@@ -1,0 +1,27 @@
+{
+  "name": "exodian",
+  "version": "0.1.0",
+  "description": "Cross-platform eXoDOS game launcher",
+  "type": "module",
+  "scripts": {
+    "start": "vite",
+    "dev": "vite",
+    "build": "vite build",
+    "serve": "vite preview",
+    "tauri": "WEBKIT_DISABLE_DMABUF_RENDERER=1 tauri"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@ark-ui/solid": "^5.35.0",
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2.6.0",
+    "@tauri-apps/plugin-opener": "^2",
+    "solid-js": "^1.9.3"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "typescript": "~5.6.2",
+    "vite": "^6.0.3",
+    "vite-plugin-solid": "^2.11.0"
+  }
+}

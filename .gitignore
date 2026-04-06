@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Rust build
+src-tauri/target/
+
+# Thumbnails (large, hosted separately)
+thumbnails/eXoDOS/
+thumbnails/*.tar.gz
+
+# IDE
+.vscode/
+*.swp
+*~
+
+# Generated DB (uncompressed — only .db.gz ships)
+metadata/exodian.db
+
+# Claude Code
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db

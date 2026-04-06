@@ -1,0 +1,58 @@
+[package]
+name = "exodian"
+version = "0.1.0"
+description = "Cross-platform eXoDOS game launcher"
+authors = ["redfox"]
+edition = "2021"
+default-run = "exodian"
+
+[lib]
+name = "exodian_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "generate_db"
+path = "src/bin/generate_db.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["protocol-asset"] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Database
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+# XML parsing (eXoDOS metadata)
+quick-xml = { version = "0.36", features = ["serialize"] }
+
+# ZIP extraction (eXoDOS Lite archives)
+zip = "2"
+
+# Gzip decompression (bundled metadata)
+flate2 = "1"
+
+# File system traversal
+walkdir = "2"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Async runtime
+tokio = { version = "1", features = ["fs", "sync"] }
+
+# Torrent parsing
+lava_torrent = "0.11"
+
+# Torrent downloading
+librqbit = "8"
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+

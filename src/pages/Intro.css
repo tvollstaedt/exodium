@@ -1,0 +1,127 @@
+.intro-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 32px;
+}
+
+.intro-window-controls {
+  position: fixed;
+  top: 8px;
+  right: 12px;
+  -webkit-app-region: no-drag;
+  z-index: 10;
+}
+
+.intro-content {
+  max-width: 620px;
+  width: 100%;
+  -webkit-app-region: no-drag;
+}
+
+.intro-title {
+  color: var(--accent);
+  font-size: 28px;
+  font-weight: 700;
+  text-align: center;
+  margin-bottom: 4px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+.intro-subtitle {
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: center;
+  margin-bottom: 28px;
+}
+
+.collection-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.collection-card {
+  background: var(--bg-secondary);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: var(--border-radius-lg);
+  padding: 14px;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
+}
+
+.collection-card:hover {
+  border-color: rgba(255, 255, 255, 0.1);
+  transform: translateY(-1px);
+}
+
+.collection-card.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 20px var(--accent-glow), inset 0 0 0 1px var(--accent-glow);
+}
+
+.collection-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.collection-check {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  border: 1.5px solid rgba(255, 255, 255, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+  flex-shrink: 0;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.collection-card.selected .collection-check {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: white;
+}
+
+.collection-header h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.collection-desc {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  margin-bottom: 8px;
+}
+
+.collection-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.collection-langs {
+  background: rgba(124, 92, 252, 0.12);
+  color: var(--accent-hover);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-weight: 600;
+  font-size: 9px;
+}
+
+.intro-continue {
+  width: 100%;
+  padding: 12px;
+  font-size: 14px;
+}
