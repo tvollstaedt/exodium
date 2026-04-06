@@ -3,8 +3,14 @@
 #
 # Usage:
 #   pnpm run get-dosbox              # download latest supported version
+#   pnpm run get-dosbox -- --force   # re-download even if binary already exists
 #   VERSION=0.82.0 pnpm run get-dosbox
 set -euo pipefail
+
+FORCE=0
+for arg in "$@"; do
+  [[ "$arg" == "--force" ]] && FORCE=1
+done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -50,10 +56,10 @@ esac
 OUT_BIN="$BINARIES_DIR/dosbox-staging-$TRIPLE"
 [[ "$OS" == MINGW* || "$OS" == MSYS* || "$OS" == CYGWIN* ]] && OUT_BIN="${OUT_BIN}.exe"
 
-if [[ -f "$OUT_BIN" ]]; then
-  echo "dosbox-staging-$TRIPLE already present, skipping."
-  exit 0
-fi
+if [[ -f "$OUT_BIN" && "$FORCE" -eq 0 ]]; then
+  echo "dosbox-staging-$TRIPLE already present, skipping download."
+else
+  [[ -f "$OUT_BIN" ]] && echo "dosbox-staging-$TRIPLE already present, re-downloading (--force)."
 
 # ── Resolve download URL ──────────────────────────────────────────────────────
 
@@ -88,11 +94,20 @@ curl -fL --progress-bar -o "$TMP_DIR/$ARCHIVE" "$DOWNLOAD_URL"
 echo "Extracting..."
 
 if [[ "$ARCHIVE" == *.dmg ]]; then
-  # macOS DMG — mount, copy binary, unmount
+  # macOS DMG — mount, copy binary + shader resources, unmount
   MOUNT_POINT="$(mktemp -d)"
   hdiutil attach -quiet -nobrowse -mountpoint "$MOUNT_POINT" "$TMP_DIR/$ARCHIVE"
+  APP="$MOUNT_POINT/DOSBox Staging.app"
   # Binary is named "dosbox" inside the .app bundle
-  cp "$MOUNT_POINT/DOSBox Staging.app/Contents/MacOS/dosbox" "$OUT_BIN"
+  cp "$APP/Contents/MacOS/dosbox" "$OUT_BIN"
+  # Copy GLSL shaders to the user prefs dir DOSBox already checks.
+  # Without these, DOSBox aborts with "Fallback shader 'interpolation/bilinear' not found".
+  PREFS_DIR="$HOME/Library/Preferences/DOSBox"
+  mkdir -p "$PREFS_DIR"
+  if [[ -d "$APP/Contents/Resources/glshaders" ]]; then
+    cp -r "$APP/Contents/Resources/glshaders" "$PREFS_DIR/"
+    echo "Copied glshaders to $PREFS_DIR/glshaders"
+  fi
   hdiutil detach -quiet "$MOUNT_POINT"
   rm -rf "$MOUNT_POINT"
 elif [[ "$ARCHIVE" == *.tar.gz ]]; then
@@ -105,5 +120,16 @@ elif [[ "$ARCHIVE" == *.zip ]]; then
   cp "$FOUND" "$OUT_BIN"
 fi
 
-chmod +x "$OUT_BIN"
-echo "Installed: $OUT_BIN"
+  chmod +x "$OUT_BIN"
+  echo "Installed: $OUT_BIN"
+fi
+
+# macOS: strip quarantine and re-sign with an ad-hoc signature.
+# Required because extracting the binary from the .app bundle orphans the original
+# bundle-anchored code signature (references a now-missing Info.plist), causing
+# macOS to SIGKILL the process on launch. Runs on every invocation (idempotent).
+if [[ "$OS" == "Darwin" ]]; then
+  xattr -cr "$OUT_BIN" 2>/dev/null || true
+  codesign --force --sign - "$OUT_BIN"
+  echo "Re-signed and quarantine cleared: $OUT_BIN"
+fi

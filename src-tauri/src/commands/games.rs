@@ -915,6 +915,45 @@ pub fn launch_game(app: AppHandle, db_state: State<DbState>, id: i64) -> Result<
         cmd.arg("-conf").arg(&options_conf);
     }
 
+    // macOS: the standalone binary extracted from the .app DMG lacks the bundle's
+    // Contents/Resources/glshaders/, so DOSBox aborts when it can't find the mandatory
+    // 'interpolation/bilinear' fallback shader. Override output to 'texture' (SDL
+    // hardware renderer, no shaders required) via a last-wins conf fragment.
+    // This conf is written once per data_dir and reused on subsequent launches.
+    #[cfg(target_os = "macos")]
+    let macos_override_conf = {
+        let conf_path = std::path::Path::new(&data_dir).join("exodian_macos_dosbox.conf");
+        std::fs::write(&conf_path, "[sdl]\noutput = texture\n")
+            .map_err(|e| format!("Failed to write macOS override conf: {e}"))?;
+        conf_path
+    };
+    #[cfg(target_os = "macos")]
+    cmd.arg("-conf").arg(&macos_override_conf);
+
+    // macOS dev builds: the binary extracted from the .app DMG has a bundle-anchored
+    // code signature that becomes invalid without the surrounding bundle. Re-sign
+    // ad-hoc if the signature is broken so macOS doesn't SIGKILL the process.
+    #[cfg(all(target_os = "macos", debug_assertions))]
+    {
+        let _ = std::process::Command::new("xattr")
+            .args(["-d", "com.apple.quarantine"])
+            .arg(&dosbox_bin)
+            .output();
+        let sig_ok = std::process::Command::new("codesign")
+            .arg("-v")
+            .arg(&dosbox_bin)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if !sig_ok {
+            log::warn!("DOSBox binary has invalid signature, re-signing ad-hoc: {}", dosbox_bin.display());
+            let _ = std::process::Command::new("codesign")
+                .args(["--force", "--sign", "-"])
+                .arg(&dosbox_bin)
+                .output();
+        }
+    }
+
     cmd.spawn().map_err(|e| {
         format!(
             "Failed to launch DOSBox Staging ({}): {}",

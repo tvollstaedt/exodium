@@ -106,7 +106,8 @@ download_torrent_file() {
   if [[ ! -s "$zip_path" ]]; then
     echo "  Saving to: $dir"
     mkdir -p "$dir"
-    rm -f "$dir/../eXoDOS.aria2"   # remove stale control file if present
+    rm -f "$dir/eXoDOS.aria2"       # torrent-level control file
+    rm -f "$zip_path.aria2"         # piece-level control file adjacent to zip
     aria2c \
       --select-file="$file_idx" \
       --seed-time=0 \
@@ -117,11 +118,26 @@ download_torrent_file() {
     echo ""
   fi
 
-  if [[ ! -s "$zip_path" ]]; then
-    echo "ERROR: Download completed but $zip_path is missing or empty."
+  if ! validate_zip "$zip_path"; then
+    echo "ERROR: Download completed but $zip_path is missing or corrupt."
     echo "  No seeders may be available right now — try again later."
     exit 1
   fi
+}
+
+# validate_zip <zip_path>
+# Returns 0 if the file exists and is a valid ZIP; deletes and returns 1 if corrupt.
+validate_zip() {
+  local zip_path="$1"
+  if [[ ! -s "$zip_path" ]]; then
+    return 1
+  fi
+  if python3 -c "import zipfile, sys; f=zipfile.ZipFile('$zip_path'); sys.exit(0 if f.testzip() is None else 1)" 2>/dev/null; then
+    return 0
+  fi
+  echo "  WARNING: $zip_path is corrupt. Deleting for re-download..."
+  rm -f "$zip_path" "$zip_path.aria2"
+  return 1
 }
 
 # ── Download eXoDOS metadata (box art source — thumbnails only) ───────────────
@@ -131,10 +147,8 @@ METADATA_ZIP="$DATA_DIR/eXoDOS/Content/XODOSMetadata.zip"
 TORRENT_EXODOS="$REPO_ROOT/torrents/eXoDOS.torrent"
 
 echo "── eXoDOS metadata ──────────────────────────────────────────────────────────"
-if [[ ! -s "$METADATA_ZIP" ]]; then
+if ! validate_zip "$METADATA_ZIP"; then
   echo "Downloading XODOSMetadata.zip (~5 GB, one-time)..."
-  rm -f "$DATA_DIR/eXoDOS.aria2"
-  rm -f "$METADATA_ZIP"
   download_torrent_file "$TORRENT_EXODOS" 9 "$DATA_DIR" "$METADATA_ZIP"
 else
   echo "XODOSMetadata.zip already present, skipping."
@@ -148,7 +162,7 @@ PLP_ZIP="$DATA_DIR/eXoDOS_PLP/eXoDOS/Content/eXoDOS_PLP_Metadata.zip"
 
 if [[ "$WANT_GLP" -eq 1 ]]; then
   echo "── GLP (German) metadata ────────────────────────────────────────────────────"
-  if [[ ! -s "$GLP_ZIP" ]]; then
+  if ! validate_zip "$GLP_ZIP"; then
     echo "Downloading eXoDOS_GLP_Metadata.zip (~23 GB)..."
     download_torrent_file "$REPO_ROOT/torrents/eXoDOS_GLP.torrent" 5 "$DATA_DIR/eXoDOS_GLP" "$GLP_ZIP"
   else
@@ -158,7 +172,7 @@ fi
 
 if [[ "$WANT_SLP" -eq 1 ]]; then
   echo "── SLP (Spanish) metadata ───────────────────────────────────────────────────"
-  if [[ ! -s "$SLP_ZIP" ]]; then
+  if ! validate_zip "$SLP_ZIP"; then
     echo "Downloading eXoDOS_SLP_Metadata.zip (~3.8 GB)..."
     download_torrent_file "$REPO_ROOT/torrents/eXoDOS_SLP.torrent" 1 "$DATA_DIR/eXoDOS_SLP" "$SLP_ZIP"
   else
@@ -168,7 +182,7 @@ fi
 
 if [[ "$WANT_PLP" -eq 1 ]]; then
   echo "── PLP (Polish) metadata ────────────────────────────────────────────────────"
-  if [[ ! -s "$PLP_ZIP" ]]; then
+  if ! validate_zip "$PLP_ZIP"; then
     echo "Downloading eXoDOS_PLP_Metadata.zip (~800 MB)..."
     download_torrent_file "$REPO_ROOT/torrents/eXoDOS_PLP.torrent" 3 "$DATA_DIR/eXoDOS_PLP" "$PLP_ZIP"
   else
@@ -211,9 +225,11 @@ fi
 
 if [[ "$WANT_PLP" -eq 1 && -s "$PLP_ZIP" ]]; then
   echo "PLP (Polish)..."
+  # PLP images use English titles; match against the EN catalog to resolve shortcodes.
+  # PLP.xml.gz uses !polish/<title>.bat paths with no shortcode segment.
   $PYTHON "$SCRIPT_DIR/gen_thumbnails.py" \
     "$PLP_ZIP" \
-    "$REPO_ROOT/metadata/PLP.xml.gz" \
+    "$REPO_ROOT/metadata/MS-DOS.xml.gz" \
     "$THUMB_DIR" \
     $FORCE_FLAG
 fi
