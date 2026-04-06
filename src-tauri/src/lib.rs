@@ -17,9 +17,9 @@ use tokio::sync::RwLock;
 use commands::{
     bundled_metadata_dir, check_for_updates, download_game, factory_reset, get_available_collections,
     get_config, get_default_data_dir, get_download_progress, get_game, get_game_variants, get_games,
-    get_genres, get_installed_games, get_languages, uninstall_game, get_setup_status,
+    get_genres, get_installed_games, uninstall_game, get_setup_status,
     get_thumbnail_dir, get_torrent_info, import_games, init_download_manager, launch_game,
-    set_config, setup_from_local, setup_import, setup_start, DbState, TorrentState,
+    set_config, setup_from_local, setup_import, setup_start, toggle_favorite, DbState, TorrentState,
 };
 
 /// Copy the bundled pre-built DB to the target path.
@@ -150,7 +150,6 @@ pub fn run() {
             get_installed_games,
             get_game_variants,
             get_genres,
-            get_languages,
             import_games,
             launch_game,
             get_config,
@@ -169,6 +168,7 @@ pub fn run() {
             uninstall_game,
             get_download_progress,
             check_for_updates,
+            toggle_favorite,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

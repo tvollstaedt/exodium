@@ -60,35 +60,30 @@ pub fn get_games(
     page: Option<usize>,
     per_page: Option<usize>,
     query: Option<String>,
-    language: Option<String>,
     genre: Option<String>,
     sort_by: Option<String>,
     collection: Option<String>,
+    favorites_only: Option<bool>,
 ) -> Result<GameList, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     let page = page.unwrap_or(1);
     let per_page = per_page.unwrap_or(50);
     let query = query.unwrap_or_default();
-    let language = language.unwrap_or_default();
     let genre = genre.unwrap_or_default();
     let sort_by = sort_by.unwrap_or_default();
     let collection = collection.unwrap_or_default();
 
     let f = queries::GameFilter {
         query: &query,
-        language: &language,
         genre: &genre,
         sort_by: &sort_by,
         collection: &collection,
+        favorites_only: favorites_only.unwrap_or(false),
     };
 
-    let (games, total) = if collection.is_empty() {
-        queries::fetch_games_merged(&conn, page, per_page, &f).map_err(|e| e.to_string())?
-    } else {
-        let total = queries::count_games_filtered(&conn, &f).map_err(|e| e.to_string())?;
-        let games = queries::fetch_games_filtered(&conn, page, per_page, &f).map_err(|e| e.to_string())?;
-        (games, total)
-    };
+    let total = queries::count_games_filtered(&conn, &f).map_err(|e| e.to_string())?;
+    let games = queries::fetch_games_filtered(&conn, page, per_page, &f).map_err(|e| e.to_string())?;
+    let (games, total) = (games, total);
 
     Ok(GameList { games, total })
 }
@@ -100,48 +95,9 @@ pub fn get_genres(state: State<DbState>) -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
-pub async fn get_game_variants(
-    state: State<'_, DbState>,
-    torrent_state: State<'_, TorrentState>,
-    shortcode: String,
-) -> Result<Vec<Game>, String> {
-    let mut variants = {
-        let conn = state.0.lock().map_err(|e| e.to_string())?;
-        queries::fetch_game_variants(&conn, &shortcode).map_err(|e| e.to_string())?
-    };
-
-    // Adjust download sizes: if EN GameData already exists, subtract it from LP variant sizes
-    let guard = torrent_state.0.read().await;
-    if let Some(main_mgr) = guard.get("eXoDOS") {
-        let en_variant = variants.iter().find(|v| v.language == "EN");
-        let en_game_name = en_variant
-            .and_then(|v| v.application_path.as_deref())
-            .and_then(crate::commands::setup::game_name_from_app_path);
-
-        if let Some(name) = en_game_name {
-            let (_, gamedata_entry) = main_mgr.index().find_game_files(&name);
-
-            if let Some(gd) = gamedata_entry {
-                let en_gamedata_size = gd.size as i64;
-                let en_gd_on_disk = main_mgr.file_output_path(gd.index)
-                    .map(|p| p.exists())
-                    .unwrap_or(false);
-                let en_installed = en_variant.map(|v| v.installed).unwrap_or(false);
-
-                if en_gd_on_disk || en_installed {
-                    for variant in &mut variants {
-                        if variant.language != "EN" {
-                            if let Some(ref mut size) = variant.download_size {
-                                *size = (*size - en_gamedata_size).max(0);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(variants)
+pub fn get_game_variants(state: State<'_, DbState>, shortcode: String) -> Result<Vec<Game>, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    queries::fetch_game_variants(&conn, &shortcode).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -151,9 +107,9 @@ pub fn get_installed_games(state: State<DbState>) -> Result<Vec<Game>, String> {
 }
 
 #[tauri::command]
-pub fn get_languages(state: State<DbState>) -> Result<Vec<String>, String> {
+pub fn toggle_favorite(state: State<DbState>, id: i64) -> Result<bool, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    queries::get_languages(&conn).map_err(|e| e.to_string())
+    queries::toggle_favorite(&conn, id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -232,27 +188,6 @@ pub async fn download_game(
     let mut files = vec![game_idx];
     if let Some(gd_idx) = game.gamedata_torrent_index {
         files.push(gd_idx as usize);
-    }
-
-    // For language pack games, also download EN GameData (videos, animations)
-    if source != "eXoDOS" {
-        if let Some(main_mgr) = guard.get("eXoDOS") {
-            // Find the EN GameData ZIP by game name
-            if let Some(app_path) = &game.application_path {
-                let game_name = crate::commands::setup::game_name_from_app_path(app_path);
-                if let Some(name) = game_name {
-                    let (_, gamedata) = main_mgr.index().find_game_files(&name);
-                    if let Some(gd) = gamedata {
-                        let gd_path = main_mgr.file_output_path(gd.index);
-                        let already_exists = gd_path.as_ref().map(|p| p.exists()).unwrap_or(false);
-                        if !already_exists {
-                            let _ = main_mgr.download_files(vec![gd.index]).await;
-                            log::info!("Also downloading EN GameData for {}", name);
-                        }
-                    }
-                }
-            }
-        }
     }
 
     // Also queue !DOSmetadata.zip (DOSBox configs) if not already extracted

@@ -9,7 +9,7 @@ const GAME_COLUMNS: &str =
      description, notes, source, application_path, dosbox_conf,
      status, region, max_players, language, shortcode, torrent_source,
      in_library, installed, game_torrent_index, gamedata_torrent_index, download_size,
-     has_thumbnail, dosbox_variant";
+     has_thumbnail, dosbox_variant, favorited";
 
 fn row_to_game(row: &Row) -> rusqlite::Result<Game> {
     Ok(Game {
@@ -44,6 +44,7 @@ fn row_to_game(row: &Row) -> rusqlite::Result<Game> {
         download_size: row.get(27)?,
         has_thumbnail: row.get::<_, i32>(28).unwrap_or(0) != 0,
         dosbox_variant: row.get(29)?,
+        favorited: row.get::<_, i32>(30).unwrap_or(0) != 0,
     })
 }
 
@@ -135,13 +136,29 @@ pub fn set_game_installed(conn: &Connection, game_id: i64, installed: bool) -> D
     Ok(())
 }
 
+/// Toggle the favorited flag for a single game row.
+/// Returns the new favorited state.
+pub fn toggle_favorite(conn: &Connection, id: i64) -> DbResult<bool> {
+    let current: i32 = conn.query_row(
+        "SELECT favorited FROM games WHERE id = ?1",
+        params![id],
+        |row| row.get(0),
+    )?;
+    let new_val = if current == 0 { 1i32 } else { 0i32 };
+    conn.execute(
+        "UPDATE games SET favorited = ?1 WHERE id = ?2",
+        params![new_val, id],
+    )?;
+    Ok(new_val != 0)
+}
+
 /// Filter parameters for game queries.
 pub struct GameFilter<'a> {
     pub query: &'a str,
-    pub language: &'a str,
     pub genre: &'a str,
     pub sort_by: &'a str,
     pub collection: &'a str,
+    pub favorites_only: bool,
 }
 
 /// Build WHERE clause from filters.
@@ -154,11 +171,6 @@ fn build_where_clause(f: &GameFilter) -> (String, Vec<Box<dyn rusqlite::types::T
         conditions.push(format!("title LIKE ?{}", params.len()));
     }
 
-    if !f.language.is_empty() {
-        params.push(Box::new(f.language.to_string()));
-        conditions.push(format!("language = ?{}", params.len()));
-    }
-
     if !f.genre.is_empty() {
         // Genre is semicolon-separated, use LIKE for partial match
         params.push(Box::new(format!("%{}%", f.genre)));
@@ -168,6 +180,10 @@ fn build_where_clause(f: &GameFilter) -> (String, Vec<Box<dyn rusqlite::types::T
     if !f.collection.is_empty() {
         params.push(Box::new(f.collection.to_string()));
         conditions.push(format!("torrent_source = ?{}", params.len()));
+    }
+
+    if f.favorites_only {
+        conditions.push("favorited = 1".to_string());
     }
 
     let clause = if conditions.is_empty() {
@@ -190,8 +206,8 @@ fn order_clause(sort_by: &str) -> &str {
 }
 
 /// Count total games with filters.
-pub fn count_games(conn: &Connection, query: &str, language: &str) -> DbResult<usize> {
-    let f = GameFilter { query, language, genre: "", sort_by: "", collection: "" };
+pub fn count_games(conn: &Connection, query: &str) -> DbResult<usize> {
+    let f = GameFilter { query, genre: "", sort_by: "", collection: "", favorites_only: false };
     count_games_filtered(conn, &f)
 }
 
@@ -201,18 +217,6 @@ pub fn count_games_filtered(conn: &Connection, f: &GameFilter) -> DbResult<usize
     let mut stmt = conn.prepare_cached(&sql)?;
     let count: usize = stmt.query_row(rusqlite::params_from_iter(&params), |row| row.get(0))?;
     Ok(count)
-}
-
-/// Fetch a page of games with filters and sorting.
-pub fn fetch_games(
-    conn: &Connection,
-    page: usize,
-    per_page: usize,
-    query: &str,
-    language: &str,
-) -> DbResult<Vec<Game>> {
-    let f = GameFilter { query, language, genre: "", sort_by: "title", collection: "" };
-    fetch_games_filtered(conn, page, per_page, &f)
 }
 
 pub fn fetch_games_filtered(
@@ -241,98 +245,6 @@ pub fn fetch_games_filtered(
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(games)
-}
-
-/// Fetch merged games: one per shortcode, EN preferred, with available_languages.
-/// Simple approach: query all matching games, then merge in Rust.
-pub fn fetch_games_merged(
-    conn: &Connection,
-    page: usize,
-    per_page: usize,
-    f: &GameFilter,
-) -> DbResult<(Vec<Game>, usize)> {
-    // Step 1: Get available languages per shortcode
-    let mut lang_map: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
-    {
-        let mut stmt = conn.prepare("SELECT shortcode, language FROM games WHERE shortcode IS NOT NULL")?;
-        let rows = stmt.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?;
-        for row in rows.flatten() {
-            lang_map.entry(row.0).or_default().push(row.1);
-        }
-    }
-
-    // Step 2: Fetch one game per shortcode (EN preferred), applying filters
-    // Build WHERE without language — language is handled via the subquery below
-    let f_no_lang = GameFilter { query: f.query, language: "", genre: f.genre, sort_by: f.sort_by, collection: f.collection };
-    let (where_clause, mut params) = build_where_clause(&f_no_lang);
-    let order = order_clause(f.sort_by);
-
-    let where_prefix = if where_clause.is_empty() {
-        " WHERE".to_string()
-    } else {
-        format!("{} AND", where_clause)
-    };
-    let primary_filter = format!(
-        "{}{}",
-        where_prefix,
-        " (g.language = 'EN' OR NOT EXISTS (
-            SELECT 1 FROM games g2
-            WHERE g2.shortcode = g.shortcode AND g2.shortcode IS NOT NULL AND g2.language = 'EN'
-          ))"
-    );
-
-    // If language filter is set, only show games whose shortcode includes that language
-    let lang_filter = if !f.language.is_empty() {
-        format!(
-            " AND COALESCE(g.shortcode, CAST(g.id AS TEXT)) IN (
-                SELECT COALESCE(shortcode, CAST(id AS TEXT)) FROM games WHERE language = ?{}
-            )", params.len() + 1
-        )
-    } else {
-        String::new()
-    };
-    if !f.language.is_empty() {
-        params.push(Box::new(f.language.to_string()));
-    }
-
-    // Count
-    let count_sql = format!("SELECT COUNT(*) FROM games g{}{}", primary_filter, lang_filter);
-    let total: usize = {
-        let mut stmt = conn.prepare(&count_sql)?;
-        stmt.query_row(rusqlite::params_from_iter(&params), |row| row.get(0))?
-    };
-
-    // Fetch page
-    params.push(Box::new(per_page as i64));
-    let limit_idx = params.len();
-    params.push(Box::new(offset_val(page, per_page) as i64));
-    let offset_idx = params.len();
-
-    let sql = format!(
-        "SELECT {} FROM games g{}{} {} LIMIT ?{} OFFSET ?{}",
-        GAME_COLUMNS, primary_filter, lang_filter, order, limit_idx, offset_idx
-    );
-
-    let mut stmt = conn.prepare(&sql)?;
-    let mut games: Vec<Game> = stmt
-        .query_map(rusqlite::params_from_iter(&params), row_to_game)?
-        .collect::<Result<Vec<_>, _>>()?;
-
-    // Enrich with available languages
-    for game in &mut games {
-        if let Some(ref sc) = game.shortcode {
-            if let Some(langs) = lang_map.get(sc) {
-                let mut sorted = langs.clone();
-                sorted.sort();
-                sorted.dedup();
-                game.available_languages = Some(sorted.join(","));
-            }
-        }
-    }
-
-    Ok((games, total))
 }
 
 fn offset_val(page: usize, per_page: usize) -> usize {
@@ -382,15 +294,6 @@ pub fn fetch_installed_games(conn: &Connection) -> DbResult<Vec<Game>> {
         .query_map([], row_to_game)?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(games)
-}
-
-/// Get all distinct languages in the database.
-pub fn get_languages(conn: &Connection) -> DbResult<Vec<String>> {
-    let mut stmt = conn.prepare_cached("SELECT DISTINCT language FROM games ORDER BY language")?;
-    let langs = stmt
-        .query_map([], |row| row.get(0))?
-        .collect::<Result<Vec<String>, _>>()?;
-    Ok(langs)
 }
 
 /// Fetch a single game by ID.

@@ -7,15 +7,18 @@ import { launchGame, getGameVariants, uninstallGame } from "../api/tauri";
 import { formatBytes } from "../util";
 import { thumbnailDirForCollection } from "../stores/thumbnails";
 import { downloads, startGameDownload, getDownloadState } from "../stores/downloads";
-import { fetchGames } from "../stores/games";
+import { fetchGames, toggleFavorite } from "../stores/games";
 
 interface GameCardProps {
   game: Game;
+  onFavoriteChanged?: (id: number, favorited: boolean) => void;
+  showFavoriteBtn?: boolean;
 }
 
 export function GameCard(props: GameCardProps) {
   const [status, setStatus] = createSignal("");
   const [imgError, setImgError] = createSignal(false);
+  const [favorited, setFavorited] = createSignal(props.game.favorited);
   const [showLangPicker, setShowLangPicker] = createSignal(false);
   const [variants, setVariants] = createSignal<Game[]>([]);
   const [contextMenu, setContextMenu] = createSignal<{x: number, y: number} | null>(null);
@@ -138,6 +141,20 @@ export function GameCard(props: GameCardProps) {
     }
   };
 
+  const handleToggleFavorite = async (e: MouseEvent) => {
+    e.stopPropagation();
+    if (props.game.id == null) { return; }
+    const prev = favorited();
+    setFavorited(!prev);
+    try {
+      const next = await toggleFavorite(props.game.id);
+      setFavorited(next);
+      props.onFavoriteChanged?.(props.game.id, next);
+    } catch {
+      setFavorited(prev);
+    }
+  };
+
   const currentStatus = () => dlState()?.status || status();
   const currentProgress = () => dlState()?.progress ?? 0;
   const isDownloading = () => dlState()?.downloading ?? false;
@@ -184,6 +201,14 @@ export function GameCard(props: GameCardProps) {
           {currentStatus() && <div class="game-card-status">{currentStatus()}</div>}
         </div>
       </div>
+
+      <Show when={props.game.id != null && props.showFavoriteBtn !== false}>
+        <button
+          class={`favorite-btn${favorited() ? " is-favorited" : ""}`}
+          onClick={handleToggleFavorite}
+          title={favorited() ? "Remove from favorites" : "Add to favorites"}
+        >★</button>
+      </Show>
 
       <Show when={contextMenu()}>
         <Portal>

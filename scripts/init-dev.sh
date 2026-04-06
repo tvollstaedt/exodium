@@ -203,34 +203,45 @@ $PYTHON "$SCRIPT_DIR/gen_thumbnails.py" \
   "$METADATA_ZIP" \
   "$REPO_ROOT/metadata/MS-DOS.xml.gz" \
   "$THUMB_DIR" \
+  --db "$REPO_ROOT/metadata/exodian.db" \
   $FORCE_FLAG
 
 if [[ "$WANT_GLP" -eq 1 && -s "$GLP_ZIP" ]]; then
   echo "GLP (German)..."
+  # GLP zip also contains German box art for games in the EN catalog, so pass
+  # MS-DOS.xml.gz as a fallback to resolve shortcodes for those images too.
   $PYTHON "$SCRIPT_DIR/gen_thumbnails.py" \
     "$GLP_ZIP" \
     "$REPO_ROOT/metadata/GLP.xml.gz" \
     "$THUMB_DIR" \
+    --db "$REPO_ROOT/metadata/exodian.db" \
+    --extra-xml "$REPO_ROOT/metadata/MS-DOS.xml.gz" \
     $FORCE_FLAG
 fi
 
 if [[ "$WANT_SLP" -eq 1 && -s "$SLP_ZIP" ]]; then
   echo "SLP (Spanish)..."
+  # SLP.xml.gz paths use !spanish/<title>.bat with no shortcode dir; shortcodes
+  # come from the DB (highest priority) and zip bat structure.
   $PYTHON "$SCRIPT_DIR/gen_thumbnails.py" \
     "$SLP_ZIP" \
     "$REPO_ROOT/metadata/SLP.xml.gz" \
     "$THUMB_DIR" \
+    --db "$REPO_ROOT/metadata/exodian.db" \
+    --extra-xml "$REPO_ROOT/metadata/MS-DOS.xml.gz" \
     $FORCE_FLAG
 fi
 
 if [[ "$WANT_PLP" -eq 1 && -s "$PLP_ZIP" ]]; then
   echo "PLP (Polish)..."
-  # PLP images use English titles; match against the EN catalog to resolve shortcodes.
-  # PLP.xml.gz uses !polish/<title>.bat paths with no shortcode segment.
+  # PLP.xml.gz paths use !polish/<title>.bat with no shortcode dir; shortcodes
+  # come from the DB (highest priority) and zip bat structure.
   $PYTHON "$SCRIPT_DIR/gen_thumbnails.py" \
     "$PLP_ZIP" \
     "$REPO_ROOT/metadata/MS-DOS.xml.gz" \
     "$THUMB_DIR" \
+    --db "$REPO_ROOT/metadata/exodian.db" \
+    --extra-xml "$REPO_ROOT/metadata/PLP.xml.gz" \
     $FORCE_FLAG
 fi
 

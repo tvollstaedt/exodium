@@ -4,7 +4,7 @@ mod updates;
 
 pub use games::{
     download_game, get_config, get_download_progress, get_game, get_game_variants, get_games,
-    get_genres, get_installed_games, get_languages, import_games, launch_game, set_config,
+    get_genres, get_installed_games, import_games, launch_game, set_config, toggle_favorite,
     uninstall_game, DbState,
 };
 pub use setup::{

@@ -1,13 +1,23 @@
 import { createSignal } from "solid-js";
 import type { Game, GameList } from "../api/tauri";
-import { getGames } from "../api/tauri";
+import { getGames, toggleFavorite } from "../api/tauri";
+
+export { toggleFavorite };
+
+export function updateGameFavorited(id: number, value: boolean) {
+  setGames(prev => prev.map(g => g.id === id ? { ...g, favorited: value } : g));
+}
+
+export async function getFavoriteGames(): Promise<Game[]> {
+  const result = await getGames(1, 500, "", "", "title", "", true);
+  return result.games;
+}
 
 const [games, setGames] = createSignal<Game[]>([]);
 const [totalGames, setTotalGames] = createSignal(0);
 const [loading, setLoading] = createSignal(false);
 const [error, setError] = createSignal<string | null>(null);
 const [searchQuery, setSearchQuery] = createSignal("");
-const [languageFilter, setLanguageFilter] = createSignal("");
 const [genreFilter, setGenreFilter] = createSignal("");
 const [sortBy, setSortBy] = createSignal("title");
 const [collectionFilter, setCollectionFilter] = createSignal("");
@@ -19,7 +29,6 @@ const PER_PAGE = 100;
 export {
   games, totalGames, loading, error, hasMore,
   searchQuery, setSearchQuery,
-  languageFilter, setLanguageFilter,
   genreFilter, setGenreFilter,
   sortBy, setSortBy,
   collectionFilter, setCollectionFilter,
@@ -32,7 +41,7 @@ export async function fetchGames() {
   setCurrentPage(1);
   try {
     const result: GameList = await getGames(
-      1, PER_PAGE, searchQuery(), languageFilter(), genreFilter(), sortBy(), collectionFilter()
+      1, PER_PAGE, searchQuery(), genreFilter(), sortBy(), collectionFilter()
     );
     setGames(result.games);
     setTotalGames(result.total);
@@ -51,7 +60,7 @@ export async function fetchMoreGames() {
   const nextPage = currentPage() + 1;
   try {
     const result: GameList = await getGames(
-      nextPage, PER_PAGE, searchQuery(), languageFilter(), genreFilter(), sortBy(), collectionFilter()
+      nextPage, PER_PAGE, searchQuery(), genreFilter(), sortBy(), collectionFilter()
     );
     setGames((prev) => [...prev, ...result.games]);
     setCurrentPage(nextPage);

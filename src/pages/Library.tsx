@@ -2,30 +2,26 @@ import { onMount, onCleanup, For, Show, createSignal, createMemo } from "solid-j
 import {
   games, loading, error, hasMore, totalGames,
   fetchGames, fetchMoreGames,
-  languageFilter, setLanguageFilter,
   genreFilter, setGenreFilter,
   sortBy, setSortBy,
   collectionFilter, setCollectionFilter,
+  getFavoriteGames,
+  updateGameFavorited,
 } from "../stores/games";
-import { getLanguages, getGenres, getInstalledGames, getConfig, getAvailableCollections, type Game } from "../api/tauri";
+import { getGenres, getInstalledGames, getConfig, getAvailableCollections, type Game } from "../api/tauri";
 import { GameCard } from "../components/GameCard";
 import { Select } from "../components/Select";
 
 export function Library() {
   let sentinelRef: HTMLDivElement | undefined;
-  const [languages, setLanguages] = createSignal<string[]>([]);
   const [genres, setGenres] = createSignal<string[]>([]);
   const [installedGames, setInstalledGames] = createSignal<Game[]>([]);
+  const [favoriteGames, setFavoriteGames] = createSignal<Game[]>([]);
   const [collections, setCollections] = createSignal<{id: string, label: string}[]>([]);
 
   const genreOptions = createMemo(() => [
     { value: "", label: "All Genres" },
     ...genres().map((g) => ({ value: g, label: g })),
-  ]);
-
-  const languageOptions = createMemo(() => [
-    { value: "", label: "All Languages" },
-    ...languages().map((l) => ({ value: l, label: l })),
   ]);
 
   const sortOptions = [
@@ -43,13 +39,32 @@ export function Library() {
     } catch {}
   };
 
+  const refreshFavorites = async () => {
+    try { setFavoriteGames(await getFavoriteGames()); } catch {}
+  };
+
+  const handleFavoriteChanged = (id: number, favorited: boolean) => {
+    updateGameFavorited(id, favorited);
+    if (!favorited) {
+      // Remove immediately — no async round-trip needed
+      setFavoriteGames(prev => prev.filter(g => g.id !== id));
+    } else {
+      // Adding: try to source the game object from the current page; fall back to a fetch
+      const game = games().find(g => g.id === id);
+      if (game) {
+        setFavoriteGames(prev => [...prev, { ...game, favorited: true }]);
+      } else {
+        refreshFavorites();
+      }
+    }
+  };
+
   onMount(async () => {
-    fetchGames();
     refreshInstalled();
+    refreshFavorites();
 
     try {
-      const [langs, gens] = await Promise.all([getLanguages(), getGenres()]);
-      setLanguages(langs);
+      const gens = await getGenres();
       setGenres(gens);
     } catch {}
 
@@ -65,8 +80,14 @@ export function Library() {
         }
         const cols = colStr.split(",").map((id) => ({ id, label: labelMap[id] || id }));
         setCollections(cols);
+        // Auto-select first collection so the default view is never the merged "All" view
+        if (cols.length > 0 && !collectionFilter()) {
+          setCollectionFilter(cols[0].id);
+        }
       }
     } catch {}
+
+    fetchGames();
 
     const observer = new IntersectionObserver(
       (entries) => {
@@ -79,7 +100,7 @@ export function Library() {
 
     if (sentinelRef) observer.observe(sentinelRef);
 
-    const interval = setInterval(refreshInstalled, 5000);
+    const interval = setInterval(() => { refreshInstalled(); refreshFavorites(); }, 5000);
     onCleanup(() => clearInterval(interval));
   });
 
@@ -97,10 +118,6 @@ export function Library() {
     <div class="library">
       <Show when={collections().length > 1}>
         <div class="collection-bar">
-          <button
-            class={`collection-btn ${collectionFilter() === "" ? "active" : ""}`}
-            onClick={() => switchCollection("")}
-          >All</button>
           <For each={collections()}>
             {(col) => (
               <button
@@ -120,14 +137,6 @@ export function Library() {
             placeholder="All Genres"
           />
         </Show>
-        <Show when={languages().length > 1}>
-          <Select
-            options={languageOptions()}
-            value={languageFilter()}
-            onChange={applyFilter(setLanguageFilter)}
-            placeholder="All Languages"
-          />
-        </Show>
         <Select
           options={sortOptions}
           value={sortBy()}
@@ -140,24 +149,35 @@ export function Library() {
         <div class="error">{error()}</div>
       </Show>
 
+      <Show when={favoriteGames().length > 0}>
+        <div class="library-section">
+          <h2 class="section-title">Favorites ({favoriteGames().length})</h2>
+          <div class="game-grid">
+            <For each={favoriteGames()}>
+              {(game) => <GameCard game={game} onFavoriteChanged={handleFavoriteChanged} />}
+            </For>
+          </div>
+        </div>
+      </Show>
+
       <Show when={installedGames().length > 0}>
         <div class="library-section">
-          <h2 class="section-title">My Games ({installedGames().length})</h2>
+          <h2 class="section-title">Installed ({installedGames().length})</h2>
           <div class="game-grid">
             <For each={installedGames()}>
-              {(game) => <GameCard game={game} />}
+              {(game) => <GameCard game={game} onFavoriteChanged={handleFavoriteChanged} showFavoriteBtn={false} />}
             </For>
           </div>
         </div>
       </Show>
 
       <div class="library-section">
-        <Show when={installedGames().length > 0}>
+        <Show when={installedGames().length > 0 || favoriteGames().length > 0}>
           <h2 class="section-title">All Games</h2>
         </Show>
         <div class="game-grid">
           <For each={games()}>
-            {(game) => <GameCard game={game} />}
+            {(game) => <GameCard game={game} onFavoriteChanged={handleFavoriteChanged} />}
           </For>
         </div>
       </div>

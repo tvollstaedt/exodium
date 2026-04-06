@@ -28,6 +28,7 @@ pub struct Game {
     pub torrent_source: Option<String>,
     pub in_library: bool,
     pub installed: bool,
+    pub favorited: bool,
     pub game_torrent_index: Option<i64>,
     pub gamedata_torrent_index: Option<i64>,
     pub download_size: Option<i64>,

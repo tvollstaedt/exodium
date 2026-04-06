@@ -27,6 +27,7 @@ export interface Game {
   torrent_source: string | null;
   in_library: boolean;
   installed: boolean;
+  favorited: boolean;
   game_torrent_index: number | null;
   gamedata_torrent_index: number | null;
   download_size: number | null;
@@ -43,12 +44,16 @@ export async function getGames(
   page?: number,
   perPage?: number,
   query?: string,
-  language?: string,
   genre?: string,
   sortBy?: string,
-  collection?: string
+  collection?: string,
+  favoritesOnly?: boolean
 ): Promise<GameList> {
-  return invoke("get_games", { page, perPage, query, language, genre, sortBy, collection });
+  return invoke("get_games", { page, perPage, query, genre, sortBy, collection, favoritesOnly });
+}
+
+export async function toggleFavorite(id: number): Promise<boolean> {
+  return invoke("toggle_favorite", { id });
 }
 
 export async function getGenres(): Promise<string[]> {
@@ -65,10 +70,6 @@ export async function getGameVariants(shortcode: string): Promise<Game[]> {
 
 export async function getInstalledGames(): Promise<Game[]> {
   return invoke("get_installed_games");
-}
-
-export async function getLanguages(): Promise<string[]> {
-  return invoke("get_languages");
 }
 
 export async function getGame(id: number): Promise<Game | null> {

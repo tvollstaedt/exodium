@@ -396,7 +396,7 @@ pub async fn get_setup_status(
             let (has_data_dir, count) = {
                 let conn = db_state.0.lock().map_err(|e| e.to_string())?;
                 let dir = queries::get_config(&conn, "data_dir").map_err(|e| e.to_string())?;
-                let count = queries::count_games(&conn, "", "").map_err(|e| e.to_string())?;
+                let count = queries::count_games(&conn, "").map_err(|e| e.to_string())?;
                 (dir.is_some(), count)
             };
             return Ok(SetupStatus {
@@ -436,7 +436,7 @@ pub async fn get_setup_status(
     // Check if games are already imported
     let games_imported = {
         let conn = db_state.0.lock().map_err(|e| e.to_string())?;
-        queries::count_games(&conn, "", "").map_err(|e| e.to_string())?
+        queries::count_games(&conn, "").map_err(|e| e.to_string())?
     };
 
     let phase = if games_imported > 0 {
@@ -548,20 +548,10 @@ pub fn game_name_from_app_path(app_path: &str) -> Option<String> {
 
 /// Match imported games to their torrent file indices.
 /// `torrent_source` identifies which torrent file this is.
-/// `shared_gamedata_index` is the eXoDOS torrent index for looking up shared GameData for LP games.
 fn match_torrent_indices(
     conn: &rusqlite::Connection,
     index: &TorrentIndex,
     torrent_source: &str,
-) -> Result<(), String> {
-    match_torrent_indices_with_shared(conn, index, torrent_source, None)
-}
-
-fn match_torrent_indices_with_shared(
-    conn: &rusqlite::Connection,
-    index: &TorrentIndex,
-    torrent_source: &str,
-    shared_gamedata_index: Option<&TorrentIndex>,
 ) -> Result<(), String> {
     let mut matched = 0;
     let mut unmatched = 0;
@@ -595,16 +585,8 @@ fn match_torrent_indices_with_shared(
 
             if let Some(game) = game_entry {
                 let gamedata_idx = gamedata_entry.map(|g| g.index as i64);
-                let mut size = game.size as i64
+                let size = game.size as i64
                     + gamedata_entry.map(|g| g.size as i64).unwrap_or(0);
-
-                // For LP games, add shared EN GameData size from eXoDOS torrent
-                if let Some(shared_idx) = shared_gamedata_index {
-                    let (_, shared_gd) = shared_idx.find_game_files(&search_name);
-                    if let Some(gd) = shared_gd {
-                        size += gd.size as i64;
-                    }
-                }
 
                 update_stmt
                     .execute(rusqlite::params![

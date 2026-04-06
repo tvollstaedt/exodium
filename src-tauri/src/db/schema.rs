@@ -31,6 +31,7 @@ pub fn create_tables(conn: &Connection) -> DbResult<()> {
             torrent_source        TEXT,
             in_library            INTEGER NOT NULL DEFAULT 0,
             installed             INTEGER NOT NULL DEFAULT 0,
+            favorited             INTEGER NOT NULL DEFAULT 0,
             game_torrent_index    INTEGER,
             gamedata_torrent_index INTEGER,
             download_size         INTEGER,

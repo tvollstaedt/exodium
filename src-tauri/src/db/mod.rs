@@ -43,5 +43,21 @@ fn migrate(conn: &Connection) -> DbResult<()> {
     if !has_dosbox_variant {
         conn.execute_batch("ALTER TABLE games ADD COLUMN dosbox_variant TEXT")?;
     }
+
+    // Add favorited column if missing (added after initial release).
+    let has_favorited: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('games') WHERE name = 'favorited'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+        > 0;
+    if !has_favorited {
+        conn.execute_batch("ALTER TABLE games ADD COLUMN favorited INTEGER NOT NULL DEFAULT 0")?;
+    }
+    // Ensure index exists (safe for both new and migrated DBs)
+    conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_games_favorited ON games(favorited)")?;
+
     Ok(())
 }

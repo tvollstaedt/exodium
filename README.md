@@ -10,6 +10,7 @@ A cross-platform game launcher for the [eXoDOS](https://www.retro-exo.com/exodos
 - Collection tabs for browsing each language pack separately
 - Shortcode-keyed thumbnails for box art
 - Save game backup/restore on uninstall
+- Favorites: star any game to bookmark it for later download or play
 
 ## Tech Stack
 
@@ -60,6 +61,17 @@ pnpm tauri dev
 | `pnpm run get-dosbox` | Download DOSBox Staging binary only (no thumbnails) |
 | `pnpm run infohash` | Print stored torrent infohashes from the local DB |
 | `pnpm tauri dev` | Start the app in development mode |
+
+## Thumbnail Generation
+
+`scripts/gen_thumbnails.py` resizes box art from a metadata ZIP into shortcode-keyed JPEGs. It now accepts two extra flags:
+
+| Flag | Description |
+|------|-------------|
+| `--db <path>` | Path to `metadata/exodian.db` — highest-priority shortcode source; ensures LP-exclusive titles (e.g. Spanish/Polish games with no eXoDOS counterpart) get the correct filename |
+| `--extra-xml <xml.gz>` | Additional catalogue to merge as a fallback (e.g. pass `MS-DOS.xml.gz` when generating GLP/SLP/PLP thumbs to resolve box art that belongs to EN-catalog games) |
+
+`init-dev.sh` already passes both flags for all four collections — no manual intervention needed.
 
 ## Regenerating the Game Database
 
