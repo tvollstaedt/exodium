@@ -11,6 +11,9 @@ src-tauri/target/
 thumbnails/eXoDOS/
 thumbnails/*.tar.gz
 
+# Bundled emulator binaries (platform-specific, fetched via get-dosbox)
+src-tauri/binaries/
+
 # IDE
 .vscode/
 *.swp

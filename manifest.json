@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-04-06T00:00:00Z",
+  "manifest_url": "TODO: https://raw.githubusercontent.com/<user>/exodian-releases/main/manifest.json",
+  "collections": {
+    "eXoDOS": {
+      "torrent_infohash": "99b685d95a496e771e0ebd9d0a547257e222dd1c",
+      "game_count": 7604,
+      "thumbnail_pack": {
+        "url": "TODO: https://github.com/<user>/exodian-releases/releases/download/v1/thumbnails-eXoDOS-v1.tar.gz",
+        "sha256": "TODO",
+        "size_bytes": 89400000,
+        "version": 1
+      }
+    },
+    "eXoDOS_GLP": {
+      "torrent_infohash": "903d04310ce42f6e287932b3293366f54e910021",
+      "game_count": 660
+    },
+    "eXoDOS_PLP": {
+      "torrent_infohash": "2a452d7fe40dc728b202622fa4735bd89de49548",
+      "game_count": 0
+    },
+    "eXoDOS_SLP": {
+      "torrent_infohash": "37b37fd60c04402976ed552fd4416f81a0cae889",
+      "game_count": 0
+    }
+  }
+}

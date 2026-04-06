@@ -6,6 +6,7 @@ import { WindowControls } from "../components/WindowControls";
 import {
   setupFromLocal,
   getDefaultDataDir,
+  getAvailableCollections,
   setConfig,
   initDownloadManager,
 } from "../api/tauri";
@@ -37,8 +38,10 @@ export function Setup(props: SetupProps) {
   const handleContinue = async () => {
     if (!dataDir()) return;
     try {
+      const available = await getAvailableCollections();
+      const collectionsCSV = available.map((c) => c.id).join(",");
       await setConfig("data_dir", dataDir());
-      await setConfig("collections", "eXoDOS,eXoDOS_GLP,eXoDOS_SLP,eXoDOS_PLP");
+      await setConfig("collections", collectionsCSV);
       await initDownloadManager();
       props.onComplete();
     } catch (e) {

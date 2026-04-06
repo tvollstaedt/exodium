@@ -32,11 +32,15 @@ const XML_CANDIDATES: &[&str] = &[
     "MS-DOS.xml",
 ];
 
-/// Import games from an eXoDOS ZIP (XODOSMetadata.zip, GLP, etc.).
+/// Import games from an eXo metadata ZIP (XODOSMetadata.zip, GLP, etc.).
 /// Searches for MS-DOS.xml inside the archive, parses it, and inserts into the DB.
+///
+/// `shortcode_segment` is the collection-specific path component used to extract
+/// shortcodes from application_path (e.g. "!dos" for eXoDOS).
 pub fn import_from_zip(
     zip_path: &Path,
     conn: &rusqlite::Connection,
+    shortcode_segment: &str,
 ) -> ImportResult<usize> {
     log::info!("Opening ZIP: {}", zip_path.display());
     let file = std::fs::File::open(zip_path)?;
@@ -67,7 +71,7 @@ pub fn import_from_zip(
     log::info!("Reading XML from: {}", xml_name);
     let xml_entry = archive.by_name(&xml_name)?;
     let reader = BufReader::new(xml_entry);
-    let games: Vec<Game> = xml::parse_games_xml(reader)?;
+    let games: Vec<Game> = xml::parse_games_xml(reader, shortcode_segment)?;
 
     let count = db::queries::insert_games(conn, &games)?;
     Ok(count)

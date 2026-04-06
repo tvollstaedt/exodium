@@ -32,4 +32,5 @@ pub struct Game {
     pub gamedata_torrent_index: Option<i64>,
     pub download_size: Option<i64>,
     pub has_thumbnail: bool,
+    pub dosbox_variant: Option<String>,
 }

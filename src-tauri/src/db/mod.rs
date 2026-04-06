@@ -25,5 +25,23 @@ pub fn open(path: &Path) -> DbResult<Connection> {
 /// Initialize the database schema (idempotent).
 pub fn init(conn: &Connection) -> DbResult<()> {
     schema::create_tables(conn)?;
+    migrate(conn)?;
+    Ok(())
+}
+
+/// Additive migrations for existing databases.
+fn migrate(conn: &Connection) -> DbResult<()> {
+    // Add dosbox_variant column if missing (added after initial release).
+    let has_dosbox_variant: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('games') WHERE name = 'dosbox_variant'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+        > 0;
+    if !has_dosbox_variant {
+        conn.execute_batch("ALTER TABLE games ADD COLUMN dosbox_variant TEXT")?;
+    }
     Ok(())
 }

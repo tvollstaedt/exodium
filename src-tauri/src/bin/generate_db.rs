@@ -12,16 +12,7 @@ use exodian_lib::db;
 use exodian_lib::game_name_from_app_path;
 use exodian_lib::import::xml::parse_games_xml;
 use exodian_lib::torrent::TorrentIndex;
-
-/// Collection ID → (metadata_file, torrent_file)
-/// Language packs listed BEFORE eXoDOS so their games get matched to the correct
-/// torrent before eXoDOS matching can claim them.
-const COLLECTION_MAP: &[(&str, &str, &str)] = &[
-    ("eXoDOS_GLP", "GLP.xml.gz", "eXoDOS_GLP.torrent"),
-    ("eXoDOS_PLP", "PLP.xml.gz", "eXoDOS_PLP.torrent"),
-    ("eXoDOS_SLP", "SLP.xml.gz", "eXoDOS_SLP.torrent"),
-    ("eXoDOS", "MS-DOS.xml.gz", "eXoDOS.torrent"),
-];
+use exodian_lib::COLLECTION_MAP;
 
 fn project_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
@@ -191,15 +182,15 @@ fn main() {
 
     // Load all torrent indices upfront
     let mut torrent_indices: HashMap<String, TorrentIndex> = HashMap::new();
-    for (col_id, _, torrent_file) in COLLECTION_MAP {
-        let path = torrents_dir.join(torrent_file);
+    for col in COLLECTION_MAP {
+        let path = torrents_dir.join(col.torrent_file);
         if path.exists() {
             match TorrentIndex::from_file(&path) {
                 Ok(idx) => {
-                    println!("Loaded torrent {}: {} files", col_id, idx.files.len());
-                    torrent_indices.insert(col_id.to_string(), idx);
+                    println!("Loaded torrent {}: {} files", col.id, idx.files.len());
+                    torrent_indices.insert(col.id.to_string(), idx);
                 }
-                Err(e) => eprintln!("Warning: failed to parse {}: {}", torrent_file, e),
+                Err(e) => eprintln!("Warning: failed to parse {}: {}", col.torrent_file, e),
             }
         } else {
             eprintln!("Warning: torrent not found: {}", path.display());
@@ -208,8 +199,8 @@ fn main() {
 
     // Import each collection's XML and match torrent indices
     let mut total_imported = 0usize;
-    for (col_id, meta_file, _) in COLLECTION_MAP {
-        let meta_path = metadata_dir.join(meta_file);
+    for col in COLLECTION_MAP {
+        let meta_path = metadata_dir.join(col.metadata_file);
         if !meta_path.exists() {
             eprintln!("Warning: metadata not found: {}", meta_path.display());
             continue;
@@ -217,21 +208,21 @@ fn main() {
 
         let file = std::fs::File::open(&meta_path).unwrap();
         let reader = BufReader::new(flate2::read::GzDecoder::new(file));
-        let games = parse_games_xml(reader).unwrap();
+        let games = parse_games_xml(reader, col.shortcode_segment).unwrap();
         let count = games.len();
 
         db::queries::insert_games(&conn, &games).unwrap();
-        println!("Imported {} games from {}", count, col_id);
+        println!("Imported {} games from {}", count, col.id);
         total_imported += count;
 
         // Match torrent indices for this collection
-        if let Some(index) = torrent_indices.get(*col_id) {
-            let shared = if *col_id != "eXoDOS" {
+        if let Some(index) = torrent_indices.get(col.id) {
+            let shared = if col.id != "eXoDOS" {
                 torrent_indices.get("eXoDOS")
             } else {
                 None
             };
-            match_torrent_indices(&conn, index, col_id, shared);
+            match_torrent_indices(&conn, index, col.id, shared);
         }
     }
 
@@ -415,6 +406,57 @@ fn main() {
         }
         tx.commit().unwrap();
         println!("Marked {} shortcodes with thumbnails ({} without)", thumb_count, shortcodes.len() - thumb_count);
+    }
+
+    // Populate dosbox_variant from metadata/dosbox.txt
+    // Format: "Game Title (Year):variant\dosbox.exe"
+    // We strip the "(Year)" suffix and normalize before matching against game titles.
+    let dosbox_txt = root.join("metadata/dosbox.txt");
+    if dosbox_txt.exists() {
+        let content = std::fs::read_to_string(&dosbox_txt).unwrap_or_default();
+        // Build map: normalized_title → variant_slug
+        let mut variant_map: HashMap<String, String> = HashMap::new();
+        for line in content.lines() {
+            let line = line.trim();
+            if line.is_empty() { continue; }
+            let Some(colon) = line.rfind(':') else { continue };
+            let title_raw = &line[..colon];
+            let path_raw = &line[colon + 1..]; // e.g. "ece4230\dosbox.exe" or "dosbox.exe"
+            // Extract slug: first path component before '\', or "dosbox" for bare "dosbox.exe"
+            let slug = if let Some(sep) = path_raw.find('\\') {
+                path_raw[..sep].to_string()
+            } else {
+                "dosbox".to_string() // bare dosbox.exe = classic 0.74
+            };
+            variant_map.insert(normalize_title(title_raw), slug);
+        }
+        println!("Loaded {} dosbox variant entries", variant_map.len());
+
+        // Match by title and update
+        let mut stmt = conn.prepare("SELECT id, title FROM games").unwrap();
+        let rows: Vec<(i64, String)> = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+
+        let tx = conn.unchecked_transaction().unwrap();
+        {
+            let mut update = tx
+                .prepare_cached("UPDATE games SET dosbox_variant = ?1 WHERE id = ?2")
+                .unwrap();
+            let mut matched = 0usize;
+            for (id, title) in &rows {
+                if let Some(variant) = variant_map.get(&normalize_title(title)) {
+                    update.execute(params![variant, id]).unwrap();
+                    matched += 1;
+                }
+            }
+            println!("Set dosbox_variant for {}/{} games", matched, rows.len());
+        }
+        tx.commit().unwrap();
+    } else {
+        println!("WARN: metadata/dosbox.txt not found, skipping variant mapping");
     }
 
     // Final stats

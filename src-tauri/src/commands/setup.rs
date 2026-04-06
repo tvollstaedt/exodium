@@ -13,6 +13,64 @@ use crate::torrent::TorrentIndex;
 
 use super::DbState;
 
+/// Metadata describing a single eXo collection.
+/// All path conventions for a collection are captured here so that game
+/// launch / install / uninstall code does not need to hard-code any
+/// collection-specific strings.
+#[derive(Debug, Clone, Serialize)]
+pub struct CollectionDef {
+    /// Internal collection ID (e.g. "eXoDOS", "eXoDOS_GLP").
+    pub id: &'static str,
+    /// Human-readable name shown in the UI.
+    pub display_name: &'static str,
+    /// Bundled metadata XML gz file (e.g. "MS-DOS.xml.gz").
+    pub metadata_file: &'static str,
+    /// Bundled .torrent filename (e.g. "eXoDOS.torrent").
+    pub torrent_file: &'static str,
+    /// Optional bundled DOSBox/emulator configs ZIP.
+    pub configs_zip: Option<&'static str>,
+    /// The folder name the torrent creates inside the data dir (e.g. "eXoDOS").
+    /// Used in: <data_dir>/<inner_folder>/ for the main collection,
+    ///           <data_dir>/<collection_id>/<inner_folder>/ for sub-collections.
+    pub inner_folder: &'static str,
+    /// Path from <inner_folder> to the individual game directories.
+    /// e.g. "eXo/eXoDOS" → games are at <inner_folder>/eXo/eXoDOS/<shortcode>/
+    pub game_prefix: &'static str,
+    /// Segment in the LaunchBox application_path used to extract the shortcode.
+    /// e.g. "!dos" for eXoDOS (path looks like "eXo\eXoDOS\!dos\<shortcode>\…")
+    pub shortcode_segment: &'static str,
+    /// Language subdirectory inside game_prefix for LP variant games.
+    /// None for the base English collection.
+    pub lang_dir: Option<&'static str>,
+}
+
+/// Look up a collection definition by ID.  Returns None for unknown IDs.
+pub fn collection_def(id: &str) -> Option<&'static CollectionDef> {
+    COLLECTION_MAP.iter().find(|c| c.id == id)
+}
+
+/// Serialisable summary returned by the `get_available_collections` command.
+#[derive(Debug, Serialize)]
+pub struct CollectionInfo {
+    pub id: String,
+    pub display_name: String,
+    pub torrent_file: String,
+}
+
+/// Return the list of all known collections (for the frontend to render
+/// collection pickers / labels without hardcoding IDs).
+#[tauri::command]
+pub fn get_available_collections() -> Vec<CollectionInfo> {
+    COLLECTION_MAP
+        .iter()
+        .map(|c| CollectionInfo {
+            id: c.id.to_string(),
+            display_name: c.display_name.to_string(),
+            torrent_file: c.torrent_file.to_string(),
+        })
+        .collect()
+}
+
 /// Managed state for the download system — supports multiple torrents.
 pub struct TorrentState(pub RwLock<std::collections::HashMap<String, Arc<DownloadManager>>>);
 
@@ -67,29 +125,36 @@ pub async fn init_download_manager(
     let mut managers = torrent_state.0.write().await;
     let metadata_dir = bundled_metadata_dir().ok();
 
-    for (col_id, _, torrent_file, configs_zip) in COLLECTION_MAP {
-        if !collections.contains(col_id) {
+    for col in COLLECTION_MAP {
+        if !collections.contains(&col.id) {
             continue;
         }
-        if let Ok(torrent_path) = bundled_torrent_path(torrent_file) {
+        if let Ok(torrent_path) = bundled_torrent_path(col.torrent_file) {
             // Each collection gets its own subdirectory to avoid file path conflicts
             // (all eXoDOS torrents share the same torrent name "eXoDOS")
-            let col_data_path = if *col_id == "eXoDOS" {
+            let col_data_path = if col.id == "eXoDOS" {
                 data_path.clone()
             } else {
-                data_path.join(col_id)
+                data_path.join(col.id)
             };
             match DownloadManager::new(&torrent_path, &col_data_path).await {
                 Ok(mgr) => {
-                    // Extract bundled DOSBox configs if available
-                    if let Some(cfg_zip) = configs_zip {
+                    // Store the torrent infohash so the update-checker can compare later
+                    if let Ok(hash) = TorrentIndex::infohash(&torrent_path) {
+                        if let Ok(conn) = db_state.0.lock() {
+                            let _ = queries::set_config(&conn, &format!("{}_infohash", col.id), &hash);
+                        }
+                    }
+
+                    // Extract bundled emulator configs if available
+                    if let Some(cfg_zip) = col.configs_zip {
                         if let Some(ref md) = metadata_dir {
                             let cfg_path = md.join(cfg_zip);
                             let torrent_root = mgr.torrent_root();
                             if cfg_path.exists() {
-                                let lock = torrent_root.join(format!(".{}_configs_extracted", col_id));
+                                let lock = torrent_root.join(format!(".{}_configs_extracted", col.id));
                                 if !lock.exists() {
-                                    log::info!("Extracting {} configs to {}", col_id, torrent_root.display());
+                                    log::info!("Extracting {} configs to {}", col.id, torrent_root.display());
                                     if let Ok(file) = std::fs::File::open(&cfg_path) {
                                         if let Ok(mut archive) = zip::ZipArchive::new(file) {
                                             let _ = archive.extract(&torrent_root);
@@ -100,11 +165,11 @@ pub async fn init_download_manager(
                             }
                         }
                     }
-                    log::info!("Initialized download manager: {}", col_id);
-                    managers.insert(col_id.to_string(), Arc::new(mgr));
+                    log::info!("Initialized download manager: {}", col.id);
+                    managers.insert(col.id.to_string(), Arc::new(mgr));
                 }
                 Err(e) => {
-                    log::warn!("Failed to init {} download manager: {}", col_id, e);
+                    log::warn!("Failed to init {} download manager: {}", col.id, e);
                 }
             }
         }
@@ -174,14 +239,56 @@ pub fn get_default_data_dir() -> Result<String, String> {
     Ok(default.to_string_lossy().to_string())
 }
 
-/// Collection ID → (metadata_file, torrent_file, optional_configs_zip)
-/// Language packs listed BEFORE eXoDOS so their games get matched to the correct
-/// torrent before eXoDOS matching can claim them (same-title translations).
-const COLLECTION_MAP: &[(&str, &str, &str, Option<&str>)] = &[
-    ("eXoDOS_GLP", "GLP.xml.gz", "eXoDOS_GLP.torrent", Some("GLP_configs.zip")),
-    ("eXoDOS_PLP", "PLP.xml.gz", "eXoDOS_PLP.torrent", None),
-    ("eXoDOS_SLP", "SLP.xml.gz", "eXoDOS_SLP.torrent", None),
-    ("eXoDOS", "MS-DOS.xml.gz", "eXoDOS.torrent", Some("eXoDOS_configs.zip")),
+/// All known eXo collections.
+/// Language packs are listed BEFORE eXoDOS so their games are matched to the
+/// correct torrent before eXoDOS can claim same-title translations.
+/// To add a new collection, append a CollectionDef entry here — no other
+/// Rust file needs to be changed for path/emulator dispatch.
+pub const COLLECTION_MAP: &[CollectionDef] = &[
+    CollectionDef {
+        id: "eXoDOS_GLP",
+        display_name: "German Language Pack",
+        metadata_file: "GLP.xml.gz",
+        torrent_file: "eXoDOS_GLP.torrent",
+        configs_zip: Some("GLP_configs.zip"),
+        inner_folder: "eXoDOS",
+        game_prefix: "eXo/eXoDOS",
+        shortcode_segment: "!dos",
+        lang_dir: Some("!german"),
+    },
+    CollectionDef {
+        id: "eXoDOS_PLP",
+        display_name: "Polish Language Pack",
+        metadata_file: "PLP.xml.gz",
+        torrent_file: "eXoDOS_PLP.torrent",
+        configs_zip: None,
+        inner_folder: "eXoDOS",
+        game_prefix: "eXo/eXoDOS",
+        shortcode_segment: "!dos",
+        lang_dir: Some("!polish"),
+    },
+    CollectionDef {
+        id: "eXoDOS_SLP",
+        display_name: "Spanish Language Pack",
+        metadata_file: "SLP.xml.gz",
+        torrent_file: "eXoDOS_SLP.torrent",
+        configs_zip: None,
+        inner_folder: "eXoDOS",
+        game_prefix: "eXo/eXoDOS",
+        shortcode_segment: "!dos",
+        lang_dir: Some("!spanish"),
+    },
+    CollectionDef {
+        id: "eXoDOS",
+        display_name: "eXoDOS",
+        metadata_file: "MS-DOS.xml.gz",
+        torrent_file: "eXoDOS.torrent",
+        configs_zip: Some("eXoDOS_configs.zip"),
+        inner_folder: "eXoDOS",
+        game_prefix: "eXo/eXoDOS",
+        shortcode_segment: "!dos",
+        lang_dir: None,
+    },
 ];
 
 /// Resolve bundled metadata directory.
@@ -410,7 +517,7 @@ pub async fn setup_import(
         queries::clear_games(&conn).map_err(|e| e.to_string())?;
 
         let count =
-            import::import_from_zip(&zip, &conn).map_err(|e| e.to_string())?;
+            import::import_from_zip(&zip, &conn, "!dos").map_err(|e| e.to_string())?;
 
         // Extract !DOSmetadata.zip to torrent root so eXo/eXoDOS/!dos/ is available
         if let Some(dosbox_zip) = dosbox_zip_path {
@@ -604,12 +711,12 @@ pub async fn setup_from_local(
 
         let count = if let Some(zip) = zip_path {
             log::info!("Importing from ZIP: {}", zip.display());
-            import::import_from_zip(&zip, &conn).map_err(|e| e.to_string())?
+            import::import_from_zip(&zip, &conn, "!dos").map_err(|e| e.to_string())?
         } else if let Some(xml) = xml_path {
             log::info!("Importing from XML: {}", xml.display());
             let file = std::fs::File::open(&xml).map_err(|e| e.to_string())?;
             let reader = std::io::BufReader::new(file);
-            let games = import::xml::parse_games_xml(reader).map_err(|e| e.to_string())?;
+            let games = import::xml::parse_games_xml(reader, "!dos").map_err(|e| e.to_string())?;
             let count = games.len();
             db::queries::insert_games(&conn, &games).map_err(|e| e.to_string())?;
             count

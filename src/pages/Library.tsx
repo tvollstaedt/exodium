@@ -7,16 +7,9 @@ import {
   sortBy, setSortBy,
   collectionFilter, setCollectionFilter,
 } from "../stores/games";
-import { getLanguages, getGenres, getInstalledGames, getConfig, type Game } from "../api/tauri";
+import { getLanguages, getGenres, getInstalledGames, getConfig, getAvailableCollections, type Game } from "../api/tauri";
 import { GameCard } from "../components/GameCard";
 import { Select } from "../components/Select";
-
-const COLLECTION_LABELS: Record<string, string> = {
-  "eXoDOS": "eXoDOS",
-  "eXoDOS_GLP": "German",
-  "eXoDOS_SLP": "Spanish",
-  "eXoDOS_PLP": "Polish",
-};
 
 export function Library() {
   let sentinelRef: HTMLDivElement | undefined;
@@ -61,9 +54,16 @@ export function Library() {
     } catch {}
 
     try {
-      const colStr = await getConfig("collections");
+      const [colStr, available] = await Promise.all([
+        getConfig("collections"),
+        getAvailableCollections(),
+      ]);
       if (colStr) {
-        const cols = colStr.split(",").map((id) => ({ id, label: COLLECTION_LABELS[id] || id }));
+        const labelMap: Record<string, string> = {};
+        for (const c of available) {
+          labelMap[c.id] = c.display_name;
+        }
+        const cols = colStr.split(",").map((id) => ({ id, label: labelMap[id] || id }));
         setCollections(cols);
       }
     } catch {}

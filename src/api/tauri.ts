@@ -31,6 +31,7 @@ export interface Game {
   gamedata_torrent_index: number | null;
   download_size: number | null;
   has_thumbnail: boolean;
+  dosbox_variant: string | null;
 }
 
 export interface GameList {
@@ -161,4 +162,29 @@ export async function downloadGame(id: number): Promise<string> {
 
 export async function getDownloadProgress(id: number): Promise<DownloadProgress | null> {
   return invoke("get_download_progress", { id });
+}
+
+export interface CollectionUpdate {
+  collection: string;
+  current_hash: string;
+  latest_hash: string;
+  new_game_count: number;
+}
+
+export interface UpdateInfo {
+  updates: CollectionUpdate[];
+}
+
+export async function checkForUpdates(): Promise<UpdateInfo> {
+  return invoke("check_for_updates");
+}
+
+export interface CollectionInfo {
+  id: string;
+  display_name: string;
+  torrent_file: string;
+}
+
+export async function getAvailableCollections(): Promise<CollectionInfo[]> {
+  return invoke("get_available_collections");
 }

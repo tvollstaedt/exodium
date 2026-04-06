@@ -6,6 +6,7 @@ pub mod torrent;
 
 // Re-export utilities used by the generate_db binary
 pub use commands::game_name_from_app_path;
+pub use commands::{CollectionDef, COLLECTION_MAP};
 
 use std::path::Path;
 use std::sync::Mutex;
@@ -14,11 +15,11 @@ use tauri::Manager;
 use tokio::sync::RwLock;
 
 use commands::{
-    bundled_metadata_dir, download_game, factory_reset, get_config, get_default_data_dir,
-    get_download_progress, get_game, get_game_variants, get_games, get_genres,
-    get_installed_games, get_languages, uninstall_game, get_setup_status, get_thumbnail_dir,
-    get_torrent_info, import_games, init_download_manager, launch_game, set_config,
-    setup_from_local, setup_import, setup_start, DbState, TorrentState,
+    bundled_metadata_dir, check_for_updates, download_game, factory_reset, get_available_collections,
+    get_config, get_default_data_dir, get_download_progress, get_game, get_game_variants, get_games,
+    get_genres, get_installed_games, get_languages, uninstall_game, get_setup_status,
+    get_thumbnail_dir, get_torrent_info, import_games, init_download_manager, launch_game,
+    set_config, setup_from_local, setup_import, setup_start, DbState, TorrentState,
 };
 
 /// Copy the bundled pre-built DB to the target path.
@@ -108,6 +109,37 @@ pub fn run() {
                 }
             };
 
+            // Sync has_thumbnail flags from the thumbnail directory on disk.
+            if let Ok(metadata_dir) = commands::bundled_metadata_dir() {
+                if let Some(thumb_dir) = metadata_dir.parent().map(|p| p.join("thumbnails").join("eXoDOS")) {
+                    if thumb_dir.is_dir() {
+                        if let Ok(entries) = std::fs::read_dir(&thumb_dir) {
+                            let shortcodes: Vec<String> = entries
+                                .flatten()
+                                .filter_map(|e| {
+                                    let p = e.path();
+                                    if p.extension().and_then(|s| s.to_str()) == Some("jpg") {
+                                        p.file_stem().and_then(|s| s.to_str()).map(|s| s.to_string())
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect();
+                            if !shortcodes.is_empty() {
+                                let _ = conn.execute_batch("UPDATE games SET has_thumbnail = 0");
+                                for sc in &shortcodes {
+                                    let _ = conn.execute(
+                                        "UPDATE games SET has_thumbnail = 1 WHERE shortcode = ?1",
+                                        rusqlite::params![sc],
+                                    );
+                                }
+                                log::info!("Synced has_thumbnail for {} shortcodes", shortcodes.len());
+                            }
+                        }
+                    }
+                }
+            }
+
             app.manage(DbState(Mutex::new(conn)));
             app.manage(TorrentState(RwLock::new(std::collections::HashMap::new())));
             Ok(())
@@ -130,11 +162,13 @@ pub fn run() {
             setup_from_local,
             get_default_data_dir,
             get_thumbnail_dir,
+            get_available_collections,
             init_download_manager,
             factory_reset,
             download_game,
             uninstall_game,
             get_download_progress,
+            check_for_updates,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

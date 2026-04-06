@@ -2,6 +2,8 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Mutex;
 
+use tauri::AppHandle;
+
 use rusqlite::Connection;
 use serde::Serialize;
 use tauri::State;
@@ -13,16 +15,6 @@ use crate::torrent::manager::DownloadProgress;
 
 use super::TorrentState;
 
-/// Map torrent_source to the language subdirectory under eXo/eXoDOS/.
-fn lang_dir_for_source(source: &str) -> Option<&'static str> {
-    match source {
-        "eXoDOS_GLP" => Some("!german"),
-        "eXoDOS_SLP" => Some("!spanish"),
-        "eXoDOS_PLP" => Some("!polish"),
-        _ => None,
-    }
-}
-
 /// Resolve the data directory for a collection.
 fn collection_data_dir(data_dir: &str, source: &str) -> PathBuf {
     if source == "eXoDOS" {
@@ -30,6 +22,25 @@ fn collection_data_dir(data_dir: &str, source: &str) -> PathBuf {
     } else {
         std::path::Path::new(data_dir).join(source)
     }
+}
+
+/// Get the inner folder name for a collection (the folder the torrent creates).
+fn collection_inner_folder(source: &str) -> &'static str {
+    crate::commands::setup::collection_def(source)
+        .map(|c| c.inner_folder)
+        .unwrap_or("eXoDOS")
+}
+
+/// Get the game directory prefix for a collection (path from inner_folder to game dirs).
+fn collection_game_prefix(source: &str) -> &'static str {
+    crate::commands::setup::collection_def(source)
+        .map(|c| c.game_prefix)
+        .unwrap_or("eXo/eXoDOS")
+}
+
+/// Get the language subdirectory for an LP collection, if any.
+fn collection_lang_dir(source: &str) -> Option<&'static str> {
+    crate::commands::setup::collection_def(source).and_then(|c| c.lang_dir)
 }
 
 /// Language subdirectories used in the eXoDOS file structure.
@@ -164,7 +175,7 @@ pub async fn import_games(state: State<'_, DbState>, zip_path: String) -> Result
     tauri::async_runtime::spawn_blocking(move || {
         let conn = db::open(&db_path).map_err(|e| e.to_string())?;
         let path = std::path::Path::new(&zip);
-        crate::import::import_from_zip(path, &conn).map_err(|e| e.to_string())
+        crate::import::import_from_zip(path, &conn, "!dos").map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -246,7 +257,11 @@ pub async fn download_game(
 
     // Also queue !DOSmetadata.zip (DOSBox configs) if not already extracted
     if let Some(main_mgr) = guard.get("eXoDOS") {
-        let dosbox_dir = main_mgr.torrent_root().join("eXo/eXoDOS/!dos");
+        let main_prefix = collection_game_prefix("eXoDOS");
+        let main_segment = crate::commands::setup::collection_def("eXoDOS")
+            .map(|c| c.shortcode_segment)
+            .unwrap_or("!dos");
+        let dosbox_dir = main_mgr.torrent_root().join(format!("{}/{}", main_prefix, main_segment));
         if !dosbox_dir.exists() {
             if let Some(dm) = main_mgr.index().find_dosbox_metadata_zip() {
                 let _ = main_mgr.download_files(vec![dm.index]).await;
@@ -435,7 +450,9 @@ pub async fn uninstall_game(
         .to_string();
 
     let source = game.torrent_source.as_deref().unwrap_or("eXoDOS");
-    let torrent_root = collection_data_dir(&data_dir, source).join("eXoDOS");
+    let inner_folder = collection_inner_folder(source);
+    let game_prefix = collection_game_prefix(source);
+    let torrent_root = collection_data_dir(&data_dir, source).join(inner_folder);
 
     // Get game name from bat filename for ZIP deletion
     let game_name = game.application_path.as_deref()
@@ -443,11 +460,11 @@ pub async fn uninstall_game(
         .unwrap_or_else(|| game.title.clone());
 
     // Determine game directory
-    // For EN: eXo/eXoDOS/<shortcode>/
-    // For DE: eXo/eXoDOS/!german/<shortcode>/
-    let mut game_dir_candidates = vec![torrent_root.join(format!("eXo/eXoDOS/{}", shortcode))];
+    // For EN:  <game_prefix>/<shortcode>/
+    // For LP:  <game_prefix>/<lang_dir>/<shortcode>/
+    let mut game_dir_candidates = vec![torrent_root.join(format!("{}/{}", game_prefix, shortcode))];
     for ld in LANG_DIRS {
-        game_dir_candidates.push(torrent_root.join(format!("eXo/eXoDOS/{}/{}", ld, shortcode)));
+        game_dir_candidates.push(torrent_root.join(format!("{}/{}/{}", game_prefix, ld, shortcode)));
     }
 
     let game_dir: Option<PathBuf> = game_dir_candidates.into_iter().find(|d| d.exists());
@@ -462,7 +479,7 @@ pub async fn uninstall_game(
         if let Some(ref dir) = game_dir {
             if dir.exists() {
                 // Back up the entire game directory (preserves saves, configs, etc.)
-                let save_dir = torrent_root.join(format!("eXo/eXoDOS/!save/{}", shortcode));
+                let save_dir = torrent_root.join(format!("{}/!save/{}", game_prefix, shortcode));
                 if save_dir.exists() {
                     let _ = std::fs::remove_dir_all(&save_dir);
                 }
@@ -476,9 +493,9 @@ pub async fn uninstall_game(
             }
         }
 
-        let mut zip_paths = vec![torrent_root.join(format!("eXo/eXoDOS/{}.zip", game_name))];
+        let mut zip_paths = vec![torrent_root.join(format!("{}/{}.zip", game_prefix, game_name))];
         for ld in LANG_DIRS {
-            zip_paths.push(torrent_root.join(format!("eXo/eXoDOS/{}/{}.zip", ld, game_name)));
+            zip_paths.push(torrent_root.join(format!("{}/{}/{}.zip", game_prefix, ld, game_name)));
         }
         for zip in &zip_paths {
             let _ = std::fs::remove_file(zip);
@@ -506,27 +523,28 @@ pub async fn uninstall_game(
 /// Patch a DOSBox config file: convert Windows-style relative paths to absolute Linux paths.
 /// The eXoDOS configs use `.\eXoDOS\game\` which doesn't work on Linux.
 ///
-/// For LP games, `lp_info` provides the shortcode and language dir. The EN autoexec's
-/// mount paths are redirected to the LP location. If the redirected path doesn't exist
-/// (different directory structure), falls back to a generated autoexec.
+/// For LP games, `lp_info` provides the shortcode, language dir, game_folder (the second
+/// component of game_prefix, e.g. "eXoDOS"), and the resolved LP game directory path.
+/// The EN autoexec's mount paths are redirected to the LP location.  If the redirected
+/// path doesn't exist (different directory structure), falls back to a generated autoexec.
 fn patch_dosbox_conf(
     conf_path: &std::path::Path,
     working_dir: &std::path::Path,
-    lp_info: Option<(&str, &str, &std::path::Path)>, // (shortcode, lang_dir, lp_game_dir)
+    lp_info: Option<(&str, &str, &str, &std::path::Path)>, // (shortcode, lang_dir, game_folder, lp_game_dir)
 ) -> Result<PathBuf, String> {
     let content = std::fs::read_to_string(conf_path)
         .map_err(|e| format!("Failed to read {}: {}", conf_path.display(), e))?;
 
     let abs_prefix = format!("{}/", working_dir.to_string_lossy());
 
-    let patched = if let Some((shortcode, lang_dir, game_dir)) = lp_info {
+    let patched = if let Some((shortcode, lang_dir, game_folder, game_dir)) = lp_info {
         // Strategy 1: Redirect EN mount paths to LP location (preserves CD mounts, etc.)
-        let en_path = format!("eXoDOS\\{}", shortcode);
-        let lp_path = format!("eXoDOS\\{}\\{}", lang_dir, shortcode);
+        let en_path = format!("{}\\{}", game_folder, shortcode);
+        let lp_path = format!("{}\\{}\\{}", game_folder, lang_dir, shortcode);
         let redirected = content.replace(&en_path, &lp_path);
 
         // Check if the redirected mount path exists AND internal dirs match
-        let redirected_dir = working_dir.join(format!("eXoDOS/{}/{}", lang_dir, shortcode));
+        let redirected_dir = working_dir.join(format!("{}/{}/{}", game_folder, lang_dir, shortcode));
         let autoexec_compatible = redirected_dir.exists() && {
             // Verify that any `cd` targets in the autoexec exist in the redirected dir
             let autoexec = content.split("[autoexec]").nth(1).unwrap_or("");
@@ -721,9 +739,41 @@ fn extract_game_zip(zip_path: &std::path::Path, dest: &std::path::Path) -> Resul
     Ok(())
 }
 
+/// Resolve the DOSBox Staging binary path.
+/// Checks the bundled sidecar binary first, then falls back to the system PATH.
+fn resolve_dosbox(app: &AppHandle) -> PathBuf {
+    use tauri::Manager;
+    let bin = if cfg!(windows) { "dosbox-staging.exe" } else { "dosbox-staging" };
+
+    if let Ok(res_dir) = app.path().resource_dir() {
+        // Production bundle: Tauri strips the triple suffix and places the binary here.
+        let prod = res_dir.join(bin);
+        if prod.exists() {
+            return prod;
+        }
+
+        // Dev mode (pnpm tauri dev): resource_dir is src-tauri/; binary is in binaries/
+        // named with the Rust target triple, e.g. dosbox-staging-aarch64-apple-darwin.
+        let binaries_dir = res_dir.join("binaries");
+        if let Ok(entries) = std::fs::read_dir(&binaries_dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let name_str = name.to_string_lossy();
+                if name_str.starts_with("dosbox-staging") {
+                    log::info!("Using bundled DOSBox: {}", entry.path().display());
+                    return entry.path();
+                }
+            }
+        }
+    }
+
+    log::warn!("Bundled DOSBox not found, falling back to system PATH");
+    PathBuf::from(bin)
+}
+
 /// Launch a downloaded game via DOSBox Staging.
 #[tauri::command]
-pub fn launch_game(db_state: State<DbState>, id: i64) -> Result<String, String> {
+pub fn launch_game(app: AppHandle, db_state: State<DbState>, id: i64) -> Result<String, String> {
     let conn = db_state.0.lock().map_err(|e| e.to_string())?;
 
     let game = queries::fetch_game_by_id(&conn, id)
@@ -751,13 +801,18 @@ pub fn launch_game(db_state: State<DbState>, id: i64) -> Result<String, String> 
     // Normalize Windows backslashes
     let dosbox_conf = dosbox_conf.replace('\\', "/");
 
-    // Each collection has its own subdirectory (except eXoDOS which is at the root)
-    // eXoDOS: <data_dir>/eXoDOS/eXo/...
-    // eXoDOS_GLP: <data_dir>/eXoDOS_GLP/eXoDOS/eXo/...
+    // Each collection has its own subdirectory (except eXoDOS which is at the root).
+    // Layout:  <data_dir>/<inner_folder>/           — for eXoDOS
+    //          <data_dir>/<col_id>/<inner_folder>/  — for sub-collections
     let source = game.torrent_source.as_deref().unwrap_or("eXoDOS");
-    let main_torrent_root = collection_data_dir(&data_dir, "eXoDOS").join("eXoDOS");
-    let torrent_root = collection_data_dir(&data_dir, source).join("eXoDOS");
-    let mut working_dir = torrent_root.join("eXo");
+    let main_inner = collection_inner_folder("eXoDOS");
+    let src_inner = collection_inner_folder(source);
+    let src_game_prefix = collection_game_prefix(source);
+    let main_torrent_root = collection_data_dir(&data_dir, "eXoDOS").join(main_inner);
+    let torrent_root = collection_data_dir(&data_dir, source).join(src_inner);
+    // working_dir is the first path component of game_prefix (e.g. "eXo")
+    let working_dir_name = src_game_prefix.split('/').next().unwrap_or("eXo");
+    let mut working_dir = torrent_root.join(working_dir_name);
     let mut game_conf = torrent_root.join(&dosbox_conf);
     let options_conf = main_torrent_root.join("eXo/emulators/dosbox/options.conf");
 
@@ -772,8 +827,12 @@ pub fn launch_game(db_state: State<DbState>, id: i64) -> Result<String, String> 
         }
     }
 
-    // The config might be under a language-specific !dos/ subdirectory
+    // The config might be under a language-specific subdirectory
     if !game_conf.exists() {
+        let main_game_prefix = collection_game_prefix("eXoDOS");
+        let main_segment = crate::commands::setup::collection_def("eXoDOS")
+            .map(|c| c.shortcode_segment)
+            .unwrap_or("!dos");
         if let Some(shortcode) = dosbox_conf
             .strip_suffix("/dosbox.conf")
             .and_then(|p| p.rsplit('/').next())
@@ -786,11 +845,12 @@ pub fn launch_game(db_state: State<DbState>, id: i64) -> Result<String, String> 
             'outer: for root in &roots {
                 for lang_dir in LANG_DIRS {
                     let alt = root.join(format!(
-                        "eXo/eXoDOS/!dos/{}/{}/dosbox.conf", lang_dir, shortcode
+                        "{}/{}/{}/{}/dosbox.conf",
+                        main_game_prefix, main_segment, lang_dir, shortcode
                     ));
                     if alt.exists() {
                         game_conf = alt;
-                        working_dir = root.join("eXo");
+                        working_dir = root.join(working_dir_name);
                         break 'outer;
                     }
                 }
@@ -811,17 +871,19 @@ pub fn launch_game(db_state: State<DbState>, id: i64) -> Result<String, String> 
         return Err(format!("Working directory not found: {}", working_dir.display()));
     }
 
-    // For LP games, determine the language dir and game path for config patching
+    // For LP games, determine the language dir and game path for config patching.
+    // The game_folder is the second component of game_prefix (e.g. "eXoDOS" from "eXo/eXoDOS").
     let shortcode = game.shortcode.as_deref().unwrap_or("");
-    let lp_info = lang_dir_for_source(source).map(|ld| {
-        let dir = torrent_root.join(format!("eXo/eXoDOS/{}/{}", ld, shortcode));
-        (shortcode, ld, dir)
+    let game_folder = src_game_prefix.split('/').nth(1).unwrap_or("eXoDOS");
+    let lp_info = collection_lang_dir(source).map(|ld| {
+        let dir = torrent_root.join(format!("{}/{}/{}", src_game_prefix, ld, shortcode));
+        (shortcode, ld, game_folder, dir)
     });
 
     let patched_conf = patch_dosbox_conf(
         &game_conf,
         &working_dir,
-        lp_info.as_ref().map(|(sc, ld, dir)| (*sc, *ld, dir.as_path())),
+        lp_info.as_ref().map(|(sc, ld, gf, dir)| (*sc, *ld, *gf, dir.as_path())),
     )?;
 
     log::info!(
@@ -831,7 +893,20 @@ pub fn launch_game(db_state: State<DbState>, id: i64) -> Result<String, String> 
         patched_conf.display()
     );
 
-    let mut cmd = Command::new("dosbox-staging");
+    // Log variant for diagnostics; all variants currently map to DOSBox Staging.
+    // ECE builds have no cross-platform release — Staging is used as best-effort.
+    if let Some(ref variant) = game.dosbox_variant {
+        if variant.starts_with("ece") {
+            log::warn!(
+                "Game '{}' uses ECE variant '{}' which has no cross-platform build. \
+                 Using DOSBox Staging — gameplay accuracy may differ.",
+                game.title, variant
+            );
+        }
+    }
+
+    let dosbox_bin = resolve_dosbox(&app);
+    let mut cmd = Command::new(&dosbox_bin);
     cmd.current_dir(&working_dir)
         .arg("-conf")
         .arg(&patched_conf);
@@ -840,8 +915,12 @@ pub fn launch_game(db_state: State<DbState>, id: i64) -> Result<String, String> 
         cmd.arg("-conf").arg(&options_conf);
     }
 
-    cmd.spawn()
-        .map_err(|e| format!("Failed to launch DOSBox Staging: {}", e))?;
+    cmd.spawn().map_err(|e| {
+        format!(
+            "Failed to launch DOSBox Staging ({}): {}",
+            dosbox_bin.display(), e
+        )
+    })?;
 
     Ok(format!("Launched: {}", game.title))
 }

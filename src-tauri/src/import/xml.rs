@@ -59,19 +59,22 @@ fn blank_to_none(s: Option<String>) -> Option<String> {
     s.filter(|v| !v.is_empty())
 }
 
-/// Extract shortcode from application_path.
-/// e.g., "eXo\eXoDOS\!dos\captlsm\Capitalism (1995).bat" → "captlsm"
-/// e.g., "eXo\eXoDOS\!dos\!german\SQ5\Space Quest V (1993).bat" → "SQ5"
-fn extract_shortcode(app_path: &Option<String>) -> Option<String> {
+/// Extract shortcode from application_path using a collection-specific path segment.
+///
+/// eXoDOS:   "eXo\eXoDOS\!dos\captlsm\Capitalism (1995).bat"   → segment "!dos" → "captlsm"
+/// eXoDOS:   "eXo\eXoDOS\!dos\!german\SQ5\Space Quest V.bat"   → segment "!dos" → "SQ5"
+/// eXoWin3x: "eXo\eXoWin3x\!windows\GAME\…"                   → segment "!windows" → "GAME"
+fn extract_shortcode(app_path: &Option<String>, segment: &str) -> Option<String> {
     let path = app_path.as_ref()?;
     let normalized = path.replace('\\', "/");
-    let dos_idx = normalized.find("/!dos/")?;
-    let after_dos = &normalized[dos_idx + 6..]; // skip "/!dos/"
+    let needle = format!("/{}/", segment);
+    let seg_idx = normalized.find(&needle)?;
+    let after_seg = &normalized[seg_idx + needle.len()..];
     // Skip language dir if present (e.g., "!german/")
-    let after_lang = if after_dos.starts_with('!') {
-        after_dos.find('/')?.checked_add(1).and_then(|i| after_dos.get(i..))?
+    let after_lang = if after_seg.starts_with('!') {
+        after_seg.find('/')?.checked_add(1).and_then(|i| after_seg.get(i..))?
     } else {
-        after_dos
+        after_seg
     };
     // Take the shortcode (next path segment)
     let end = after_lang.find('/')?;
@@ -99,61 +102,64 @@ fn extract_language(series: &Option<String>) -> String {
     "EN".to_string()
 }
 
-impl From<XmlGame> for Game {
-    fn from(x: XmlGame) -> Self {
-        let year = extract_year(&x.release_date);
-        let language = extract_language(&x.series);
-        let shortcode = extract_shortcode(&x.application_path)
-            .or_else(|| extract_shortcode(&x.root_folder));
-        Game {
-            id: None,
-            title: x.title,
-            sort_title: blank_to_none(x.sort_title),
-            platform: x.platform.unwrap_or_else(|| "MS-DOS".to_string()),
-            developer: blank_to_none(x.developer),
-            publisher: blank_to_none(x.publisher),
-            release_date: blank_to_none(x.release_date),
-            year,
-            genre: blank_to_none(x.genre),
-            series: blank_to_none(x.series),
-            play_mode: blank_to_none(x.play_mode),
-            rating: x.community_star_rating
-                .as_deref()
-                .and_then(|s| s.parse::<f64>().ok())
-                .filter(|&r| r > 0.0),
-            description: blank_to_none(x.notes),
-            notes: None,
-            source: blank_to_none(x.source),
-            application_path: blank_to_none(x.application_path),
-            dosbox_conf: x
-                .root_folder
-                .as_deref()
-                .map(|rf| format!("{}/dosbox.conf", rf)),
-            status: blank_to_none(x.status),
-            region: blank_to_none(x.region),
-            max_players: x.max_players.as_deref().and_then(|s| s.parse().ok()),
-            language,
-            shortcode,
-            available_languages: None,
-            torrent_source: None,
-            in_library: false,
-            installed: false,
-            game_torrent_index: None,
-            gamedata_torrent_index: None,
-            download_size: None,
-            has_thumbnail: false,
-        }
+/// Convert a raw XML game record to our Game model.
+/// `shortcode_segment` is the collection-specific path segment used to extract
+/// the shortcode from application_path (e.g. "!dos" for eXoDOS, "!windows" for eXoWin3x).
+fn xml_game_to_game(x: XmlGame, shortcode_segment: &str) -> Game {
+    let year = extract_year(&x.release_date);
+    let language = extract_language(&x.series);
+    let shortcode = extract_shortcode(&x.application_path, shortcode_segment)
+        .or_else(|| extract_shortcode(&x.root_folder, shortcode_segment));
+    Game {
+        id: None,
+        title: x.title,
+        sort_title: blank_to_none(x.sort_title),
+        platform: x.platform.unwrap_or_else(|| "MS-DOS".to_string()),
+        developer: blank_to_none(x.developer),
+        publisher: blank_to_none(x.publisher),
+        release_date: blank_to_none(x.release_date),
+        year,
+        genre: blank_to_none(x.genre),
+        series: blank_to_none(x.series),
+        play_mode: blank_to_none(x.play_mode),
+        rating: x.community_star_rating
+            .as_deref()
+            .and_then(|s| s.parse::<f64>().ok())
+            .filter(|&r| r > 0.0),
+        description: blank_to_none(x.notes),
+        notes: None,
+        source: blank_to_none(x.source),
+        application_path: blank_to_none(x.application_path),
+        dosbox_conf: x
+            .root_folder
+            .as_deref()
+            .map(|rf| format!("{}/dosbox.conf", rf)),
+        status: blank_to_none(x.status),
+        region: blank_to_none(x.region),
+        max_players: x.max_players.as_deref().and_then(|s| s.parse().ok()),
+        language,
+        shortcode,
+        available_languages: None,
+        torrent_source: None,
+        in_library: false,
+        installed: false,
+        game_torrent_index: None,
+        gamedata_torrent_index: None,
+        download_size: None,
+        has_thumbnail: false,
+        dosbox_variant: None, // populated later by generate_db from dosbox.txt
     }
 }
 
-/// Parse the eXoDOS MS-DOS.xml game database from a buffered reader.
-/// The XML is ~37 MB with ~7,667 <Game> entries.
-pub fn parse_games_xml<R: BufRead>(reader: R) -> ImportResult<Vec<Game>> {
+/// Parse a LaunchBox XML game database from a buffered reader.
+/// `shortcode_segment` selects the path component used for shortcode extraction
+/// (e.g. "!dos" for eXoDOS, "!windows" for eXoWin3x).
+pub fn parse_games_xml<R: BufRead>(reader: R, shortcode_segment: &str) -> ImportResult<Vec<Game>> {
     let doc: LaunchBoxGames = from_reader(reader)?;
     let games: Vec<Game> = doc
         .games
         .into_iter()
-        .map(Game::from)
+        .map(|x| xml_game_to_game(x, shortcode_segment))
         .filter(|g| !g.title.is_empty())
         .collect();
     log::info!("Parsed {} games from XML", games.len());

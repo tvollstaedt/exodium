@@ -34,7 +34,8 @@ pub fn create_tables(conn: &Connection) -> DbResult<()> {
             game_torrent_index    INTEGER,
             gamedata_torrent_index INTEGER,
             download_size         INTEGER,
-            has_thumbnail         INTEGER NOT NULL DEFAULT 0
+            has_thumbnail         INTEGER NOT NULL DEFAULT 0,
+            dosbox_variant        TEXT
         );
 
         CREATE TABLE IF NOT EXISTS downloads (

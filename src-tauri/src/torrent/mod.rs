@@ -116,6 +116,12 @@ impl TorrentIndex {
             .iter()
             .find(|f| f.path.ends_with("!DOSmetadata.zip"))
     }
+
+    /// Return the SHA1 info-hash (hex) of a torrent file.
+    pub fn infohash(path: &Path) -> TorrentResult<String> {
+        let torrent = Torrent::read_from_file(path)?;
+        Ok(torrent.info_hash())
+    }
 }
 
 // Compile-time check that DownloadManager can be used in Tauri State<>.

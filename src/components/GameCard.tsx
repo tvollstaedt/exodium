@@ -5,7 +5,7 @@ import { Progress } from "@ark-ui/solid/progress";
 import type { Game } from "../api/tauri";
 import { launchGame, getGameVariants, uninstallGame } from "../api/tauri";
 import { formatBytes } from "../util";
-import { thumbnailDir } from "../stores/thumbnails";
+import { thumbnailDirForCollection } from "../stores/thumbnails";
 import { downloads, startGameDownload, getDownloadState } from "../stores/downloads";
 import { fetchGames } from "../stores/games";
 
@@ -32,7 +32,7 @@ export function GameCard(props: GameCardProps) {
   });
 
   const thumbSrc = () => {
-    const dir = thumbnailDir();
+    const dir = thumbnailDirForCollection(props.game.torrent_source);
     if (!dir || !props.game.shortcode || !props.game.has_thumbnail) return null;
     return convertFileSrc(`${dir}/${props.game.shortcode}.jpg`);
   };
