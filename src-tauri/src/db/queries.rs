@@ -338,3 +338,233 @@ impl<T> OptionalRow<T> for Result<T, rusqlite::Error> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::Game;
+    use pretty_assertions::assert_eq;
+
+    fn open_test_db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        crate::db::init(&conn).unwrap();
+        conn
+    }
+
+    fn make_game(title: &str) -> Game {
+        Game {
+            id: None,
+            title: title.to_string(),
+            sort_title: None,
+            platform: "MS-DOS".to_string(),
+            developer: None,
+            publisher: None,
+            release_date: None,
+            year: None,
+            genre: None,
+            series: None,
+            play_mode: None,
+            rating: None,
+            description: None,
+            notes: None,
+            source: None,
+            application_path: None,
+            dosbox_conf: None,
+            status: None,
+            region: None,
+            max_players: None,
+            language: "EN".to_string(),
+            shortcode: None,
+            available_languages: None,
+            torrent_source: None,
+            in_library: false,
+            installed: false,
+            favorited: false,
+            game_torrent_index: None,
+            gamedata_torrent_index: None,
+            download_size: None,
+            has_thumbnail: false,
+            dosbox_variant: None,
+        }
+    }
+
+    #[test]
+    fn insert_and_fetch_game() {
+        let conn = open_test_db();
+        let game = make_game("Space Quest V");
+        insert_games(&conn, &[game]).unwrap();
+
+        let id: i64 = conn.query_row("SELECT id FROM games WHERE title = ?1", params!["Space Quest V"], |r| r.get(0)).unwrap();
+        let fetched = fetch_game_by_id(&conn, id).unwrap().unwrap();
+        assert_eq!(fetched.title, "Space Quest V");
+        assert_eq!(fetched.language, "EN");
+        assert!(!fetched.installed);
+        assert!(!fetched.favorited);
+    }
+
+    #[test]
+    fn search_by_query() {
+        let conn = open_test_db();
+        insert_games(&conn, &[
+            make_game("Space Quest V"),
+            make_game("Space Quest IV"),
+            make_game("Doom"),
+        ]).unwrap();
+
+        let f = GameFilter { query: "Space", genre: "", sort_by: "", collection: "", favorites_only: false };
+        let results = fetch_games_filtered(&conn, 1, 50, &f).unwrap();
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().all(|g| g.title.contains("Space")));
+    }
+
+    #[test]
+    fn filter_by_genre() {
+        let conn = open_test_db();
+        let mut rpg = make_game("Baldur's Gate");
+        rpg.genre = Some("Role-Playing;Strategy".to_string());
+        let mut action = make_game("Doom");
+        action.genre = Some("Action;Shooter".to_string());
+        insert_games(&conn, &[rpg, action]).unwrap();
+
+        let f = GameFilter { query: "", genre: "Role-Playing", sort_by: "", collection: "", favorites_only: false };
+        let results = fetch_games_filtered(&conn, 1, 50, &f).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "Baldur's Gate");
+    }
+
+    #[test]
+    fn filter_by_collection() {
+        let conn = open_test_db();
+        insert_games(&conn, &[make_game("Doom"), make_game("Doom DE")]).unwrap();
+
+        // torrent_source is set post-import by the torrent matching phase,
+        // not by insert_games — update it directly here.
+        conn.execute("UPDATE games SET torrent_source = 'eXoDOS' WHERE title = 'Doom'", []).unwrap();
+        conn.execute("UPDATE games SET torrent_source = 'eXoDOS_GLP' WHERE title = 'Doom DE'", []).unwrap();
+
+        let f = GameFilter { query: "", genre: "", sort_by: "", collection: "eXoDOS_GLP", favorites_only: false };
+        let results = fetch_games_filtered(&conn, 1, 50, &f).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "Doom DE");
+    }
+
+    #[test]
+    fn filter_favorites_only() {
+        let conn = open_test_db();
+        insert_games(&conn, &[make_game("Doom"), make_game("Quake")]).unwrap();
+        let id: i64 = conn.query_row("SELECT id FROM games WHERE title = 'Doom'", [], |r| r.get(0)).unwrap();
+        toggle_favorite(&conn, id).unwrap();
+
+        let f = GameFilter { query: "", genre: "", sort_by: "", collection: "", favorites_only: true };
+        let results = fetch_games_filtered(&conn, 1, 50, &f).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "Doom");
+    }
+
+    #[test]
+    fn pagination() {
+        let conn = open_test_db();
+        let games: Vec<Game> = (1..=10).map(|i| make_game(&format!("Game {:02}", i))).collect();
+        insert_games(&conn, &games).unwrap();
+
+        let f = GameFilter { query: "", genre: "", sort_by: "", collection: "", favorites_only: false };
+        let page1 = fetch_games_filtered(&conn, 1, 4, &f).unwrap();
+        let page2 = fetch_games_filtered(&conn, 2, 4, &f).unwrap();
+        let total = count_games_filtered(&conn, &f).unwrap();
+
+        assert_eq!(page1.len(), 4);
+        assert_eq!(page2.len(), 4);
+        assert_eq!(total, 10);
+
+        // Pages must not overlap
+        let ids1: std::collections::HashSet<_> = page1.iter().map(|g| &g.title).collect();
+        let ids2: std::collections::HashSet<_> = page2.iter().map(|g| &g.title).collect();
+        assert!(ids1.is_disjoint(&ids2));
+    }
+
+    #[test]
+    fn toggle_favorite_persists() {
+        let conn = open_test_db();
+        insert_games(&conn, &[make_game("Doom")]).unwrap();
+        let id: i64 = conn.query_row("SELECT id FROM games WHERE title = 'Doom'", [], |r| r.get(0)).unwrap();
+
+        let new_state = toggle_favorite(&conn, id).unwrap();
+        assert!(new_state, "first toggle should return true");
+
+        let fetched = fetch_game_by_id(&conn, id).unwrap().unwrap();
+        assert!(fetched.favorited);
+
+        let new_state2 = toggle_favorite(&conn, id).unwrap();
+        assert!(!new_state2, "second toggle should return false");
+
+        let fetched2 = fetch_game_by_id(&conn, id).unwrap().unwrap();
+        assert!(!fetched2.favorited);
+    }
+
+    #[test]
+    fn config_round_trip() {
+        let conn = open_test_db();
+        assert_eq!(get_config(&conn, "data_dir").unwrap(), None);
+
+        set_config(&conn, "data_dir", "/home/user/eXoDOS").unwrap();
+        assert_eq!(get_config(&conn, "data_dir").unwrap().as_deref(), Some("/home/user/eXoDOS"));
+
+        // Upsert: update existing key
+        set_config(&conn, "data_dir", "/mnt/games").unwrap();
+        assert_eq!(get_config(&conn, "data_dir").unwrap().as_deref(), Some("/mnt/games"));
+    }
+
+    #[test]
+    fn set_in_library_and_installed() {
+        let conn = open_test_db();
+        insert_games(&conn, &[make_game("Doom")]).unwrap();
+        let id: i64 = conn.query_row("SELECT id FROM games WHERE title = 'Doom'", [], |r| r.get(0)).unwrap();
+
+        set_in_library(&conn, id).unwrap();
+        let g = fetch_game_by_id(&conn, id).unwrap().unwrap();
+        assert!(g.in_library);
+        assert!(!g.installed);
+
+        set_game_installed(&conn, id, true).unwrap();
+        let g = fetch_game_by_id(&conn, id).unwrap().unwrap();
+        assert!(g.in_library);
+        assert!(g.installed);
+
+        set_game_installed(&conn, id, false).unwrap();
+        let g = fetch_game_by_id(&conn, id).unwrap().unwrap();
+        assert!(g.in_library, "in_library stays set after uninstall");
+        assert!(!g.installed);
+    }
+
+    #[test]
+    fn count_games_filtered_matches_fetch() {
+        let conn = open_test_db();
+        let games: Vec<Game> = ["Alpha", "Beta", "Gamma", "Delta"]
+            .iter()
+            .map(|t| make_game(t))
+            .collect();
+        insert_games(&conn, &games).unwrap();
+
+        let f = GameFilter { query: "a", genre: "", sort_by: "", collection: "", favorites_only: false };
+        let count = count_games_filtered(&conn, &f).unwrap();
+        let fetched = fetch_games_filtered(&conn, 1, 50, &f).unwrap();
+        assert_eq!(count, fetched.len(), "count must match number of fetched rows");
+    }
+
+    #[test]
+    fn get_genres_splits_semicolons() {
+        let conn = open_test_db();
+        let mut g1 = make_game("A");
+        g1.genre = Some("Action;Adventure".to_string());
+        let mut g2 = make_game("B");
+        g2.genre = Some("Action;Puzzle".to_string());
+        insert_games(&conn, &[g1, g2]).unwrap();
+
+        let genres = get_genres(&conn).unwrap();
+        assert!(genres.contains(&"Action".to_string()));
+        assert!(genres.contains(&"Adventure".to_string()));
+        assert!(genres.contains(&"Puzzle".to_string()));
+        // Deduplication: "Action" appears once despite two games
+        assert_eq!(genres.iter().filter(|g| g.as_str() == "Action").count(), 1);
+    }
+}

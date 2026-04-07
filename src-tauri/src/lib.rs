@@ -4,9 +4,9 @@ pub mod import;
 pub mod models;
 pub mod torrent;
 
-// Re-export utilities used by the generate_db binary
+// Re-export utilities used by the generate_db binary and integration tests
 pub use commands::game_name_from_app_path;
-pub use commands::{CollectionDef, COLLECTION_MAP};
+pub use commands::{collection_data_dir, CollectionDef, COLLECTION_MAP};
 
 use std::path::Path;
 use std::sync::Mutex;

@@ -16,7 +16,7 @@ use crate::torrent::manager::DownloadProgress;
 use super::TorrentState;
 
 /// Resolve the data directory for a collection.
-fn collection_data_dir(data_dir: &str, source: &str) -> PathBuf {
+pub fn collection_data_dir(data_dir: &str, source: &str) -> PathBuf {
     if source == "eXoDOS" {
         std::path::Path::new(data_dir).to_path_buf()
     } else {
@@ -341,15 +341,27 @@ pub async fn get_download_progress(
                         });
                     }
                 } else {
-                    // ZIP reported finished but not on disk.
-                    // This can happen when librqbit has piece data but hasn't assembled the file.
-                    // Show error so user can retry via uninstall + re-download.
+                    // ZIP not on disk despite torrent reporting 100%.
+                    // Common cause: pieces covering this file were received as a side effect of
+                    // downloading a neighboring file, but the file was never selected so librqbit
+                    // never assembled/wrote it. Re-selecting the file forces assembly.
                     log::warn!(
-                        "Download reports 100% but ZIP missing: {}. librqbit may need a restart.",
+                        "Download reports 100% but ZIP missing: {}. Re-requesting file assembly.",
                         zip_path.display()
                     );
+                    // Only spawn the re-trigger once — if the file is already selected (i.e., a
+                    // previous poll already spawned a re-request), skip spawning again to avoid
+                    // a new task every second while librqbit assembles the file.
+                    if !manager.is_file_selected(game_idx).await {
+                        let mgr = std::sync::Arc::clone(manager);
+                        tauri::async_runtime::spawn(async move {
+                            let _ = mgr.download_files(vec![game_idx]).await;
+                        });
+                    }
+                    // Show as still in-progress so the frontend keeps polling until the ZIP
+                    // appears and extraction can proceed normally.
                     if let Some(ref mut p) = progress {
-                        p.error = Some("Download incomplete — right-click to uninstall and retry".to_string());
+                        p.finished = false;
                     }
                 }
             }
@@ -495,9 +507,30 @@ fn patch_dosbox_conf(
         };
         if autoexec_compatible {
             log::info!("LP launch: using redirected EN config for {}", shortcode);
-            redirected
+            let mut result = redirected
                 .replace(".\\", &abs_prefix)
-                .replace('\\', "/")
+                .replace('\\', "/");
+
+            // If autoexec has no actual launch command (e.g., all commented out with #),
+            // append one found by inspecting the LP game directory.
+            if !autoexec_has_launch_cmd(&result) {
+                log::info!("LP launch: autoexec has no launch cmd, appending find_lp_launch for {}", shortcode);
+                if let Some((subdir, cmd)) = find_lp_launch(game_dir) {
+                    // Strip any trailing `exit` so our appended commands aren't skipped.
+                    let trimmed = result.trim_end();
+                    if trimmed.to_ascii_lowercase().ends_with("exit") {
+                        result.truncate(trimmed.len() - "exit".len());
+                        result.push('\n');
+                    }
+                    if !subdir.is_empty() {
+                        result.push_str(&format!("cd {}\n", subdir));
+                    }
+                    result.push_str("cls\n");
+                    result.push_str(&format!("{}\n", cmd));
+                    result.push_str("exit\n");
+                }
+            }
+            result
         } else {
             // Strategy 2: Different directory structure — generate custom autoexec
             log::info!("LP launch: generating custom autoexec for {} (redirected path not found)", shortcode);
@@ -605,7 +638,58 @@ fn find_lp_launch(game_dir: &std::path::Path) -> Option<(String, String)> {
         }
     }
 
-    // Strategy 2: Look for a .com file (more likely to be a DOS game than .exe)
+    // Strategy 2: Look for any .bat file that calls an exe/com (skip known utility names).
+    // Returns the .bat itself as the command so all its steps run in sequence.
+    const SKIP_BAT_STEMS: &[&str] = &[
+        "anleit", "readme", "install", "setup", "help", "manual",
+        "problem", "config", "uninstal", "uninst",
+    ];
+    for (subdir, dir) in &search_dirs {
+        let dir_stem = dir
+            .file_name()
+            .map(|n| n.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+
+        let mut candidates: Vec<String> = if let Ok(entries) = std::fs::read_dir(dir) {
+            entries
+                .filter_map(|e| e.ok())
+                .filter(|e| {
+                    let name = e.file_name().to_string_lossy().to_lowercase();
+                    name.ends_with(".bat")
+                        && name != "run.bat"
+                        && !SKIP_BAT_STEMS.iter().any(|s| name.starts_with(s))
+                })
+                .map(|e| e.file_name().to_string_lossy().to_string())
+                .collect()
+        } else {
+            vec![]
+        };
+
+        // Prefer .bat whose stem matches the directory name
+        candidates.sort_by_key(|b| {
+            let stem = b.rsplitn(2, '.').last().unwrap_or(b).to_lowercase();
+            usize::from(stem != dir_stem)
+        });
+
+        for bat in &candidates {
+            let bat_path = dir.join(bat);
+            if let Ok(content) = std::fs::read_to_string(&bat_path) {
+                let has_exe_call = content.lines().any(|line| {
+                    let l = line.trim().to_ascii_lowercase();
+                    !l.is_empty()
+                        && !l.starts_with(':')
+                        && !l.starts_with("rem ")
+                        && (l.contains(".exe") || l.contains(".com"))
+                });
+                if has_exe_call {
+                    log::info!("LP launch: found .bat launcher '{}' in '{}'", bat, subdir);
+                    return Some((subdir.clone(), bat.clone()));
+                }
+            }
+        }
+    }
+
+    // Strategy 3: Look for a .com file (more likely to be a DOS game than .exe)
     for (subdir, dir) in &search_dirs {
         if let Ok(entries) = std::fs::read_dir(dir) {
             for entry in entries.filter_map(|e| e.ok()) {
@@ -620,7 +704,72 @@ fn find_lp_launch(game_dir: &std::path::Path) -> Option<(String, String)> {
         }
     }
 
+    // Strategy 4: Look for a .exe in subdirectories (skip utilities and installers)
+    const SKIP_EXE_STEMS: &[&str] = &[
+        "install", "setup", "uninst", "config", "cdtest", "showtext",
+        // DOS/4GW and protected-mode extenders — not the game itself
+        "rtm", "dos4gw", "dpmi", "cwsdpmi",
+    ];
+    for (subdir, dir) in search_dirs.iter().filter(|(s, _)| !s.is_empty()) {
+        let dir_stem = dir
+            .file_name()
+            .map(|n| n.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+
+        let mut exes: Vec<String> = if let Ok(entries) = std::fs::read_dir(dir) {
+            entries
+                .filter_map(|e| e.ok())
+                .filter(|e| {
+                    let name = e.file_name().to_string_lossy().to_lowercase();
+                    name.ends_with(".exe")
+                        && !SKIP_EXE_STEMS.iter().any(|s| name.starts_with(s))
+                })
+                .map(|e| e.file_name().to_string_lossy().to_string())
+                .collect()
+        } else {
+            vec![]
+        };
+
+        // Prefer exe whose stem matches the directory name
+        exes.sort_by_key(|e| {
+            let stem = e.rsplitn(2, '.').last().unwrap_or(e).to_lowercase();
+            usize::from(stem != dir_stem)
+        });
+
+        if let Some(exe) = exes.first() {
+            log::info!("LP launch: found .exe '{}' in '{}'", exe, subdir);
+            return Some((subdir.clone(), exe.clone()));
+        }
+    }
+
     None
+}
+
+/// Returns true if the [autoexec] section of a dosbox conf contains at least one
+/// line that looks like an actual game launch command (not just mounts, drive switches,
+/// comments, or housekeeping).
+fn autoexec_has_launch_cmd(conf: &str) -> bool {
+    let autoexec = match conf.split("[autoexec]").nth(1) {
+        Some(s) => s,
+        None => return false,
+    };
+    autoexec.lines().any(|line| {
+        let l = line.trim().to_ascii_lowercase();
+        if l.is_empty() || l.starts_with('#') || l.starts_with("rem ") {
+            return false;
+        }
+        // Drive-switch: single letter followed by colon (a: through z:)
+        let is_drive_switch = l.len() >= 2
+            && l.as_bytes()[1] == b':'
+            && l.as_bytes()[0].is_ascii_alphabetic();
+        if is_drive_switch {
+            return false;
+        }
+        const NON_LAUNCH: &[&str] = &[
+            "@echo", "@exit", "echo ", "mount ", "imgmount", "exit", "cls",
+        ];
+        !NON_LAUNCH.iter().any(|p| l.starts_with(p))
+    })
 }
 
 fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
@@ -897,4 +1046,123 @@ pub fn launch_game(app: AppHandle, db_state: State<DbState>, id: i64) -> Result<
     })?;
 
     Ok(format!("Launched: {}", game.title))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    // ── collection_data_dir ──────────────────────────────────────────────────
+
+    #[test]
+    fn collection_data_dir_exodos_is_root() {
+        let dir = collection_data_dir("/data", "eXoDOS");
+        assert_eq!(dir, std::path::PathBuf::from("/data"));
+    }
+
+    #[test]
+    fn collection_data_dir_glp_is_subdir() {
+        let dir = collection_data_dir("/data", "eXoDOS_GLP");
+        assert_eq!(dir, std::path::PathBuf::from("/data/eXoDOS_GLP"));
+    }
+
+    #[test]
+    fn collection_data_dir_slp_is_subdir() {
+        let dir = collection_data_dir("/data", "eXoDOS_SLP");
+        assert_eq!(dir, std::path::PathBuf::from("/data/eXoDOS_SLP"));
+    }
+
+    // ── patch_dosbox_conf ────────────────────────────────────────────────────
+
+    fn write_conf(dir: &std::path::Path, name: &str, content: &str) -> std::path::PathBuf {
+        let path = dir.join(name);
+        fs::write(&path, content).unwrap();
+        path
+    }
+
+    #[test]
+    fn patch_dosbox_conf_converts_windows_paths() {
+        let tmp = tempfile::tempdir().unwrap();
+        let working_dir = tmp.path();
+
+        let conf_content = "[sdl]\nfullscreen=false\n[autoexec]\n@mount c .\\eXoDOS\\SQ5\nc:\nSQ5.bat\nexit\n";
+        let conf_path = write_conf(working_dir, "dosbox.conf", conf_content);
+
+        let patched_path = patch_dosbox_conf(&conf_path, working_dir, None).unwrap();
+        let patched = fs::read_to_string(&patched_path).unwrap();
+
+        // Backslash replaced with forward slash
+        assert!(!patched.contains('\\'), "no backslashes should remain: {}", patched);
+        // Relative .\ prefix replaced with absolute working dir
+        let abs_prefix = format!("{}/", working_dir.to_string_lossy());
+        assert!(patched.contains(&abs_prefix), "absolute path prefix expected: {}", patched);
+    }
+
+    #[test]
+    fn patch_dosbox_conf_lp_mount_redirect() {
+        let tmp = tempfile::tempdir().unwrap();
+        let working_dir = tmp.path();
+
+        // Create the LP redirect dir so the compatibility check passes
+        let lp_dir = working_dir.join("eXoDOS/!german/SQ5");
+        fs::create_dir_all(&lp_dir).unwrap();
+
+        let conf_content = "[autoexec]\n@mount c eXoDOS\\SQ5\nc:\nSQ5.bat\nexit\n";
+        let conf_path = write_conf(working_dir, "dosbox.conf", conf_content);
+
+        let patched_path = patch_dosbox_conf(
+            &conf_path,
+            working_dir,
+            Some(("SQ5", "!german", "eXoDOS", &lp_dir)),
+        )
+        .unwrap();
+        let patched = fs::read_to_string(&patched_path).unwrap();
+
+        assert!(
+            patched.contains("eXoDOS/!german/SQ5"),
+            "LP path redirect expected in patched config: {}",
+            patched
+        );
+    }
+
+    // ── find_lp_launch ───────────────────────────────────────────────────────
+
+    #[test]
+    fn find_lp_launch_parses_run_bat() {
+        let tmp = tempfile::tempdir().unwrap();
+        let game_dir = tmp.path();
+
+        // Create the target executable so the directory scan finds it
+        fs::write(game_dir.join("sq5.exe"), b"").unwrap();
+
+        let run_bat = "@call sq5.exe\n";
+        fs::write(game_dir.join("run.bat"), run_bat).unwrap();
+
+        let result = find_lp_launch(game_dir);
+        assert!(result.is_some(), "run.bat parsing should find a launch command");
+        let (subdir, cmd) = result.unwrap();
+        assert_eq!(subdir, "", "game is in root of game_dir");
+        assert_eq!(cmd, "sq5.exe");
+    }
+
+    #[test]
+    fn find_lp_launch_finds_com_file_fallback() {
+        let tmp = tempfile::tempdir().unwrap();
+        let game_dir = tmp.path();
+
+        // No run.bat, but a .com file exists
+        fs::write(game_dir.join("game.com"), b"").unwrap();
+
+        let result = find_lp_launch(game_dir);
+        assert!(result.is_some(), ".com file should be found as fallback");
+        let (_, cmd) = result.unwrap();
+        assert!(cmd.to_lowercase().ends_with(".com"));
+    }
+
+    #[test]
+    fn find_lp_launch_returns_none_for_empty_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(find_lp_launch(tmp.path()).is_none());
+    }
 }

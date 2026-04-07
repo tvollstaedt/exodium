@@ -166,3 +166,139 @@ pub fn parse_games_xml<R: BufRead>(reader: R, shortcode_segment: &str) -> Import
     log::info!("Parsed {} games from XML", games.len());
     Ok(games)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::BufReader;
+
+    // ── extract_shortcode ────────────────────────────────────────────────────
+
+    #[test]
+    fn extract_shortcode_dos() {
+        let path = Some(r"eXo\eXoDOS\!dos\SQ5\Space Quest V.bat".to_string());
+        assert_eq!(extract_shortcode(&path, "!dos"), Some("SQ5".to_string()));
+    }
+
+    #[test]
+    fn extract_shortcode_german_lang_dir_skipped() {
+        // German LP games have an extra !german dir before the shortcode
+        let path = Some(r"eXo\eXoDOS\!dos\!german\SQ5\Space Quest V DE.bat".to_string());
+        assert_eq!(extract_shortcode(&path, "!dos"), Some("SQ5".to_string()));
+    }
+
+    #[test]
+    fn extract_shortcode_windows_collection() {
+        let path = Some(r"eXo\eXoWin3x\!windows\MYST\Myst.bat".to_string());
+        assert_eq!(extract_shortcode(&path, "!windows"), Some("MYST".to_string()));
+    }
+
+    #[test]
+    fn extract_shortcode_missing_segment_returns_none() {
+        let path = Some(r"eXo\eXoDOS\SQ5\Space Quest V.bat".to_string());
+        assert_eq!(extract_shortcode(&path, "!dos"), None);
+    }
+
+    #[test]
+    fn extract_shortcode_none_path_returns_none() {
+        assert_eq!(extract_shortcode(&None, "!dos"), None);
+    }
+
+    // ── extract_year ────────────────────────────────────────────────────────
+
+    #[test]
+    fn extract_year_valid_iso_date() {
+        assert_eq!(extract_year(&Some("1993-05-01T00:00:00".to_string())), Some(1993));
+    }
+
+    #[test]
+    fn extract_year_year_only() {
+        assert_eq!(extract_year(&Some("1999".to_string())), Some(1999));
+    }
+
+    #[test]
+    fn extract_year_empty_string_returns_none() {
+        assert_eq!(extract_year(&Some(String::new())), None);
+    }
+
+    #[test]
+    fn extract_year_none_returns_none() {
+        assert_eq!(extract_year(&None), None);
+    }
+
+    #[test]
+    fn extract_year_non_numeric_returns_none() {
+        assert_eq!(extract_year(&Some("XXXX-01-01".to_string())), None);
+    }
+
+    // ── extract_language ────────────────────────────────────────────────────
+
+    #[test]
+    fn extract_language_de() {
+        assert_eq!(extract_language(&Some("Language: DE".to_string())), "DE");
+    }
+
+    #[test]
+    fn extract_language_no_tag_defaults_to_en() {
+        assert_eq!(extract_language(&Some("Playlist: Roland MT-32".to_string())), "EN");
+        assert_eq!(extract_language(&None), "EN");
+    }
+
+    #[test]
+    fn extract_language_playlist_combo() {
+        assert_eq!(
+            extract_language(&Some("Playlist: Roland MT-32; Language: FR".to_string())),
+            "FR"
+        );
+    }
+
+    #[test]
+    fn extract_language_code_uppercased() {
+        // The language code value is uppercased regardless of the casing in the XML.
+        // Note: the "Language:" tag itself must be capital-L — strip_prefix is case-sensitive.
+        assert_eq!(extract_language(&Some("Language: pl".to_string())), "PL");
+    }
+
+    // ── parse_games_xml ─────────────────────────────────────────────────────
+
+    const FIXTURE_XML: &str = r#"<?xml version="1.0"?>
+<LaunchBox>
+  <Game>
+    <Title>Space Quest V</Title>
+    <ApplicationPath>eXo\eXoDOS\!dos\SQ5\Space Quest V.bat</ApplicationPath>
+    <ReleaseDate>1993-03-01T00:00:00</ReleaseDate>
+    <Genre>Adventure</Genre>
+    <Series>Language: EN</Series>
+    <CommunityStarRating>4.2</CommunityStarRating>
+  </Game>
+  <Game>
+    <Title>Space Quest V DE</Title>
+    <ApplicationPath>eXo\eXoDOS\!dos\!german\SQ5\Space Quest V.bat</ApplicationPath>
+    <Series>Language: DE</Series>
+  </Game>
+  <Game>
+    <Title></Title>
+    <ApplicationPath>eXo\eXoDOS\!dos\EMPTY\empty.bat</ApplicationPath>
+  </Game>
+</LaunchBox>"#;
+
+    #[test]
+    fn parse_games_xml_fixture_count_and_fields() {
+        let reader = BufReader::new(FIXTURE_XML.as_bytes());
+        let games = parse_games_xml(reader, "!dos").unwrap();
+
+        // Empty-title game must be filtered out
+        assert_eq!(games.len(), 2, "empty-title game must be filtered");
+
+        let en = games.iter().find(|g| g.language == "EN").unwrap();
+        assert_eq!(en.title, "Space Quest V");
+        assert_eq!(en.shortcode.as_deref(), Some("SQ5"));
+        assert_eq!(en.year, Some(1993));
+        assert_eq!(en.genre.as_deref(), Some("Adventure"));
+        assert!((en.rating.unwrap() - 4.2).abs() < 0.001);
+
+        let de = games.iter().find(|g| g.language == "DE").unwrap();
+        assert_eq!(de.title, "Space Quest V DE");
+        assert_eq!(de.shortcode.as_deref(), Some("SQ5"));
+    }
+}

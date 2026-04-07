@@ -132,6 +132,11 @@ impl DownloadManager {
         &self.torrent_index
     }
 
+    /// Returns true if the given file index has been queued for download.
+    pub async fn is_file_selected(&self, file_index: usize) -> bool {
+        self.selected_files.read().await.contains(&file_index)
+    }
+
     /// Get the torrent root directory: <data_dir>/<torrent_name>/
     pub fn torrent_root(&self) -> PathBuf {
         self.data_dir.join(&self.torrent_index.name)
