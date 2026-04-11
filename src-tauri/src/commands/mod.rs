@@ -3,8 +3,8 @@ pub(crate) mod setup;
 mod updates;
 
 pub use games::{
-    collection_data_dir, download_game, get_config, get_download_progress, get_game,
-    get_game_variants, get_games, get_genres, get_installed_games, import_games, launch_game,
+    cancel_download, collection_data_dir, download_game, get_config, get_download_progress, get_game,
+    get_game_variants, get_games, get_genres, get_section_keys, get_installed_games, import_games, launch_game,
     set_config, toggle_favorite, uninstall_game, DbState,
 };
 pub use setup::{

@@ -71,3 +71,18 @@ export async function fetchMoreGames() {
     setLoading(false);
   }
 }
+
+/// Load all games at once — used by jumpToSection when the target section isn't rendered yet.
+export async function fetchAllGames() {
+  if (loading()) { return; }
+  setLoading(true);
+  try {
+    const result: GameList = await getGames(1, totalGames() || 9999, searchQuery(), genreFilter(), sortBy(), collectionFilter());
+    setGames(result.games);
+    setHasMore(false);
+  } catch (e) {
+    setError(e instanceof Error ? e.message : String(e));
+  } finally {
+    setLoading(false);
+  }
+}

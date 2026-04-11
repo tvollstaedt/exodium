@@ -56,8 +56,22 @@ export async function toggleFavorite(id: number): Promise<boolean> {
   return invoke("toggle_favorite", { id });
 }
 
-export async function getGenres(): Promise<string[]> {
-  return invoke("get_genres");
+export async function cancelDownload(id: number): Promise<void> {
+  return invoke("cancel_download", { id });
+}
+
+export async function getGenres(collection?: string): Promise<string[]> {
+  return invoke("get_genres", { collection });
+}
+
+export async function getSectionKeys(
+  sortBy?: string,
+  query?: string,
+  genre?: string,
+  collection?: string,
+  favoritesOnly?: boolean,
+): Promise<string[]> {
+  return invoke("get_section_keys", { sortBy, query, genre, collection, favoritesOnly });
 }
 
 export async function getThumbnailDir(collection: string): Promise<string> {
@@ -149,8 +163,8 @@ export async function initDownloadManager(): Promise<boolean> {
   return invoke("init_download_manager");
 }
 
-export async function factoryReset(): Promise<void> {
-  return invoke("factory_reset");
+export async function factoryReset(deleteGameData: boolean): Promise<void> {
+  return invoke("factory_reset", { deleteGameData });
 }
 
 export async function uninstallGame(id: number): Promise<string> {

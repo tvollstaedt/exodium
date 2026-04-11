@@ -50,7 +50,7 @@ describe("API invoke mapping", () => {
   it("getGenres sends no args", async () => {
     mockInvoke.mockResolvedValue([]);
     await getGenres();
-    expect(mockInvoke).toHaveBeenCalledWith("get_genres");
+    expect(mockInvoke).toHaveBeenCalledWith("get_genres", { collection: undefined });
   });
 
   it("getGameVariants passes shortcode", async () => {

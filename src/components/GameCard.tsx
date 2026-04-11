@@ -1,144 +1,77 @@
-import { createSignal, onMount, Show, For } from "solid-js";
+import { createSignal, createEffect, Show, For } from "solid-js";
 import { Portal } from "solid-js/web";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { Progress } from "@ark-ui/solid/progress";
 import type { Game } from "../api/tauri";
-import { launchGame, getGameVariants, uninstallGame } from "../api/tauri";
-import { formatBytes } from "../util";
+import { getGameVariants } from "../api/tauri";
+import { formatBytes, parseLangEntries, langBadgeClass, performUninstall } from "../util";
 import { thumbnailDirForCollection } from "../stores/thumbnails";
-import { downloads, startGameDownload, getDownloadState } from "../stores/downloads";
-import { fetchGames, toggleFavorite } from "../stores/games";
+import { downloads, cancelGameDownload } from "../stores/downloads";
+import { toggleFavorite } from "../stores/games";
 
 interface GameCardProps {
   game: Game;
   onFavoriteChanged?: (id: number, favorited: boolean) => void;
   showFavoriteBtn?: boolean;
+  onDetail: (game: Game) => void;
 }
 
 export function GameCard(props: GameCardProps) {
   const [status, setStatus] = createSignal("");
   const [imgError, setImgError] = createSignal(false);
   const [favorited, setFavorited] = createSignal(props.game.favorited);
-  const [showLangPicker, setShowLangPicker] = createSignal(false);
   const [variants, setVariants] = createSignal<Game[]>([]);
   const [contextMenu, setContextMenu] = createSignal<{x: number, y: number} | null>(null);
   const [confirmUninstall, setConfirmUninstall] = createSignal(false);
 
-  // Pre-load variant IDs for multi-lang games so download state is visible on main card
-  onMount(async () => {
-    if (isMultiLang() && props.game.shortcode && variants().length === 0) {
-      try {
-        const v = await getGameVariants(props.game.shortcode);
-        setVariants(v);
-      } catch {}
-    }
+  // Sync favorited badge when the games store refreshes the prop externally.
+  createEffect(() => setFavorited(props.game.favorited));
+
+  // Pre-load variant IDs for multi-lang games so download state is visible on main card.
+  // createEffect re-runs when props.game.shortcode changes, handling component reuse in For loops.
+  createEffect(() => {
+    const shortcode = props.game.shortcode;
+    if (!isMultiLang() || !shortcode) { return; }
+    getGameVariants(shortcode)
+      .then((v) => { if (props.game.shortcode === shortcode) { setVariants(v); } })
+      .catch(() => {});
   });
 
   const thumbSrc = () => {
     const dir = thumbnailDirForCollection(props.game.torrent_source);
-    if (!dir || !props.game.shortcode || !props.game.has_thumbnail) return null;
+    if (!dir || !props.game.shortcode || !props.game.has_thumbnail) { return null; }
     return convertFileSrc(`${dir}/${props.game.shortcode}.jpg`);
   };
 
-  // Parse "DE:0,EN:2" format: 0=available, 1=downloading, 2=installed
-  const langEntries = () => {
-    const raw = props.game.available_languages;
-    if (!raw) {
-      const state = props.game.installed ? 2 : props.game.in_library ? 1 : 0;
-      return [{ lang: props.game.language, state }];
-    }
-    return raw.split(",").map((entry) => {
-      const [lang, flag] = entry.split(":");
-      return { lang, state: parseInt(flag) || 0 };
-    });
-  };
-  const availLangs = () => langEntries().map((e) => e.lang);
-  const isMultiLang = () => availLangs().length > 1;
-
-  const langBadgeClass = (state: number) => {
-    if (state === 2) return "lang-installed";   // green
-    if (state === 1) return "lang-downloading"; // amber
-    return "";                                   // blue (default)
-  };
+  const langEntries = () => parseLangEntries(props.game);
+  const isMultiLang = () => langEntries().length > 1;
 
   // Read download state — check primary game and any loaded variants
   const dlState = () => {
     const dl = downloads();
-    if (props.game.id != null && dl[props.game.id]) return dl[props.game.id];
-    // Check loaded variants
+    if (props.game.id != null && dl[props.game.id]) { return dl[props.game.id]; }
     for (const v of variants()) {
-      if (v.id != null && dl[v.id]?.downloading) return dl[v.id];
+      if (v.id != null && dl[v.id]?.downloading) { return dl[v.id]; }
     }
     return undefined;
   };
 
-  const handleDownload = (gameId: number) => {
-    setShowLangPicker(false);
-    startGameDownload(gameId);
-  };
-
-  const handleUninstall = async (gameId: number) => {
-    setShowLangPicker(false);
-    try {
-      setStatus("Uninstalling...");
-      await uninstallGame(gameId);
-      // Refresh everything
-      fetchGames();
-      if (props.game.shortcode) {
-        const v = await getGameVariants(props.game.shortcode).catch(() => []);
-        setVariants(v);
-      }
-      setStatus("Uninstalled");
-      setTimeout(() => setStatus(""), 2000);
-    } catch (e) {
-      setStatus(`Error: ${String(e)}`);
-      setTimeout(() => setStatus(""), 3000);
-    }
-  };
-
-  const handleLaunch = async (gameId: number) => {
-    setShowLangPicker(false);
-    setStatus("Launching...");
-    try {
-      const result = await launchGame(gameId);
-      setStatus(result);
-    } catch (e) {
-      setStatus(`Error: ${e}`);
-    }
-    setTimeout(() => setStatus(""), 3000);
-  };
-
   const handleContextMenu = (e: MouseEvent) => {
-    if ((!props.game.installed && !props.game.in_library) || props.game.id == null) return;
+    if ((!props.game.installed && !props.game.in_library) || props.game.id == null) { return; }
     e.preventDefault();
     setConfirmUninstall(false);
     setContextMenu({ x: e.clientX, y: e.clientY });
   };
 
-  const handleClick = async (e: MouseEvent) => {
+  const handleContextUninstall = async () => {
+    setContextMenu(null);
+    if (props.game.id == null) { return; }
+    await performUninstall(props.game.id, setStatus);
+  };
+
+  const handleClick = (e: MouseEvent) => {
     e.stopPropagation();
-    if (props.game.id == null) return;
-
-    if (isMultiLang() && props.game.shortcode) {
-      try {
-        const v = await getGameVariants(props.game.shortcode);
-        setVariants(v);
-        setShowLangPicker(true);
-      } catch (err) {
-        setStatus(`Error: ${err}`);
-      }
-      return;
-    }
-
-    // Single language
-    if (props.game.installed) {
-      await handleLaunch(props.game.id);
-    } else if (props.game.game_torrent_index != null && !dlState()?.downloading) {
-      handleDownload(props.game.id);
-    } else if (!props.game.game_torrent_index) {
-      setStatus("No download available");
-      setTimeout(() => setStatus(""), 2000);
-    }
+    props.onDetail(props.game);
   };
 
   const handleToggleFavorite = async (e: MouseEvent) => {
@@ -155,12 +88,11 @@ export function GameCard(props: GameCardProps) {
     }
   };
 
-  const currentStatus = () => dlState()?.status || status();
   const currentProgress = () => dlState()?.progress ?? 0;
   const isDownloading = () => dlState()?.downloading ?? false;
 
   return (
-    <div class={`game-card ${props.game.installed || props.game.in_library ? "installed" : ""}`} onContextMenu={handleContextMenu}>
+    <div class={`game-card ${props.game.installed || props.game.in_library ? "installed" : ""}`} onContextMenu={handleContextMenu} data-game-id={props.game.id != null ? String(props.game.id) : undefined}>
       <div onClick={handleClick}>
         <Show when={thumbSrc() && !imgError()}>
           <img
@@ -185,20 +117,37 @@ export function GameCard(props: GameCardProps) {
                 </span>
               )}
             </For>
-            <Show when={!props.game.in_library && props.game.download_size && !isMultiLang() && !isDownloading()}>
-              <span class="badge badge-size">
-                {formatBytes(props.game.download_size!)}
-              </span>
+          </div>
+          <div class="game-card-action-bar">
+            <Show when={status()}>
+              <span class="card-action-label action-downloading">{status()}</span>
             </Show>
-            <Show when={isDownloading()}>
-              <Progress.Root value={currentProgress() * 100} class="ark-progress mini">
-                <Progress.Track class="ark-progress-track">
-                  <Progress.Range class="ark-progress-range" />
-                </Progress.Track>
-              </Progress.Root>
+            <Show when={!status()}>
+              <Show when={isDownloading()}>
+                <Progress.Root value={currentProgress() * 100} class="ark-progress mini">
+                  <Progress.Track class="ark-progress-track">
+                    <Progress.Range class="ark-progress-range" />
+                  </Progress.Track>
+                </Progress.Root>
+                <span class="card-action-label action-downloading">{dlState()?.status}</span>
+                <Show when={props.game.id != null}>
+                  <button class="card-cancel-btn" title="Cancel download"
+                    onClick={(e) => { e.stopPropagation(); cancelGameDownload(props.game.id!); }}>✕</button>
+                </Show>
+              </Show>
+              <Show when={!isDownloading() && props.game.installed}>
+                <span class="card-action-label action-installed">▶ Play</span>
+              </Show>
+              <Show when={!isDownloading() && !props.game.installed && props.game.in_library}>
+                <span class="card-action-label action-incomplete">⚠ Incomplete</span>
+              </Show>
+              <Show when={!isDownloading() && !props.game.installed && !props.game.in_library}>
+                <span class="card-action-label action-download">
+                  {props.game.download_size ? `↓ ${formatBytes(props.game.download_size)}` : "↓ Download"}
+                </span>
+              </Show>
             </Show>
           </div>
-          {currentStatus() && <div class="game-card-status">{currentStatus()}</div>}
         </div>
       </div>
 
@@ -216,8 +165,7 @@ export function GameCard(props: GameCardProps) {
           <div class="context-menu" style={{ left: `${contextMenu()!.x}px`, top: `${contextMenu()!.y}px` }}>
             <button class="context-menu-item danger" onMouseDown={(e) => e.stopPropagation()} onClick={() => {
               if (confirmUninstall()) {
-                setContextMenu(null);
-                handleUninstall(props.game.id!);
+                handleContextUninstall();
               } else {
                 setConfirmUninstall(true);
               }
@@ -226,46 +174,6 @@ export function GameCard(props: GameCardProps) {
             </button>
           </div>
         </Portal>
-      </Show>
-
-      <Show when={showLangPicker()}>
-        <div class="lang-picker-backdrop" onClick={() => setShowLangPicker(false)} />
-        <div class="lang-picker">
-          <div class="lang-picker-title">Select version</div>
-          <For each={variants()}>
-            {(variant) => {
-              const vDl = () => variant.id != null ? getDownloadState(variant.id) : undefined;
-              return (
-                <div class={`lang-picker-item ${variant.installed ? "is-installed" : ""}`}>
-                  <span class="badge badge-lang">{variant.language}</span>
-                  <span class="lang-picker-label">{variant.title}</span>
-                  <Show when={vDl()?.downloading}>
-                    <span class="lang-picker-action action-download">{vDl()!.status}</span>
-                  </Show>
-                  <Show when={!vDl()?.downloading && variant.installed}>
-                    <button class="lang-picker-btn action-play" onClick={(e) => { e.stopPropagation(); handleLaunch(variant.id!); }}>
-                      ▶ Play
-                    </button>
-                    <button class="lang-picker-btn action-uninstall" onClick={(e) => { e.stopPropagation(); handleUninstall(variant.id!); }}>
-                      ✕
-                    </button>
-                  </Show>
-                  <Show when={!vDl()?.downloading && !variant.installed}>
-                    <button
-                      class="lang-picker-btn action-download"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (variant.game_torrent_index != null) handleDownload(variant.id!);
-                      }}
-                    >
-                      {variant.game_torrent_index != null ? `↓ ${formatBytes(variant.download_size ?? 0)}` : "—"}
-                    </button>
-                  </Show>
-                </div>
-              );
-            }}
-          </For>
-        </div>
       </Show>
     </div>
   );

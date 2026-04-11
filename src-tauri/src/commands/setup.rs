@@ -140,10 +140,18 @@ pub async fn init_download_manager(
             match DownloadManager::new(&torrent_path, &col_data_path).await {
                 Ok(mgr) => {
                     // Store the torrent infohash so the update-checker can compare later
-                    if let Ok(hash) = TorrentIndex::infohash(&torrent_path) {
-                        if let Ok(conn) = db_state.0.lock() {
-                            let _ = queries::set_config(&conn, &format!("{}_infohash", col.id), &hash);
+                    match TorrentIndex::infohash(&torrent_path) {
+                        Ok(hash) => {
+                            match db_state.0.lock() {
+                                Ok(conn) => {
+                                    if let Err(e) = queries::set_config(&conn, &format!("{}_infohash", col.id), &hash) {
+                                        log::warn!("Failed to save infohash for {}: {}", col.id, e);
+                                    }
+                                }
+                                Err(e) => log::warn!("Failed to lock DB for infohash write ({}): {}", col.id, e),
+                            }
                         }
+                        Err(e) => log::warn!("Failed to compute infohash for {}: {}", col.id, e),
                     }
 
                     // Extract bundled emulator configs if available
@@ -184,19 +192,41 @@ pub async fn init_download_manager(
 pub async fn factory_reset(
     db_state: State<'_, DbState>,
     torrent_state: State<'_, TorrentState>,
+    delete_game_data: bool,
 ) -> Result<(), String> {
+    // Read data_dir before clearing config (Mutex must not be held across await)
+    let data_dir = if delete_game_data {
+        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        queries::get_config(&conn, "data_dir").map_err(|e| e.to_string())?
+    } else {
+        None
+    };
+
     // Drop all download managers
     torrent_state.0.write().await.clear();
 
     // Clear all tables
-    let conn = db_state.0.lock().map_err(|e| e.to_string())?;
-    conn.execute_batch(
-        "DELETE FROM games; DELETE FROM downloads; DELETE FROM images;
-         DELETE FROM playlists; DELETE FROM playlist_games; DELETE FROM config;",
-    )
-    .map_err(|e| e.to_string())?;
+    {
+        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        conn.execute_batch(
+            "DELETE FROM games; DELETE FROM downloads; DELETE FROM images;
+             DELETE FROM playlists; DELETE FROM playlist_games; DELETE FROM config;",
+        )
+        .map_err(|e| e.to_string())?;
+    }
 
-    log::info!("Factory reset completed");
+    // Optionally delete game data folder
+    if let Some(dir) = data_dir {
+        if !dir.is_empty() {
+            let path = std::path::Path::new(&dir);
+            if path.exists() {
+                std::fs::remove_dir_all(path).map_err(|e| e.to_string())?;
+                log::info!("Deleted game data folder: {}", dir);
+            }
+        }
+    }
+
+    log::info!("Factory reset completed (delete_game_data={})", delete_game_data);
     Ok(())
 }
 

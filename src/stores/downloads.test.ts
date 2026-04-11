@@ -104,8 +104,8 @@ describe("downloads state machine", () => {
     expect(getDownloadState(102)?.status).toBe("Installed!");
     expect(getDownloadState(102)?.downloading).toBe(false);
 
-    // After 3 more seconds, the entry should be removed
-    await vi.advanceTimersByTimeAsync(3100);
+    // After 5 more seconds, the entry should be removed (delay extended to 5000ms)
+    await vi.advanceTimersByTimeAsync(5100);
     expect(getDownloadState(102)).toBeUndefined();
   });
 

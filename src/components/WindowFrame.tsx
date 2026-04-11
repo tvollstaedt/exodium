@@ -1,15 +1,11 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
-const EDGE_SIZE = 6;
-
-/**
- * Invisible resize edges around the window.
- * Must be placed as the first child of the root element.
- */
+// Invisible resize edges around the window. Must be placed as the first child of the root element.
 export function WindowFrame() {
   const win = getCurrentWindow();
 
-  const startResize = (direction: string) => async (e: MouseEvent) => {
+  type ResizeDirection = "North" | "South" | "East" | "West" | "NorthEast" | "NorthWest" | "SouthEast" | "SouthWest";
+  const startResize = (direction: ResizeDirection) => async (e: MouseEvent) => {
     e.preventDefault();
     await (win as any).startResizing(direction);
   };

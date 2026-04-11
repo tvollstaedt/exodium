@@ -67,7 +67,7 @@ pub fn get_games(
 ) -> Result<GameList, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     let page = page.unwrap_or(1);
-    let per_page = per_page.unwrap_or(50);
+    let per_page = per_page.unwrap_or(50).min(500);
     let query = query.unwrap_or_default();
     let genre = genre.unwrap_or_default();
     let sort_by = sort_by.unwrap_or_default();
@@ -83,15 +83,39 @@ pub fn get_games(
 
     let total = queries::count_games_filtered(&conn, &f).map_err(|e| e.to_string())?;
     let games = queries::fetch_games_filtered(&conn, page, per_page, &f).map_err(|e| e.to_string())?;
-    let (games, total) = (games, total);
 
     Ok(GameList { games, total })
 }
 
 #[tauri::command]
-pub fn get_genres(state: State<DbState>) -> Result<Vec<String>, String> {
+pub fn get_genres(state: State<DbState>, collection: Option<String>) -> Result<Vec<String>, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    queries::get_genres(&conn).map_err(|e| e.to_string())
+    let collection = collection.unwrap_or_default();
+    queries::get_genres(&conn, &collection).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_section_keys(
+    state: State<DbState>,
+    sort_by: Option<String>,
+    query: Option<String>,
+    genre: Option<String>,
+    collection: Option<String>,
+    favorites_only: Option<bool>,
+) -> Result<Vec<String>, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let sort_by = sort_by.unwrap_or_default();
+    let query = query.unwrap_or_default();
+    let genre = genre.unwrap_or_default();
+    let collection = collection.unwrap_or_default();
+    let f = queries::GameFilter {
+        query: &query,
+        genre: &genre,
+        sort_by: &sort_by,
+        collection: &collection,
+        favorites_only: favorites_only.unwrap_or(false),
+    };
+    queries::get_section_keys(&conn, &f).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -180,10 +204,16 @@ pub async fn download_game(
 
     let source = game.torrent_source.as_deref().unwrap_or("eXoDOS");
 
-    let guard = torrent_state.0.read().await;
-    let manager = guard
-        .get(source)
-        .ok_or_else(|| format!("Download manager for '{}' not initialized.", source))?;
+    // Clone Arc references and immediately drop the guard so we don't hold it across awaits.
+    let (manager, main_mgr_opt) = {
+        let guard = torrent_state.0.read().await;
+        let manager = guard
+            .get(source)
+            .cloned()
+            .ok_or_else(|| format!("Download manager for '{}' not initialized.", source))?;
+        let main_mgr = guard.get("eXoDOS").cloned();
+        (manager, main_mgr)
+    };
 
     let mut files = vec![game_idx];
     if let Some(gd_idx) = game.gamedata_torrent_index {
@@ -191,7 +221,7 @@ pub async fn download_game(
     }
 
     // Also queue !DOSmetadata.zip (DOSBox configs) if not already extracted
-    if let Some(main_mgr) = guard.get("eXoDOS") {
+    if let Some(ref main_mgr) = main_mgr_opt {
         let main_prefix = collection_game_prefix("eXoDOS");
         let main_segment = crate::commands::setup::collection_def("eXoDOS")
             .map(|c| c.shortcode_segment)
@@ -236,10 +266,16 @@ pub async fn get_download_progress(
         }
     };
 
-    let guard = torrent_state.0.read().await;
-    let manager = match guard.get(&source) {
-        Some(m) => m,
-        None => return Ok(None),
+    // Clone Arc references and drop the guard immediately — the guard must not be held
+    // across any .await point to avoid blocking concurrent writers.
+    let (manager, main_mgr_opt) = {
+        let guard = torrent_state.0.read().await;
+        let manager = match guard.get(&source).cloned() {
+            Some(m) => m,
+            None => return Ok(None),
+        };
+        let main_mgr = guard.get("eXoDOS").cloned();
+        (manager, main_mgr)
     };
 
     let mut progress = manager.file_progress(game_idx).await;
@@ -259,7 +295,7 @@ pub async fn get_download_progress(
     }
 
     // Extract !DOSmetadata.zip if it just finished downloading (check main eXoDOS manager)
-    if let Some(main_mgr) = guard.get("eXoDOS") {
+    if let Some(ref main_mgr) = main_mgr_opt {
         if let Some(dosbox_meta) = main_mgr.index().find_dosbox_metadata_zip() {
             if main_mgr.is_file_complete(dosbox_meta.index).await {
                 if let Some(zip_path) = main_mgr.file_output_path(dosbox_meta.index) {
@@ -353,7 +389,7 @@ pub async fn get_download_progress(
                     // previous poll already spawned a re-request), skip spawning again to avoid
                     // a new task every second while librqbit assembles the file.
                     if !manager.is_file_selected(game_idx).await {
-                        let mgr = std::sync::Arc::clone(manager);
+                        let mgr = manager.clone();
                         tauri::async_runtime::spawn(async move {
                             let _ = mgr.download_files(vec![game_idx]).await;
                         });
@@ -369,6 +405,48 @@ pub async fn get_download_progress(
     }
 
     Ok(progress)
+}
+
+/// Cancel an in-progress download: deselects the file from the torrent, then clears in_library.
+/// Deselect happens first so the DB and torrent state stay consistent even if one step fails.
+#[tauri::command]
+pub async fn cancel_download(
+    db_state: State<'_, DbState>,
+    torrent_state: State<'_, TorrentState>,
+    id: i64,
+) -> Result<(), String> {
+    let (game_idx, gamedata_idx, source) = {
+        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let game = queries::fetch_game_by_id(&conn, id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("Game {} not found", id))?;
+        (
+            game.game_torrent_index.map(|i| i as usize),
+            game.gamedata_torrent_index.map(|i| i as usize),
+            game.torrent_source.unwrap_or_else(|| "eXoDOS".to_string()),
+        )
+    };
+
+    // Deselect from torrent first — if this fails silently, we still want to clear the DB flag.
+    {
+        let guard = torrent_state.0.read().await;
+        if let Some(manager) = guard.get(&source) {
+            if let Some(idx) = game_idx {
+                manager.deselect_file(idx).await;
+            }
+            if let Some(idx) = gamedata_idx {
+                manager.deselect_file(idx).await;
+            }
+        }
+    }
+
+    // Clear DB flag after torrent deselection.
+    {
+        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        queries::clear_in_library(&conn, id).map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
 }
 
 /// Uninstall a game: back up saves, delete game files, free disk space.
@@ -431,10 +509,15 @@ pub async fn uninstall_game(
                     let _ = std::fs::remove_dir_all(&save_dir);
                 }
                 // Rename is the fastest way to "back up" — atomic move
-                if let Err(_) = std::fs::rename(dir, &save_dir) {
+                if let Err(e) = std::fs::rename(dir, &save_dir) {
                     // Rename failed (cross-device?), fall back to copy + delete
-                    let _ = copy_dir_recursive(dir, &save_dir);
-                    let _ = std::fs::remove_dir_all(dir);
+                    log::warn!("Rename to save dir failed ({}), falling back to copy", e);
+                    if let Err(e) = copy_dir_recursive(dir, &save_dir) {
+                        log::error!("Failed to back up game directory '{}': {}", dir.display(), e);
+                        // Don't delete the source if backup failed
+                    } else {
+                        let _ = std::fs::remove_dir_all(dir);
+                    }
                 }
                 log::info!("Backed up saves to {}", save_dir.display());
             }

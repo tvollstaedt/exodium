@@ -12,6 +12,7 @@ interface SelectProps {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  class?: string;
 }
 
 export function Select(props: SelectProps) {
@@ -24,6 +25,7 @@ export function Select(props: SelectProps) {
 
   return (
     <ArkSelect.Root
+      class={props.class}
       collection={collection()}
       value={props.value ? [props.value] : []}
       onValueChange={(details) => {

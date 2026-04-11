@@ -88,10 +88,13 @@ function App() {
   };
 
   const [showResetDialog, setShowResetDialog] = createSignal(false);
+  const [deleteGameData, setDeleteGameData] = createSignal(false);
 
   const confirmReset = async () => {
+    const doDelete = deleteGameData();
     setShowResetDialog(false);
-    await factoryReset();
+    setDeleteGameData(false);
+    await factoryReset(doDelete);
     setPhase("setup");
     setShowSettings(false);
     setDataDir("");
@@ -127,7 +130,7 @@ function App() {
             </Tooltip.Root>
             <Tooltip.Root openDelay={400}>
               <Tooltip.Trigger asChild={(props) =>
-                <button {...props()} class="icon-btn" onClick={() => setShowSettings(!showSettings())}>
+                <button {...props()} class="icon-btn" onClick={() => setShowSettings(true)}>
                   &#9881;
                 </button>
               } />
@@ -136,34 +139,57 @@ function App() {
           </div>
           <WindowControls />
         </div>
-        <Show when={showSettings()}>
-          <div class="settings-panel">
-            <div class="setting-row">
-              <span class="setting-label">Data directory:</span>
-              <span class="setting-value">{dataDir() || "Not set"}</span>
-              <button class="btn-small" onClick={handleChangeDataDir}>Change</button>
-            </div>
-            <div class="settings-divider" />
-            <div class="setting-row">
-              <span class="setting-label">Reset:</span>
-              <button class="btn-danger" onClick={() => setShowResetDialog(true)}>Factory Reset</button>
-              <span class="setting-hint">Clears all data and returns to collection selection</span>
-            </div>
-          </div>
-        </Show>
 
-        <Dialog.Root open={showResetDialog()} onOpenChange={(e) => setShowResetDialog(e.open)}>
+        <Dialog.Root open={showSettings()} onOpenChange={(e) => setShowSettings(e.open)}>
+          <Portal>
+            <Dialog.Backdrop class="ark-dialog-backdrop" />
+            <Dialog.Positioner class="ark-dialog-positioner">
+              <Dialog.Content class="ark-dialog-content ark-dialog-settings">
+                <Dialog.Title class="ark-dialog-title">Settings</Dialog.Title>
+                <div class="settings-body">
+                  <div class="setting-row">
+                    <span class="setting-label">Data directory</span>
+                    <span class="setting-value">{dataDir() || "Not set"}</span>
+                    <button class="btn-small" onClick={handleChangeDataDir}>Change</button>
+                  </div>
+                  <div class="settings-divider" />
+                  <div class="setting-row">
+                    <span class="setting-label">Factory Reset</span>
+                    <span class="setting-hint">Clears all data and returns to collection selection</span>
+                    <button class="btn-danger" onClick={() => setShowResetDialog(true)}>Reset…</button>
+                  </div>
+                </div>
+                <div class="ark-dialog-actions">
+                  <Dialog.CloseTrigger class="btn-secondary">Close</Dialog.CloseTrigger>
+                </div>
+              </Dialog.Content>
+            </Dialog.Positioner>
+          </Portal>
+        </Dialog.Root>
+
+        <Dialog.Root open={showResetDialog()} onOpenChange={(e) => { setShowResetDialog(e.open); if (!e.open) { setDeleteGameData(false); } }}>
           <Portal>
             <Dialog.Backdrop class="ark-dialog-backdrop" />
             <Dialog.Positioner class="ark-dialog-positioner">
               <Dialog.Content class="ark-dialog-content">
                 <Dialog.Title class="ark-dialog-title">Factory Reset</Dialog.Title>
                 <Dialog.Description class="ark-dialog-desc">
-                  This will delete all imported game data and settings. This cannot be undone.
+                  Clears the Exodian database and all settings. Your downloaded game files stay on disk and can be re-imported later.
                 </Dialog.Description>
+                <label class="reset-option">
+                  <input
+                    type="checkbox"
+                    checked={deleteGameData()}
+                    onChange={(e) => setDeleteGameData(e.currentTarget.checked)}
+                  />
+                  <span>Also delete game data folder{dataDir() ? ` (${dataDir()})` : ""}</span>
+                </label>
+                <Show when={deleteGameData()}>
+                  <p class="reset-warning">This will permanently delete all downloaded game files. This cannot be undone.</p>
+                </Show>
                 <div class="ark-dialog-actions">
                   <Dialog.CloseTrigger class="btn-secondary">Cancel</Dialog.CloseTrigger>
-                  <button class="btn-danger" onClick={confirmReset}>Reset Everything</button>
+                  <button class="btn-danger" onClick={confirmReset}>Reset</button>
                 </div>
               </Dialog.Content>
             </Dialog.Positioner>

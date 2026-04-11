@@ -283,6 +283,18 @@ impl DownloadManager {
         }
     }
 
+    /// Remove a file from the active selection, telling librqbit to stop prioritising it.
+    /// Holds the write lock across the session update to keep selected_files and the
+    /// torrent session in sync — no other caller can observe a partially-updated state.
+    pub async fn deselect_file(&self, file_index: usize) {
+        let mut selected = self.selected_files.write().await;
+        selected.remove(&file_index);
+        let handle_guard = self.handle.read().await;
+        if let Some(ref handle) = *handle_guard {
+            let _ = self.session.update_only_files(handle, &*selected).await;
+        }
+    }
+
     /// Check if a specific file has finished downloading.
     pub async fn is_file_complete(&self, file_index: usize) -> bool {
         self.file_progress(file_index)

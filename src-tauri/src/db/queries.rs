@@ -127,6 +127,11 @@ pub fn set_in_library(conn: &Connection, game_id: i64) -> DbResult<()> {
     Ok(())
 }
 
+pub fn clear_in_library(conn: &Connection, game_id: i64) -> DbResult<()> {
+    conn.execute("UPDATE games SET in_library = 0 WHERE id = ?1", params![game_id])?;
+    Ok(())
+}
+
 /// Mark a game as installed (also sets in_library).
 pub fn set_game_installed(conn: &Connection, game_id: i64, installed: bool) -> DbResult<()> {
     conn.execute(
@@ -199,8 +204,9 @@ fn order_clause(sort_by: &str) -> &str {
     match sort_by {
         "year_asc" => "ORDER BY COALESCE(year, 9999) ASC, title ASC",
         "year_desc" => "ORDER BY COALESCE(year, 0) DESC, title ASC",
-        "rating" => "ORDER BY COALESCE(rating, 0) DESC, title ASC",
+        "rating" => "ORDER BY COALESCE(rating, -1) DESC, title ASC",
         "title_desc" => "ORDER BY title DESC",
+        "genre" => "ORDER BY COALESCE(genre, 'zzz') ASC, title ASC",
         _ => "ORDER BY title ASC",
     }
 }
@@ -247,9 +253,6 @@ pub fn fetch_games_filtered(
     Ok(games)
 }
 
-fn offset_val(page: usize, per_page: usize) -> usize {
-    (page.saturating_sub(1)) * per_page
-}
 
 /// Get all language variants for a shortcode.
 pub fn fetch_game_variants(conn: &Connection, shortcode: &str) -> DbResult<Vec<Game>> {
@@ -265,10 +268,16 @@ pub fn fetch_game_variants(conn: &Connection, shortcode: &str) -> DbResult<Vec<G
 }
 
 /// Get all distinct genres (split from semicolon-separated values).
-pub fn get_genres(conn: &Connection) -> DbResult<Vec<String>> {
-    let mut stmt = conn.prepare_cached("SELECT DISTINCT genre FROM games WHERE genre IS NOT NULL AND genre != ''")?;
+pub fn get_genres(conn: &Connection, collection: &str) -> DbResult<Vec<String>> {
+    let (sql, params) = if collection.is_empty() {
+        ("SELECT DISTINCT genre FROM games WHERE genre IS NOT NULL AND genre != ''".to_string(), vec![])
+    } else {
+        ("SELECT DISTINCT genre FROM games WHERE genre IS NOT NULL AND genre != '' AND torrent_source = ?1".to_string(),
+         vec![collection.to_string()])
+    };
+    let mut stmt = conn.prepare_cached(&sql)?;
     let raw: Vec<String> = stmt
-        .query_map([], |row| row.get(0))?
+        .query_map(rusqlite::params_from_iter(&params), |row| row.get(0))?
         .filter_map(|r| r.ok())
         .collect();
 
@@ -283,10 +292,62 @@ pub fn get_genres(conn: &Connection) -> DbResult<Vec<String>> {
     Ok(genres)
 }
 
+/// Return the distinct section-header keys for the current filter + sort, matching
+/// the groupKey() logic on the frontend. Used to populate the jump bar before all
+/// games are loaded via infinite scroll.
+pub fn get_section_keys(conn: &Connection, f: &GameFilter) -> DbResult<Vec<String>> {
+    let (where_clause, params) = build_where_clause(f);
+
+    let (select_expr, order_expr) = match f.sort_by {
+        "title" => (
+            "CASE WHEN UPPER(SUBSTR(COALESCE(sort_title,title),1,1)) GLOB '[A-Z]' \
+             THEN UPPER(SUBSTR(COALESCE(sort_title,title),1,1)) ELSE '#' END",
+            "key ASC",
+        ),
+        "title_desc" => (
+            "CASE WHEN UPPER(SUBSTR(COALESCE(sort_title,title),1,1)) GLOB '[A-Z]' \
+             THEN UPPER(SUBSTR(COALESCE(sort_title,title),1,1)) ELSE '#' END",
+            "key DESC",
+        ),
+        "year_asc"  => ("COALESCE(CAST(year AS TEXT),'Unknown')", "COALESCE(year,9999) ASC"),
+        "year_desc" => ("COALESCE(CAST(year AS TEXT),'Unknown')", "COALESCE(year,0) DESC"),
+        "genre"     => ("COALESCE(genre,'Unknown')",               "COALESCE(genre,'zzz') ASC"),
+        "rating"    => ("CAST(ROUND(COALESCE(rating,-1)) AS INTEGER)", "COALESCE(rating,-1) DESC"),
+        _           => return Ok(vec![]),
+    };
+
+    let sql = format!(
+        "SELECT DISTINCT {select} as key FROM games {where_clause} ORDER BY {order}",
+        select = select_expr,
+        where_clause = where_clause,
+        order = order_expr,
+    );
+
+    let mut stmt = conn.prepare_cached(&sql)?;
+    let raw: Vec<String> = stmt
+        .query_map(rusqlite::params_from_iter(&params), |row| row.get::<_, String>(0))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    if f.sort_by == "rating" {
+        return Ok(raw.iter().map(|s| {
+            match s.parse::<i64>() {
+                Ok(n) if n >= 0 => {
+                    let n = n.clamp(0, 5) as usize;
+                    "★".repeat(n) + &"☆".repeat(5 - n)
+                }
+                _ => "Unrated".to_string(),
+            }
+        }).collect());
+    }
+
+    Ok(raw)
+}
+
 /// Fetch installed games — flat list, one row per installed variant.
 pub fn fetch_installed_games(conn: &Connection) -> DbResult<Vec<Game>> {
     let sql = format!(
-        "SELECT {} FROM games WHERE in_library = 1 ORDER BY title, language",
+        "SELECT {} FROM games WHERE installed = 1 ORDER BY title, language",
         GAME_COLUMNS
     );
     let mut stmt = conn.prepare(&sql)?;
@@ -560,7 +621,7 @@ mod tests {
         g2.genre = Some("Action;Puzzle".to_string());
         insert_games(&conn, &[g1, g2]).unwrap();
 
-        let genres = get_genres(&conn).unwrap();
+        let genres = get_genres(&conn, "").unwrap();
         assert!(genres.contains(&"Action".to_string()));
         assert!(genres.contains(&"Adventure".to_string()));
         assert!(genres.contains(&"Puzzle".to_string()));
