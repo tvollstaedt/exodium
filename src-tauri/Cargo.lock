@@ -1362,7 +1362,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "exodian"
+name = "exodium"
 version = "0.1.0"
 dependencies = [
  "anyhow",
