@@ -15,7 +15,7 @@ pub enum DbError {
 
 pub type DbResult<T> = Result<T, DbError>;
 
-/// Open (or create) the Exodian database at the given path.
+/// Open (or create) the Exodium database at the given path.
 pub fn open(path: &Path) -> DbResult<Connection> {
     let conn = Connection::open(path)?;
     conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;

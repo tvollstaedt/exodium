@@ -1,13 +1,13 @@
 [package]
-name = "exodian"
+name = "exodium"
 version = "0.1.0"
 description = "Cross-platform eXoDOS game launcher"
 authors = ["redfox"]
 edition = "2021"
-default-run = "exodian"
+default-run = "exodium"
 
 [lib]
-name = "exodian_lib"
+name = "exodium_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [[bin]]

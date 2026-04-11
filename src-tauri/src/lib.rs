@@ -27,8 +27,8 @@ use commands::{
 fn install_bundled_db(target: &Path) -> Result<(), String> {
     let metadata_dir = bundled_metadata_dir()?;
 
-    let bundled_db = metadata_dir.join("exodian.db");
-    let bundled_db_gz = metadata_dir.join("exodian.db.gz");
+    let bundled_db = metadata_dir.join("exodium.db");
+    let bundled_db_gz = metadata_dir.join("exodium.db.gz");
 
     // Clean up any stale WAL/SHM files
     let _ = std::fs::remove_file(target.with_extension("db-wal"));
@@ -70,7 +70,7 @@ pub fn run() {
                 .app_data_dir()
                 .expect("failed to resolve app data dir");
             std::fs::create_dir_all(&data_dir)?;
-            let db_path = data_dir.join("exodian.db");
+            let db_path = data_dir.join("exodium.db");
 
             log::info!("Database path: {}", db_path.display());
 

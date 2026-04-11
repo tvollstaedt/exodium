@@ -10,7 +10,7 @@
 #   pnpm run init-dev --all-packs  # download all language packs
 #
 # Environment:
-#   XDO_DEV_DATA   Override the data directory (default: ~/.exodian-dev)
+#   XDO_DEV_DATA   Override the data directory (default: ~/.exodium-dev)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -142,7 +142,7 @@ validate_zip() {
 
 # ── Download eXoDOS metadata (box art source — thumbnails only) ───────────────
 
-DATA_DIR="${XDO_DEV_DATA:-$HOME/.exodian-dev}"
+DATA_DIR="${XDO_DEV_DATA:-$HOME/.exodium-dev}"
 METADATA_ZIP="$DATA_DIR/eXoDOS/Content/XODOSMetadata.zip"
 TORRENT_EXODOS="$REPO_ROOT/torrents/eXoDOS.torrent"
 
@@ -203,7 +203,7 @@ $PYTHON "$SCRIPT_DIR/gen_thumbnails.py" \
   "$METADATA_ZIP" \
   "$REPO_ROOT/metadata/MS-DOS.xml.gz" \
   "$THUMB_DIR" \
-  --db "$REPO_ROOT/metadata/exodian.db" \
+  --db "$REPO_ROOT/metadata/exodium.db" \
   $FORCE_FLAG
 
 if [[ "$WANT_GLP" -eq 1 && -s "$GLP_ZIP" ]]; then
@@ -214,7 +214,7 @@ if [[ "$WANT_GLP" -eq 1 && -s "$GLP_ZIP" ]]; then
     "$GLP_ZIP" \
     "$REPO_ROOT/metadata/GLP.xml.gz" \
     "$THUMB_DIR" \
-    --db "$REPO_ROOT/metadata/exodian.db" \
+    --db "$REPO_ROOT/metadata/exodium.db" \
     --extra-xml "$REPO_ROOT/metadata/MS-DOS.xml.gz" \
     $FORCE_FLAG
 fi
@@ -227,7 +227,7 @@ if [[ "$WANT_SLP" -eq 1 && -s "$SLP_ZIP" ]]; then
     "$SLP_ZIP" \
     "$REPO_ROOT/metadata/SLP.xml.gz" \
     "$THUMB_DIR" \
-    --db "$REPO_ROOT/metadata/exodian.db" \
+    --db "$REPO_ROOT/metadata/exodium.db" \
     --extra-xml "$REPO_ROOT/metadata/MS-DOS.xml.gz" \
     $FORCE_FLAG
 fi
@@ -240,7 +240,7 @@ if [[ "$WANT_PLP" -eq 1 && -s "$PLP_ZIP" ]]; then
     "$PLP_ZIP" \
     "$REPO_ROOT/metadata/MS-DOS.xml.gz" \
     "$THUMB_DIR" \
-    --db "$REPO_ROOT/metadata/exodian.db" \
+    --db "$REPO_ROOT/metadata/exodium.db" \
     --extra-xml "$REPO_ROOT/metadata/PLP.xml.gz" \
     $FORCE_FLAG
 fi

@@ -114,7 +114,7 @@ function App() {
       <Show when={phase() === "ready"}>
         <div class="top-bar">
           <div class="drag-region" onMouseDown={() => getCurrentWindow().startDragging()} />
-          <span class="top-bar-logo">Exodian</span>
+          <span class="top-bar-logo">Exodium</span>
           <div class="top-bar-center">
             <SearchBar />
           </div>
@@ -174,7 +174,7 @@ function App() {
               <Dialog.Content class="ark-dialog-content">
                 <Dialog.Title class="ark-dialog-title">Factory Reset</Dialog.Title>
                 <Dialog.Description class="ark-dialog-desc">
-                  Clears the Exodian database and all settings. Your downloaded game files stay on disk and can be re-imported later.
+                  Clears the Exodium database and all settings. Your downloaded game files stay on disk and can be re-imported later.
                 </Dialog.Description>
                 <label class="reset-option">
                   <input

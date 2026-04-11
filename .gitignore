@@ -16,14 +16,18 @@ src-tauri/binaries/
 
 # IDE
 .vscode/
+.idea/
 *.swp
 *~
 
 # Generated DB (uncompressed — only .db.gz ships)
-metadata/exodian.db
+metadata/*.db
 
 # Claude Code
 .claude/
+
+# Python
+scripts/__pycache__/
 
 # OS
 .DS_Store

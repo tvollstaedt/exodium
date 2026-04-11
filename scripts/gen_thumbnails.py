@@ -14,7 +14,7 @@ Usage:
     xml_gz         Matching bundled catalogue: metadata/MS-DOS.xml.gz, GLP.xml.gz, etc.
     output_dir     Destination for shortcode-keyed JPEGs (e.g. thumbnails/eXoDOS)
     --force        Overwrite already-existing thumbnails
-    --db           Path to metadata/exodian.db — used as highest-priority shortcode
+    --db           Path to metadata/exodium.db — used as highest-priority shortcode
                    source so LP-exclusive thumbnails get the correct generate_shortcode()
                    name (e.g. ElDesafi.jpg) rather than the zip bat directory name
     --extra-xml    Additional XML catalogue to merge as fallback (e.g. MS-DOS.xml.gz
@@ -157,7 +157,7 @@ def build_title_to_shortcode_from_zip(zip_path: str) -> dict[str, str]:
 
 def build_title_to_shortcode_from_db(db_path: str) -> dict[str, str]:
     """
-    Query the pre-built exodian.db for title→shortcode mappings.
+    Query the pre-built exodium.db for title→shortcode mappings.
     This is the highest-priority source because generate_db.rs is the authoritative
     shortcode generator (including LP-exclusive games via generate_shortcode()).
     """

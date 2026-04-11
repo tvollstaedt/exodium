@@ -1,5 +1,5 @@
 {
-  "name": "exodian",
+  "name": "exodium",
   "version": "0.1.0",
   "description": "Cross-platform eXoDOS game launcher",
   "type": "module",
@@ -11,8 +11,8 @@
     "tauri": "WEBKIT_DISABLE_DMABUF_RENDERER=1 tauri",
     "get-dosbox": "bash scripts/get-dosbox.sh",
     "init-dev": "bash scripts/get-dosbox.sh && bash scripts/init-dev.sh",
-    "gen-db": "cd src-tauri && cargo run --bin generate_db && cd .. && gzip -kf metadata/exodian.db",
-    "infohash": "sqlite3 \"$HOME/Library/Application Support/com.redfox.exodian/exodian.db\" \"SELECT key, value FROM config WHERE key LIKE '%infohash%';\"",
+    "gen-db": "cd src-tauri && cargo run --bin generate_db && cd .. && gzip -kf metadata/exodium.db",
+    "infohash": "sqlite3 \"$HOME/Library/Application Support/com.redfox.exodium/exodium.db\" \"SELECT key, value FROM config WHERE key LIKE '%infohash%';\"",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:all": "cargo test --manifest-path src-tauri/Cargo.toml && vitest run"

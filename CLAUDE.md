@@ -1,10 +1,10 @@
-# Exodian — Project Guide for Claude
+# Exodium — Project Guide for Claude
 
-This file is the handover document for future Claude sessions working on **Exodian**, a cross-platform eXoDOS game launcher. Read it first before touching the code.
+This file is the handover document for future Claude sessions working on **Exodium**, a cross-platform eXoDOS game launcher. Read it first before touching the code.
 
-## What is Exodian?
+## What is Exodium?
 
-Exodian replaces the Windows-only LaunchBox frontend that ships with the [eXoDOS v6](https://www.retro-exo.com/exodos.html) collection. It is a native desktop app that lets users browse, download, and launch DOS games from the eXoDOS torrents without having to download the full ~4.9 GB metadata archive upfront.
+Exodium replaces the Windows-only LaunchBox frontend that ships with the [eXoDOS v6](https://www.retro-exo.com/exodos.html) collection. It is a native desktop app that lets users browse, download, and launch DOS games from the eXoDOS torrents without having to download the full ~4.9 GB metadata archive upfront.
 
 **Core value proposition:**
 - Runs on Linux (primary target), macOS, Windows
@@ -27,7 +27,7 @@ Exodian replaces the Windows-only LaunchBox frontend that ships with the [eXoDOS
 ## Repository layout
 
 ```
-exodian/
+exodium/
 ├── CLAUDE.md                 ← this file
 ├── src/                      ← SolidJS frontend
 │   ├── api/tauri.ts          ← typed invoke() wrappers
@@ -126,7 +126,7 @@ The 4.9 GB of LaunchBox XML + images from the torrent is replaced with ~4.2 MB o
 ## Development workflow
 
 ```bash
-cd /home/redfox/exodian   # or wherever the repo lives
+cd /home/redfox/exodium   # or wherever the repo lives
 pnpm install
 
 # First time on a new machine — downloads DOSBox Staging + thumbnails:
@@ -141,7 +141,7 @@ pnpm run init-dev --force   # regenerate thumbnails even if already present
 pnpm tauri dev
 ```
 
-`init-dev` chains `get-dosbox` + thumbnail generation. Each step is idempotent — already-downloaded files are skipped. When run interactively without pack flags it prompts whether to download LP metadata. `XODOSMetadata.zip` is only used for thumbnails — the game catalogue comes from the bundled `.xml.gz` files. Downloaded ZIPs are cached under `~/.exodian-dev/` (override with `XDO_DEV_DATA=/your/path`).
+`init-dev` chains `get-dosbox` + thumbnail generation. Each step is idempotent — already-downloaded files are skipped. When run interactively without pack flags it prompts whether to download LP metadata. `XODOSMetadata.zip` is only used for thumbnails — the game catalogue comes from the bundled `.xml.gz` files. Downloaded ZIPs are cached under `~/.exodium-dev/` (override with `XDO_DEV_DATA=/your/path`).
 
 To download only the DOSBox binary (without thumbnails):
 ```bash
@@ -181,7 +181,7 @@ Use the "Factory Reset" button on the setup screen, or call the `factory_reset` 
 Last fix attempted: moved `queries::set_config(&conn, "collections", &collections_csv)` from before `spawn_blocking` into inside the blocking task, so the write happens on the same connection that does the import. **User reported: "Same error still."**
 
 Debugging steps to try next:
-1. Check `sqlite3 <data_dir>/exodian.db "SELECT key, value FROM config;"` after running setup — is `collections` actually written?
+1. Check `sqlite3 <data_dir>/exodium.db "SELECT key, value FROM config;"` after running setup — is `collections` actually written?
 2. Is the frontend passing `collections: string[]` correctly to `import_bundled_metadata`? Log the argument at the top of the command.
 3. Is `init_download_manager` reading `collections` **before** `import_bundled_metadata` has completed? There may be a race: the frontend might call `init_download_manager` as soon as setup reports ready, before the config row is committed. Check the setup flow ordering in `Setup.tsx`.
 4. Consider persisting `collections` earlier — at the start of `setup_start` instead of inside the blocking import task — so the value is stable regardless of which command reads it next.

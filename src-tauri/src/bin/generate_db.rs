@@ -1,4 +1,4 @@
-//! Build tool: generates the pre-built exodian.db from bundled XML metadata + torrents.
+//! Build tool: generates the pre-built exodium.db from bundled XML metadata + torrents.
 //!
 //! Run from src-tauri/:  cargo run --bin generate_db
 
@@ -8,11 +8,11 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::params;
 
-use exodian_lib::db;
-use exodian_lib::game_name_from_app_path;
-use exodian_lib::import::xml::parse_games_xml;
-use exodian_lib::torrent::TorrentIndex;
-use exodian_lib::COLLECTION_MAP;
+use exodium_lib::db;
+use exodium_lib::game_name_from_app_path;
+use exodium_lib::import::xml::parse_games_xml;
+use exodium_lib::torrent::TorrentIndex;
+use exodium_lib::COLLECTION_MAP;
 
 fn project_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
@@ -170,7 +170,7 @@ fn main() {
     let root = project_root();
     let metadata_dir = root.join("metadata");
     let torrents_dir = root.join("torrents");
-    let output_path = metadata_dir.join("exodian.db");
+    let output_path = metadata_dir.join("exodium.db");
 
     // Remove old DB if it exists
     let _ = std::fs::remove_file(&output_path);

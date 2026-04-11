@@ -79,7 +79,7 @@ export function Intro(props: IntroProps) {
     }}>
       <div class="intro-window-controls"><WindowControls /></div>
       <div class="intro-content">
-        <h1 class="intro-title">Exodian</h1>
+        <h1 class="intro-title">Exodium</h1>
         <p class="intro-subtitle">Select the collections you want to set up</p>
 
         <div class="collection-grid">

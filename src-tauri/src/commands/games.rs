@@ -649,7 +649,7 @@ fn patch_dosbox_conf(
             .replace('\\', "/")
     };
 
-    let patched_path = working_dir.join(".exodian_launch.conf");
+    let patched_path = working_dir.join(".exodium_launch.conf");
     std::fs::write(&patched_path, &patched)
         .map_err(|e| format!("Failed to write patched config: {}", e))?;
 
@@ -1089,7 +1089,7 @@ pub fn launch_game(app: AppHandle, db_state: State<DbState>, id: i64) -> Result<
     // This conf is written once per data_dir and reused on subsequent launches.
     #[cfg(target_os = "macos")]
     let macos_override_conf = {
-        let conf_path = std::path::Path::new(&data_dir).join("exodian_macos_dosbox.conf");
+        let conf_path = std::path::Path::new(&data_dir).join("exodium_macos_dosbox.conf");
         std::fs::write(&conf_path, "[sdl]\noutput = texture\n")
             .map_err(|e| format!("Failed to write macOS override conf: {e}"))?;
         conf_path

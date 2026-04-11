@@ -86,7 +86,7 @@ export function Setup(props: SetupProps) {
 
       <div class="setup-window-controls"><WindowControls /></div>
       <div class="setup-card">
-        <h2>Welcome to Exodian</h2>
+        <h2>Welcome to Exodium</h2>
 
         <Show when={error()}>
           <div class="error">{error()}</div>
