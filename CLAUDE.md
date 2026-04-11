@@ -126,7 +126,6 @@ The 4.9 GB of LaunchBox XML + images from the torrent is replaced with ~4.2 MB o
 ## Development workflow
 
 ```bash
-cd /home/redfox/exodium   # or wherever the repo lives
 pnpm install
 
 # First time on a new machine — downloads DOSBox Staging + thumbnails:
@@ -148,17 +147,15 @@ To download only the DOSBox binary (without thumbnails):
 pnpm run get-dosbox
 ```
 
-WebKitGTK on this machine needs the DMA-BUF renderer disabled (already wired into the dev script / env). NVIDIA + Wayland specifics are documented in `/home/redfox/CLAUDE.md`.
-
 **Factory reset** (nukes the SQLite DB + extracted games but keeps the torrent data):
 Use the "Factory Reset" button on the setup screen, or call the `factory_reset` command.
 
 **Rebuilding thumbnails**: `scripts/gen_thumbnails.py` — takes `XODOSMetadata.zip`, `metadata/MS-DOS.xml.gz`, and an output dir. Called automatically by `init-dev.sh`.
 
-## Current state (as of 2026-04-07)
+## Current state (as of 2026-04-11)
 
 ### Working
-- Full setup flow with per-collection toggle
+- Full setup flow: data dir selection, all collections enabled, `setConfig("collections", ...)` written before `initDownloadManager()`
 - Bundled metadata import (~7,600 games across eXoDOS + LPs)
 - Torrent streaming with per-collection subdirectories
 - Multi-language merged cards with language picker
@@ -170,24 +167,15 @@ Use the "Factory Reset" button on the setup screen, or call the `factory_reset` 
 - Uninstall with save-game backup to `!save/<shortcode>/`
 - Restore saves on reinstall
 - Auto-download of shared EN GameData when installing LP variants
-- "My Games" view populated immediately on download start
+- "My Games" tab: Favorites shelf + Installed shelf; populated immediately on download start
 - Shortcode-keyed thumbnails (including PL via title backfill)
 - Custom window with drag/resize/min/max/close
+- Game detail side panel (`GameDetailPanel.tsx`) — download, launch, uninstall, language picker
+- Jump bar: populated from backend `get_section_keys` for all sort modes (A–Z, genre, year, rating); clicking an unloaded letter triggers `fetchAllGames()` then scrolls
 - Test suite: `pnpm test` / `pnpm run test:all` (vitest for frontend, `cargo test` for Rust)
 
-### ⚠ Known outstanding bug — START HERE
-**The `collections` config is not persisting in the DB**, which causes `init_download_manager` to default to only the `eXoDOS` collection. Symptom: user checks SLP in the setup wizard, completes setup, but the SLP download manager is never initialized and SLP games fail to download with "downloadmanager for exodos_slp not initialized".
-
-Last fix attempted: moved `queries::set_config(&conn, "collections", &collections_csv)` from before `spawn_blocking` into inside the blocking task, so the write happens on the same connection that does the import. **User reported: "Same error still."**
-
-Debugging steps to try next:
-1. Check `sqlite3 <data_dir>/exodium.db "SELECT key, value FROM config;"` after running setup — is `collections` actually written?
-2. Is the frontend passing `collections: string[]` correctly to `import_bundled_metadata`? Log the argument at the top of the command.
-3. Is `init_download_manager` reading `collections` **before** `import_bundled_metadata` has completed? There may be a race: the frontend might call `init_download_manager` as soon as setup reports ready, before the config row is committed. Check the setup flow ordering in `Setup.tsx`.
-4. Consider persisting `collections` earlier — at the start of `setup_start` instead of inside the blocking import task — so the value is stable regardless of which command reads it next.
-5. Double-check there's no stale DB being read (WAL checkpoint issue, or reading from a different data dir than setup wrote to).
-
-Relevant files: `src-tauri/src/commands/setup.rs` (`import_bundled_metadata`, `init_download_manager`), `src/pages/Setup.tsx` (setup flow ordering).
+### Notes on collection selection
+`Intro.tsx` contains UI for per-collection selection but is **not currently wired into App.tsx** — it is dead code. `Setup.tsx` always enables all available collections. If per-collection opt-in is reinstated, the key invariant is: `setConfig("collections", ...)` must be called and awaited **before** `initDownloadManager()`.
 
 ### 9. Bundled DOSBox Staging (zero-dependency launch)
 
@@ -217,10 +205,3 @@ Thumbnail packs for production are hosted separately (GitHub Releases or similar
 - **Don't add comments to untouched code.** Only comment genuinely non-obvious logic in code you're changing.
 - **Small, focused edits.** Don't refactor beyond the ask. The codebase has been iterated on heavily and most choices are deliberate.
 - **When in doubt about a design decision, check this file first** — most recurring questions are answered above.
-
-## User context
-
-- CachyOS Linux, Intel i7-10700K + RTX 3080, KDE/Wayland
-- Has Python 3.14 and Node 20; **no Rust toolchain** on the box — `pnpm tauri dev` bootstraps it via rustup
-- Prefers concise, direct communication; no summaries at the end of responses
-- Uses German and English interchangeably; eXoDOS is frequently tested with DE variants
