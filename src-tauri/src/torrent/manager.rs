@@ -81,10 +81,12 @@ pub struct DownloadManager {
 
 impl DownloadManager {
     /// Create a shared librqbit session. Call once, then pass to `new_with_session`.
-    pub async fn create_session(data_dir: &Path) -> anyhow::Result<Arc<Session>> {
-        std::fs::create_dir_all(data_dir)?;
+    /// `session_dir` is where librqbit stores its internal state (.librqbit/).
+    /// This should be the app config directory, NOT the game data directory.
+    pub async fn create_session(session_dir: &Path) -> anyhow::Result<Arc<Session>> {
+        std::fs::create_dir_all(session_dir)?;
         let session = Session::new_with_opts(
-            data_dir.to_path_buf(),
+            session_dir.to_path_buf(),
             SessionOptions {
                 disable_dht: false,
                 disable_dht_persistence: true,

@@ -152,11 +152,17 @@ export async function setupImport(): Promise<number> {
   return invoke("setup_import");
 }
 
-export async function setupFromLocal(
-  exodosPath: string,
-  dataDir: string
-): Promise<number> {
-  return invoke("setup_from_local", { exodosPath, dataDir });
+export async function setupFromLocal(exodosPath: string): Promise<number> {
+  return invoke("setup_from_local", { exodosPath });
+}
+
+export interface ExodosValidation {
+  valid: boolean;
+  hint: string;
+}
+
+export async function validateExodosDir(path: string): Promise<ExodosValidation> {
+  return invoke("validate_exodos_dir", { path });
 }
 
 export async function initDownloadManager(): Promise<boolean> {

@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 use tokio::sync::RwLock;
 
 use crate::db;
@@ -95,6 +95,7 @@ pub struct TorrentInfo {
 /// Returns true if initialized, false if no config found.
 #[tauri::command]
 pub async fn init_download_manager(
+    app: AppHandle,
     db_state: State<'_, DbState>,
     torrent_state: State<'_, TorrentState>,
 ) -> Result<bool, String> {
@@ -128,7 +129,9 @@ pub async fn init_download_manager(
     // All collections share one librqbit session and the same data directory.
     // The torrent files have no overlapping file paths, so all four torrents
     // extract cleanly into <data_dir>/eXoDOS/ — matching the original eXoDOS layout.
-    let session = DownloadManager::create_session(&data_path)
+    // Session state (.librqbit/) is stored in the app config dir, not the game data dir.
+    let config_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let session = DownloadManager::create_session(&config_dir)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -226,6 +229,18 @@ pub async fn factory_reset(
         }
     }
 
+    // Reinstall the bundled DB so the app is immediately browsable after re-setup
+    // (without this, the DB would be empty until the next app restart)
+    {
+        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        if let Some(db_path) = conn.path().map(PathBuf::from) {
+            drop(conn);
+            if let Err(e) = crate::install_bundled_db(&db_path) {
+                log::warn!("Could not reinstall bundled DB after factory reset: {}", e);
+            }
+        }
+    }
+
     log::info!("Factory reset completed (delete_game_data={})", delete_game_data);
     Ok(())
 }
@@ -259,14 +274,14 @@ pub fn get_thumbnail_dir(
     Err("Thumbnail directory not found".to_string())
 }
 
-/// Return a default data directory path ($HOME/eXoDOS).
+/// Return the default parent directory for game storage ($HOME).
+/// The eXoDOS folder will be created inside this directory by the torrent engine.
 #[tauri::command]
 pub fn get_default_data_dir() -> Result<String, String> {
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .map_err(|_| "Cannot determine home directory".to_string())?;
-    let default = std::path::Path::new(&home).join("eXoDOS");
-    Ok(default.to_string_lossy().to_string())
+    Ok(home)
 }
 
 /// All known eXo collections.
@@ -422,15 +437,16 @@ pub async fn get_setup_status(
     let manager = match guard.get("eXoDOS") {
         Some(m) => m,
         None => {
-            // Ready if data_dir is configured (games come from bundled DB)
+            // Ready if data_dir is configured AND the game DB has content
             let (has_data_dir, count) = {
                 let conn = db_state.0.lock().map_err(|e| e.to_string())?;
                 let dir = queries::get_config(&conn, "data_dir").map_err(|e| e.to_string())?;
                 let count = queries::count_games(&conn, "").map_err(|e| e.to_string())?;
                 (dir.is_some(), count)
             };
+            let ready = has_data_dir && count > 0;
             return Ok(SetupStatus {
-                phase: if has_data_dir {
+                phase: if ready {
                     "ready".to_string()
                 } else {
                     "not_started".to_string()
@@ -438,7 +454,7 @@ pub async fn get_setup_status(
                 metadata_progress: None,
                 dosbox_metadata_progress: None,
                 games_imported: count,
-                ready: has_data_dir,
+                ready,
             });
         }
     };
@@ -645,21 +661,32 @@ fn match_torrent_indices(
 }
 
 /// Import from an existing eXoDOS directory on disk (skips metadata download).
-/// Searches for XODOSMetadata.zip or MS-DOS.xml in the given path.
+/// The user selects the eXoDOS folder itself; the parent is stored as data_dir
+/// so that new downloads land correctly inside the existing eXoDOS tree.
 #[tauri::command]
 pub async fn setup_from_local(
+    app: AppHandle,
     db_state: State<'_, DbState>,
     torrent_state: State<'_, TorrentState>,
     exodos_path: String,
-    data_dir: String,
 ) -> Result<usize, String> {
-    // Save data_dir to config
+    let root = PathBuf::from(&exodos_path);
+
+    // The data_dir is the parent of the selected eXoDOS folder.
+    // librqbit will write new downloads to <data_dir>/eXoDOS/ which equals the selected path.
+    let data_dir = root
+        .parent()
+        .ok_or("Selected path has no parent directory")?
+        .to_string_lossy()
+        .to_string();
+
+    // Save data_dir and all collections to config
     {
         let conn = db_state.0.lock().map_err(|e| e.to_string())?;
         queries::set_config(&conn, "data_dir", &data_dir).map_err(|e| e.to_string())?;
+        let all_collections = COLLECTION_MAP.iter().map(|c| c.id).collect::<Vec<_>>().join(",");
+        queries::set_config(&conn, "collections", &all_collections).map_err(|e| e.to_string())?;
     }
-
-    let root = PathBuf::from(&exodos_path);
 
     // Search for the metadata ZIP in common locations
     let zip_candidates = [
@@ -743,28 +770,94 @@ pub async fn setup_from_local(
     .await
     .map_err(|e| e.to_string())??;
 
-    // Init the download manager for future game downloads
+    // Init download managers for all collections (for future game downloads).
+    // Session state goes in the app config dir, game files in the existing eXoDOS tree.
+    let config_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let data_path = PathBuf::from(&data_dir);
-    let manager = DownloadManager::new(&torrent_path, &data_path)
-        .await
-        .map_err(|e| format!("Failed to init download manager: {}", e))?;
 
-    // Extract !DOSmetadata.zip (DOSBox configs) into the torrent root
-    if let Some(dosbox_zip) = dosbox_zip_path {
-        let torrent_root = manager.torrent_root();
-        tauri::async_runtime::spawn_blocking(move || {
-            log::info!("Extracting DOSBox configs to {}", torrent_root.display());
-            let file = std::fs::File::open(&dosbox_zip).map_err(|e| e.to_string())?;
-            let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
-            archive.extract(&torrent_root).map_err(|e| e.to_string())
-        })
+    let session = DownloadManager::create_session(&config_dir)
         .await
-        .map_err(|e| e.to_string())??;
+        .map_err(|e| format!("Failed to init session: {}", e))?;
+
+    let mut managers = torrent_state.0.write().await;
+    for col in COLLECTION_MAP {
+        if let Ok(col_torrent_path) = bundled_torrent_path(col.torrent_file) {
+            match DownloadManager::new_with_session(Arc::clone(&session), &col_torrent_path, &data_path) {
+                Ok(mgr) => {
+                    managers.insert(col.id.to_string(), Arc::new(mgr));
+                }
+                Err(e) => log::warn!("Failed to init {} download manager: {}", col.id, e),
+            }
+        }
     }
 
-    torrent_state.0.write().await.insert("eXoDOS".to_string(), Arc::new(manager));
+    // Extract !DOSmetadata.zip (DOSBox configs) into the torrent root if found
+    if let Some(dosbox_zip) = dosbox_zip_path {
+        if let Some(main_mgr) = managers.get("eXoDOS") {
+            let torrent_root = main_mgr.torrent_root();
+            let dosbox_zip = dosbox_zip.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                log::info!("Extracting DOSBox configs to {}", torrent_root.display());
+                let file = std::fs::File::open(&dosbox_zip).map_err(|e| e.to_string())?;
+                let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+                archive.extract(&torrent_root).map_err(|e| e.to_string())
+            })
+            .await
+            .map_err(|e| e.to_string())??;
+        }
+    }
 
     Ok(count)
+}
+
+/// Result of validating a candidate eXoDOS installation directory.
+#[derive(Debug, Serialize)]
+pub struct ExodosValidation {
+    pub valid: bool,
+    pub hint: String,
+}
+
+/// Check whether a directory looks like a valid eXoDOS installation.
+/// Expects the folder the user selected to BE the eXoDOS folder (e.g. ~/eXoDOS),
+/// which should contain eXo/eXoDOS/ with at least one game language subdirectory.
+#[tauri::command]
+pub fn validate_exodos_dir(path: String) -> Result<ExodosValidation, String> {
+    let root = Path::new(&path);
+    let game_root = root.join("eXo/eXoDOS");
+
+    if !game_root.is_dir() {
+        return Ok(ExodosValidation {
+            valid: false,
+            hint: "Not a valid eXoDOS folder (eXo/eXoDOS/ not found)".to_string(),
+        });
+    }
+
+    let has_games = ["!dos", "!german", "!polish", "!spanish"]
+        .iter()
+        .any(|sub| game_root.join(sub).is_dir());
+
+    if !has_games {
+        return Ok(ExodosValidation {
+            valid: false,
+            hint: "No game directories found inside eXo/eXoDOS/".to_string(),
+        });
+    }
+
+    // Count top-level game directories as a rough hint
+    let count: usize = std::fs::read_dir(&game_root)
+        .ok()
+        .map(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .filter(|e| e.path().is_dir())
+                .count()
+        })
+        .unwrap_or(0);
+
+    Ok(ExodosValidation {
+        valid: true,
+        hint: format!("Valid eXoDOS installation (~{} directories)", count),
+    })
 }
 
 /// Resolve bundled torrent file path.

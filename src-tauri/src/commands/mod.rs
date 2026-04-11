@@ -11,6 +11,6 @@ pub use setup::{
     bundled_metadata_dir, factory_reset, game_name_from_app_path,
     get_available_collections, get_default_data_dir, get_setup_status, get_thumbnail_dir,
     get_torrent_info, init_download_manager, setup_from_local, setup_import, setup_start,
-    CollectionDef, COLLECTION_MAP, TorrentState,
+    validate_exodos_dir, CollectionDef, COLLECTION_MAP, TorrentState,
 };
 pub use updates::check_for_updates;

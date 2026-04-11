@@ -20,11 +20,11 @@ use commands::{
     get_game_variants, get_games, get_genres, get_section_keys, get_installed_games, uninstall_game,
     get_setup_status, get_thumbnail_dir, get_torrent_info, import_games, init_download_manager,
     launch_game, set_config, setup_from_local, setup_import, setup_start, toggle_favorite,
-    DbState, TorrentState,
+    validate_exodos_dir, DbState, TorrentState,
 };
 
 /// Copy the bundled pre-built DB to the target path.
-fn install_bundled_db(target: &Path) -> Result<(), String> {
+pub fn install_bundled_db(target: &Path) -> Result<(), String> {
     let metadata_dir = bundled_metadata_dir()?;
 
     let bundled_db = metadata_dir.join("exodium.db");
@@ -172,6 +172,7 @@ pub fn run() {
             check_for_updates,
             toggle_favorite,
             get_section_keys,
+            validate_exodos_dir,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
