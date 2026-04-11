@@ -71,13 +71,13 @@ case "$ASSET_OS" in
     ARCHIVE="dosbox-staging-macOS-v${VERSION}.dmg"
     ;;
   Linux)
-    ARCHIVE="dosbox-staging-Linux-x86_64-v${VERSION}.tar.gz"
+    ARCHIVE="dosbox-staging-linux-x86_64-v${VERSION}.tar.xz"
     ;;
   Linux-aarch64)
-    ARCHIVE="dosbox-staging-Linux-aarch64-v${VERSION}.tar.gz"
+    ARCHIVE="dosbox-staging-linux-aarch64-v${VERSION}.tar.xz"
     ;;
   Windows)
-    ARCHIVE="dosbox-staging-Windows-v${VERSION}.zip"
+    ARCHIVE="dosbox-staging-windows-x64-v${VERSION}.zip"
     ;;
 esac
 
@@ -110,14 +110,39 @@ if [[ "$ARCHIVE" == *.dmg ]]; then
   fi
   hdiutil detach -quiet "$MOUNT_POINT"
   rm -rf "$MOUNT_POINT"
-elif [[ "$ARCHIVE" == *.tar.gz ]]; then
-  tar -xzf "$TMP_DIR/$ARCHIVE" -C "$TMP_DIR"
-  FOUND="$(find "$TMP_DIR" -name "dosbox-staging" -not -name "*.sh" -type f | head -1)"
+elif [[ "$ARCHIVE" == *.tar.xz ]]; then
+  tar -xJf "$TMP_DIR/$ARCHIVE" -C "$TMP_DIR"
+  # Upstream ships the Linux binary as plain "dosbox" at the archive root;
+  # older releases used "dosbox-staging". Accept both, skip man pages & scripts.
+  FOUND="$(find "$TMP_DIR" -type f \( -name "dosbox-staging" -o -name "dosbox" \) -not -name "*.sh" -not -name "*.1" | head -1)"
   cp "$FOUND" "$OUT_BIN"
+  # Copy GLSL shaders to the user config dir DOSBox checks on Linux.
+  # Without these, DOSBox aborts with "Fallback shader 'interpolation/bilinear' not found".
+  SHADER_SRC="$(find "$TMP_DIR" -type d -name "glshaders" | head -1)"
+  if [[ -n "$SHADER_SRC" ]]; then
+    CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/dosbox"
+    mkdir -p "$CONFIG_DIR"
+    rm -rf "$CONFIG_DIR/glshaders"
+    cp -r "$SHADER_SRC" "$CONFIG_DIR/glshaders"
+    echo "Copied glshaders to $CONFIG_DIR/glshaders"
+  fi
 elif [[ "$ARCHIVE" == *.zip ]]; then
   unzip -q "$TMP_DIR/$ARCHIVE" -d "$TMP_DIR/extracted"
-  FOUND="$(find "$TMP_DIR/extracted" -name "dosbox-staging.exe" -type f | head -1)"
+  # Upstream ships the Windows binary as "dosbox.exe" at the archive root;
+  # older releases used "dosbox-staging.exe". Accept both, skip the debugger build.
+  FOUND="$(find "$TMP_DIR/extracted" -type f \( -name "dosbox-staging.exe" -o -name "dosbox.exe" \) -not -name "*debugger*" | head -1)"
   cp "$FOUND" "$OUT_BIN"
+  # Copy GLSL shaders to the user config dir DOSBox checks on Windows
+  # (%LOCALAPPDATA%\DOSBox\glshaders). Without these, DOSBox aborts with
+  # "Fallback shader 'interpolation/bilinear' not found".
+  SHADER_SRC="$(find "$TMP_DIR/extracted" -type d -name "glshaders" | head -1)"
+  if [[ -n "$SHADER_SRC" ]]; then
+    CONFIG_DIR="${LOCALAPPDATA:-$HOME/AppData/Local}/DOSBox"
+    mkdir -p "$CONFIG_DIR"
+    rm -rf "$CONFIG_DIR/glshaders"
+    cp -r "$SHADER_SRC" "$CONFIG_DIR/glshaders"
+    echo "Copied glshaders to $CONFIG_DIR/glshaders"
+  fi
 fi
 
   chmod +x "$OUT_BIN"
