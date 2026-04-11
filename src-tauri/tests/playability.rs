@@ -18,7 +18,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use exodian_lib::collection_data_dir;
+use exodium_lib::collection_data_dir;
 use rusqlite::Connection;
 use serde::Serialize;
 
@@ -34,7 +34,7 @@ struct InstalledGame {
 }
 
 fn open_db(data_dir: &Path) -> Option<Connection> {
-    let db_path = data_dir.join("exodian.db");
+    let db_path = data_dir.join("exodium.db");
     if !db_path.exists() {
         return None;
     }
@@ -163,14 +163,14 @@ struct PlayabilityReport {
 #[ignore]
 fn playability_check_installed_games() {
     // Locate the DB: first try $EXODIAN_DATA_DIR, then ~/eXoDOS
-    let data_dir = std::env::var("EXODIAN_DATA_DIR")
+    let data_dir = std::env::var("EXODIUM_DATA_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| dirs_from_home());
 
     let conn = match open_db(&data_dir) {
         Some(c) => c,
         None => {
-            eprintln!("[playability] No database found at {}/exodian.db — skipping.", data_dir.display());
+            eprintln!("[playability] No database found at {}/exodium.db — skipping.", data_dir.display());
             return;
         }
     };
@@ -297,5 +297,5 @@ fn playability_check_installed_games() {
 fn dirs_from_home() -> PathBuf {
     std::env::var("HOME")
         .map(|h| PathBuf::from(h).join("eXoDOS"))
-        .unwrap_or_else(|_| PathBuf::from("/tmp/exodian"))
+        .unwrap_or_else(|_| PathBuf::from("/tmp/exodium"))
 }

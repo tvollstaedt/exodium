@@ -125,19 +125,19 @@ pub async fn init_download_manager(
     let mut managers = torrent_state.0.write().await;
     let metadata_dir = bundled_metadata_dir().ok();
 
+    // All collections share one librqbit session and the same data directory.
+    // The torrent files have no overlapping file paths, so all four torrents
+    // extract cleanly into <data_dir>/eXoDOS/ — matching the original eXoDOS layout.
+    let session = DownloadManager::create_session(&data_path)
+        .await
+        .map_err(|e| e.to_string())?;
+
     for col in COLLECTION_MAP {
         if !collections.contains(&col.id) {
             continue;
         }
         if let Ok(torrent_path) = bundled_torrent_path(col.torrent_file) {
-            // Each collection gets its own subdirectory to avoid file path conflicts
-            // (all eXoDOS torrents share the same torrent name "eXoDOS")
-            let col_data_path = if col.id == "eXoDOS" {
-                data_path.clone()
-            } else {
-                data_path.join(col.id)
-            };
-            match DownloadManager::new(&torrent_path, &col_data_path).await {
+            match DownloadManager::new_with_session(Arc::clone(&session), &torrent_path, &data_path) {
                 Ok(mgr) => {
                     // Store the torrent infohash so the update-checker can compare later
                     match TorrentIndex::infohash(&torrent_path) {

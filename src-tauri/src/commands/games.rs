@@ -16,12 +16,9 @@ use crate::torrent::manager::DownloadProgress;
 use super::TorrentState;
 
 /// Resolve the data directory for a collection.
-pub fn collection_data_dir(data_dir: &str, source: &str) -> PathBuf {
-    if source == "eXoDOS" {
-        std::path::Path::new(data_dir).to_path_buf()
-    } else {
-        std::path::Path::new(data_dir).join(source)
-    }
+/// All collections share the same data directory (overlay model — no collection subdirectories).
+pub fn collection_data_dir(data_dir: &str, _source: &str) -> PathBuf {
+    std::path::Path::new(data_dir).to_path_buf()
 }
 
 /// Get the inner folder name for a collection (the folder the torrent creates).
@@ -1145,15 +1142,15 @@ mod tests {
     }
 
     #[test]
-    fn collection_data_dir_glp_is_subdir() {
+    fn collection_data_dir_glp_is_root() {
         let dir = collection_data_dir("/data", "eXoDOS_GLP");
-        assert_eq!(dir, std::path::PathBuf::from("/data/eXoDOS_GLP"));
+        assert_eq!(dir, std::path::PathBuf::from("/data"));
     }
 
     #[test]
-    fn collection_data_dir_slp_is_subdir() {
+    fn collection_data_dir_slp_is_root() {
         let dir = collection_data_dir("/data", "eXoDOS_SLP");
-        assert_eq!(dir, std::path::PathBuf::from("/data/eXoDOS_SLP"));
+        assert_eq!(dir, std::path::PathBuf::from("/data"));
     }
 
     // ── patch_dosbox_conf ────────────────────────────────────────────────────
