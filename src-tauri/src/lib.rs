@@ -93,7 +93,9 @@ pub fn run() {
                         if let Err(e) = install_bundled_db(&db_path) {
                             log::error!("Failed to install bundled DB: {}", e);
                         }
-                        db::open(&db_path).expect("failed to open installed DB")
+                        let c = db::open(&db_path).expect("failed to open installed DB");
+                        db::init(&c).expect("failed to run migrations on bundled DB");
+                        c
                     } else {
                         c
                     }

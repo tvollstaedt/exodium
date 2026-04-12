@@ -29,6 +29,15 @@ function App() {
   const [dataDir, setDataDir] = createSignal("");
   const [importing, setImporting] = createSignal(false);
   const [importStatus, setImportStatus] = createSignal("");
+  const [resetError, setResetError] = createSignal("");
+
+  // Derived: the actual game storage folder shown to the user.
+  const gameFolderPath = () => {
+    const dir = dataDir();
+    if (!dir) return "";
+    const sep = dir.includes("\\") ? "\\" : "/";
+    return dir.replace(/[/\\]$/, "") + sep + "eXoDOS";
+  };
 
   onMount(async () => {
     try {
@@ -94,10 +103,16 @@ function App() {
     const doDelete = deleteGameData();
     setShowResetDialog(false);
     setDeleteGameData(false);
-    await factoryReset(doDelete);
-    setPhase("setup");
-    setShowSettings(false);
-    setDataDir("");
+    setResetError("");
+    try {
+      await factoryReset(doDelete);
+      setPhase("setup");
+      setShowSettings(false);
+      setDataDir("");
+    } catch (e) {
+      setResetError(`Reset failed: ${e}`);
+      setShowSettings(true);
+    }
   };
 
   return (
@@ -148,16 +163,19 @@ function App() {
                 <Dialog.Title class="ark-dialog-title">Settings</Dialog.Title>
                 <div class="settings-body">
                   <div class="setting-row">
-                    <span class="setting-label">Data directory</span>
-                    <span class="setting-value">{dataDir() || "Not set"}</span>
+                    <span class="setting-label">Game folder</span>
+                    <span class="setting-value">{gameFolderPath() || "Not set"}</span>
                     <button class="btn-small" onClick={handleChangeDataDir}>Change</button>
                   </div>
                   <div class="settings-divider" />
                   <div class="setting-row">
                     <span class="setting-label">Factory Reset</span>
-                    <span class="setting-hint">Clears all data and returns to collection selection</span>
+                    <span class="setting-hint">Clears all data and returns to setup</span>
                     <button class="btn-danger" onClick={() => setShowResetDialog(true)}>Reset…</button>
                   </div>
+                  <Show when={resetError()}>
+                    <div class="error" style="margin-top:8px">{resetError()}</div>
+                  </Show>
                 </div>
                 <div class="ark-dialog-actions">
                   <Dialog.CloseTrigger class="btn-secondary">Close</Dialog.CloseTrigger>
@@ -182,7 +200,7 @@ function App() {
                     checked={deleteGameData()}
                     onChange={(e) => setDeleteGameData(e.currentTarget.checked)}
                   />
-                  <span>Also delete game data folder{dataDir() ? ` (${dataDir()})` : ""}</span>
+                  <span>Also delete game folder{gameFolderPath() ? ` (${gameFolderPath()})` : ""}</span>
                 </label>
                 <Show when={deleteGameData()}>
                   <p class="reset-warning">This will permanently delete all downloaded game files. This cannot be undone.</p>

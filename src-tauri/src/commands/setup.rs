@@ -29,9 +29,10 @@ pub struct CollectionDef {
     pub torrent_file: &'static str,
     /// Optional bundled DOSBox/emulator configs ZIP.
     pub configs_zip: Option<&'static str>,
-    /// The folder name the torrent creates inside the data dir (e.g. "eXoDOS").
-    /// Used in: <data_dir>/<inner_folder>/ for the main collection,
-    ///           <data_dir>/<collection_id>/<inner_folder>/ for sub-collections.
+    /// The folder name the torrent creates inside the data dir (always "eXoDOS").
+    /// All four collections (eXoDOS, GLP, PLP, SLP) share the same output folder via
+    /// the overlay model — their torrents all have the internal name "eXoDOS" and write
+    /// to <data_dir>/eXoDOS/ without any per-collection subdirectory.
     pub inner_folder: &'static str,
     /// Path from <inner_folder> to the individual game directories.
     /// e.g. "eXo/eXoDOS" → games are at <inner_folder>/eXo/eXoDOS/<shortcode>/
@@ -208,35 +209,34 @@ pub async fn factory_reset(
     // Drop all download managers
     torrent_state.0.write().await.clear();
 
-    // Clear all tables
+    // Reset user state without touching the game catalog.
+    // Games are catalog data (from the bundled DB) — clearing them would leave
+    // the library empty until next restart. Only reset per-user flags and config.
     {
         let conn = db_state.0.lock().map_err(|e| e.to_string())?;
         conn.execute_batch(
-            "DELETE FROM games; DELETE FROM downloads; DELETE FROM images;
-             DELETE FROM playlists; DELETE FROM playlist_games; DELETE FROM config;",
+            "UPDATE games SET in_library = 0, installed = 0, favorited = 0;
+             DELETE FROM downloads;
+             DELETE FROM images;
+             DELETE FROM playlists;
+             DELETE FROM playlist_games;
+             DELETE FROM config;",
         )
         .map_err(|e| e.to_string())?;
     }
 
-    // Optionally delete game data folder
+    // Optionally delete the eXoDOS game folder.
+    // data_dir is the PARENT of the eXoDOS folder, so we delete <data_dir>/eXoDOS/,
+    // never data_dir itself (which could be the home directory).
     if let Some(dir) = data_dir {
         if !dir.is_empty() {
-            let path = std::path::Path::new(&dir);
-            if path.exists() {
-                std::fs::remove_dir_all(path).map_err(|e| e.to_string())?;
-                log::info!("Deleted game data folder: {}", dir);
-            }
-        }
-    }
-
-    // Reinstall the bundled DB so the app is immediately browsable after re-setup
-    // (without this, the DB would be empty until the next app restart)
-    {
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
-        if let Some(db_path) = conn.path().map(PathBuf::from) {
-            drop(conn);
-            if let Err(e) = crate::install_bundled_db(&db_path) {
-                log::warn!("Could not reinstall bundled DB after factory reset: {}", e);
+            let exodos_path = std::path::Path::new(&dir).join("eXoDOS");
+            if exodos_path.exists() {
+                log::info!("Deleting game data folder: {}", exodos_path.display());
+                if let Err(e) = std::fs::remove_dir_all(&exodos_path) {
+                    log::error!("Failed to delete game data folder: {}", e);
+                    return Err(format!("Failed to delete game data: {}", e));
+                }
             }
         }
     }
@@ -688,36 +688,6 @@ pub async fn setup_from_local(
         queries::set_config(&conn, "collections", &all_collections).map_err(|e| e.to_string())?;
     }
 
-    // Search for the metadata ZIP in common locations
-    let zip_candidates = [
-        root.join("Content/XODOSMetadata.zip"),
-        root.join("eXo/Content/XODOSMetadata.zip"),
-        root.join("XODOSMetadata.zip"),
-    ];
-
-    let zip_path = zip_candidates
-        .iter()
-        .find(|p| p.exists())
-        .cloned();
-
-    // Or look for already-extracted XML
-    let xml_candidates = [
-        root.join("xml/all/MS-DOS.xml"),
-        root.join("eXo/xml/all/MS-DOS.xml"),
-    ];
-
-    let xml_path = xml_candidates
-        .iter()
-        .find(|p| p.exists())
-        .cloned();
-
-    if zip_path.is_none() && xml_path.is_none() {
-        return Err(format!(
-            "No eXoDOS metadata found in {}. Expected Content/XODOSMetadata.zip or xml/all/MS-DOS.xml",
-            exodos_path
-        ));
-    }
-
     // Find !DOSmetadata.zip for DOSBox configs
     let dosbox_zip_candidates = [
         root.join("Content/!DOSmetadata.zip"),
@@ -729,46 +699,14 @@ pub async fn setup_from_local(
         .find(|p| p.exists())
         .cloned();
 
-    // Get DB path and torrent index for the blocking task
-    let db_path = {
+    // The bundled DB already has the full game catalog — no need to re-parse the
+    // eXoDOS XML (XODOSMetadata.zip is 5 GB and would block for minutes).
+    // Just report how many games are in the current DB.
+    let count = {
         let conn = db_state.0.lock().map_err(|e| e.to_string())?;
-        conn.path()
-            .map(PathBuf::from)
-            .ok_or_else(|| "Cannot determine database path".to_string())?
+        conn.query_row("SELECT COUNT(*) FROM games", [], |r| r.get::<_, i64>(0))
+            .unwrap_or(0) as usize
     };
-
-    let torrent_path = bundled_torrent_path("eXoDOS.torrent")?;
-    let torrent_index = TorrentIndex::from_file(&torrent_path)
-        .map_err(|e| format!("Failed to parse torrent: {}", e))?;
-
-    let count = tauri::async_runtime::spawn_blocking(move || {
-        let conn = db::open(&db_path).map_err(|e| e.to_string())?;
-        db::init(&conn).map_err(|e| e.to_string())?;
-
-        // Clear existing games to prevent duplicates on re-import
-        queries::clear_games(&conn).map_err(|e| e.to_string())?;
-
-        let count = if let Some(zip) = zip_path {
-            log::info!("Importing from ZIP: {}", zip.display());
-            import::import_from_zip(&zip, &conn, "!dos").map_err(|e| e.to_string())?
-        } else if let Some(xml) = xml_path {
-            log::info!("Importing from XML: {}", xml.display());
-            let file = std::fs::File::open(&xml).map_err(|e| e.to_string())?;
-            let reader = std::io::BufReader::new(file);
-            let games = import::xml::parse_games_xml(reader, "!dos").map_err(|e| e.to_string())?;
-            let count = games.len();
-            db::queries::insert_games(&conn, &games).map_err(|e| e.to_string())?;
-            count
-        } else {
-            0
-        };
-
-        match_torrent_indices(&conn, &torrent_index, "eXoDOS").map_err(|e| e.to_string())?;
-
-        Ok::<usize, String>(count)
-    })
-    .await
-    .map_err(|e| e.to_string())??;
 
     // Init download managers for all collections (for future game downloads).
     // Session state goes in the app config dir, game files in the existing eXoDOS tree.

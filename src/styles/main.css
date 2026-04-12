@@ -1231,12 +1231,14 @@ body {
   color: var(--accent);
   font-size: 18px;
   margin-bottom: 4px;
+  text-align: center;
 }
 
 .setup-subtitle {
   color: var(--text-secondary);
   font-size: 13px;
   margin-bottom: 20px;
+  text-align: center;
 }
 
 .setup-info {

@@ -300,12 +300,16 @@ pub async fn get_download_progress(
                     if zip_path.exists() && !lock.exists() {
                         let torrent_root = main_mgr.torrent_root();
                         tauri::async_runtime::spawn_blocking(move || {
-                            if let Ok(file) = std::fs::File::open(&zip_path) {
-                                if let Ok(mut archive) = zip::ZipArchive::new(file) {
-                                    let _ = archive.extract(&torrent_root);
-                                    let _ = std::fs::write(&lock, "");
-                                    log::info!("Extracted DOSBox configs");
-                                }
+                            let result = (|| -> Result<(), String> {
+                                let file = std::fs::File::open(&zip_path).map_err(|e| e.to_string())?;
+                                let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+                                archive.extract(&torrent_root).map_err(|e| e.to_string())?;
+                                std::fs::write(&lock, "").map_err(|e| e.to_string())?;
+                                Ok(())
+                            })();
+                            match result {
+                                Ok(()) => log::info!("Extracted DOSBox configs to {}", torrent_root.display()),
+                                Err(e) => log::error!("Failed to extract DOSBox configs: {}", e),
                             }
                         });
                     }
@@ -1000,6 +1004,7 @@ pub fn launch_game(app: AppHandle, db_state: State<DbState>, id: i64) -> Result<
         if let Some(shortcode) = dosbox_conf
             .strip_suffix("/dosbox.conf")
             .and_then(|p| p.rsplit('/').next())
+            .filter(|s| !s.is_empty())
         {
             let roots = if source != "eXoDOS" {
                 vec![&torrent_root, &main_torrent_root]

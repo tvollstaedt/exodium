@@ -68,7 +68,7 @@ export function startGameDownload(gameId: number) {
           if (!stuckSince[gameId]) { stuckSince[gameId] = Date.now(); }
           const elapsed = (Date.now() - stuckSince[gameId]) / 1000;
           const status = elapsed > 30
-            ? "Waiting for peers… try cancelling and re-downloading if this persists"
+            ? "Waiting for last pieces… try cancelling and re-downloading if this persists"
             : "100%";
           setDownloads((prev) => ({
             ...prev,

@@ -17,7 +17,7 @@ interface SetupProps {
   onComplete: () => void;
 }
 
-type Phase = "mode" | "scratch" | "import" | "importing";
+type Phase = "mode" | "scratch" | "import" | "importing" | "starting";
 
 const IconDownload = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
@@ -27,7 +27,7 @@ const IconDownload = () => (
 
 const IconImport = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-    <path stroke-linecap="round" stroke-linejoin="round" d="M3 7.5L7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0V6.75a2.25 2.25 0 00-2.25-2.25H6.75" />
+    <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
   </svg>
 );
 
@@ -87,6 +87,7 @@ export function Setup(props: SetupProps) {
   const handleScratchContinue = async () => {
     if (!dataDir()) { return; }
     setError("");
+    setPhase("starting");
     try {
       const available = await getAvailableCollections();
       const collectionsCSV = available.map((c) => c.id).join(",");
@@ -96,6 +97,7 @@ export function Setup(props: SetupProps) {
       props.onComplete();
     } catch (e) {
       setError(`Failed to initialize: ${e}`);
+      setPhase("scratch");
     }
   };
 
@@ -209,6 +211,18 @@ export function Setup(props: SetupProps) {
                 Import
               </button>
             </div>
+          </div>
+        </Show>
+
+        {/* ── Starting (initializing session after scratch setup) ── */}
+        <Show when={phase() === "starting"}>
+          <p class="setup-subtitle">Setting up...</p>
+          <div class="setup-step">
+            <Progress.Root class="ark-progress">
+              <Progress.Track class="ark-progress-track">
+                <Progress.Range class="ark-progress-range indeterminate" />
+              </Progress.Track>
+            </Progress.Root>
           </div>
         </Show>
 

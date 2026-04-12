@@ -163,6 +163,9 @@ impl DownloadManager {
         } else {
             // First download — add torrent to session now
             let selected = self.selected_files.read().await.clone();
+            // Explicitly set output_folder to torrent_root so downloads land in data_dir,
+            // not in the session's default output folder (which is app_data_dir).
+            let output_folder = self.torrent_root().to_string_lossy().into_owned();
             let response = self
                 .session
                 .add_torrent(
@@ -170,31 +173,39 @@ impl DownloadManager {
                     Some(AddTorrentOptions {
                         only_files: Some(selected.into_iter().collect()),
                         overwrite: true,
+                        output_folder: Some(output_folder),
                         ..Default::default()
                     }),
                 )
                 .await?;
 
-            let handle = match response {
-                AddTorrentResponse::Added(_id, h) => h,
-                AddTorrentResponse::AlreadyManaged(_id, h) => h,
+            let (handle, already_managed) = match response {
+                AddTorrentResponse::Added(_id, h) => (h, false),
+                AddTorrentResponse::AlreadyManaged(_id, h) => (h, true),
                 AddTorrentResponse::ListOnly(_) => {
                     return Err(anyhow::anyhow!("Torrent added in list-only mode"));
                 }
             };
 
             *handle_guard = Some(handle);
-            log::info!("Torrent added, downloading files: {:?}", file_indices);
+            log::info!("Torrent added (already_managed={already_managed}), downloading files: {:?}", file_indices);
 
-            // librqbit creates 0-byte placeholder files for all torrent entries.
-            // Clean them up, but keep placeholders for files we're downloading.
+            // If the session already had this torrent, update_only_files to apply our selection.
+            if already_managed {
+                let selected = self.selected_files.read().await;
+                self.session.update_only_files(handle_guard.as_ref().unwrap(), &selected).await?;
+            }
+
+            // librqbit creates 0-byte placeholder files for all torrent entries on first add.
+            // Clean them up after a short delay so librqbit has time to write real content.
+            // 10 s is conservative but safe: the alternative (2 s) raced against assembly.
             let root = self.torrent_root();
             let keep: HashSet<PathBuf> = self.selected_files.read().await.iter()
                 .filter_map(|&idx| self.torrent_index.files.get(idx))
                 .map(|f| root.join(&f.path))
                 .collect();
             tokio::spawn(async move {
-                tokio::time::sleep(Duration::from_secs(2)).await;
+                tokio::time::sleep(Duration::from_secs(10)).await;
                 if let Err(e) = cleanup_placeholder_files(&root, &keep) {
                     log::warn!("Failed to clean up placeholder files: {}", e);
                 }
