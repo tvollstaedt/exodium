@@ -52,6 +52,19 @@ lava_torrent = "0.11"
 # Torrent downloading
 librqbit = "8"
 
+# HTTP client (content pack downloads)
+reqwest = { version = "0.12", default-features = false, features = ["stream", "rustls-tls"] }
+futures-util = "0.3"
+
+# Cryptographic hashing (sha256 verification of downloaded packs)
+sha2 = "0.10"
+
+# Tar extraction (content pack archives)
+tar = "0.4"
+
+# Disk space queries (pre-flight check before large downloads)
+fs2 = "0.4"
+
 # Logging
 log = "0.4"
 env_logger = "0.11"

@@ -139,24 +139,6 @@ pub fn get_game(state: State<DbState>, id: i64) -> Result<Option<Game>, String> 
     queries::fetch_game_by_id(&conn, id).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-pub async fn import_games(state: State<'_, DbState>, zip_path: String) -> Result<usize, String> {
-    let db_path = {
-        let conn = state.0.lock().map_err(|e| e.to_string())?;
-        conn.path()
-            .map(PathBuf::from)
-            .ok_or_else(|| "Cannot determine database path".to_string())?
-    };
-
-    let zip = zip_path.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let conn = db::open(&db_path).map_err(|e| e.to_string())?;
-        let path = std::path::Path::new(&zip);
-        crate::import::import_from_zip(path, &conn, "!dos").map_err(|e| e.to_string())
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
 
 #[tauri::command]
 pub fn get_config(state: State<DbState>, key: String) -> Result<Option<String>, String> {
@@ -429,9 +411,13 @@ pub async fn cancel_download(
     };
 
     // Deselect from torrent first — if this fails silently, we still want to clear the DB flag.
+    // Clone Arc before dropping the guard so we don't hold the read lock across awaits.
     {
-        let guard = torrent_state.0.read().await;
-        if let Some(manager) = guard.get(&source) {
+        let manager_arc = {
+            let guard = torrent_state.0.read().await;
+            guard.get(&source).cloned()
+        };
+        if let Some(manager) = manager_arc {
             if let Some(idx) = game_idx {
                 manager.deselect_file(idx).await;
             }
@@ -939,6 +925,75 @@ fn resolve_dosbox(app: &AppHandle) -> PathBuf {
     PathBuf::from(bin)
 }
 
+/// Install DOSBox Staging glshaders into the user config dir if missing.
+///
+/// On Linux and Windows, DOSBox aborts at startup with "Fallback shader
+/// 'interpolation/bilinear' not found" unless it finds glshaders in the
+/// user config dir. The shader pack is bundled as a Tauri resource
+/// (`bundle.resources` maps `resources/dosbox-glshaders` → `dosbox-glshaders`
+/// inside resource_dir). Here we copy it to the user config dir on first
+/// launch; subsequent launches see the dir already exists and no-op.
+///
+/// macOS is skipped because launch_game writes a last-wins conf fragment
+/// (`output = texture`) that bypasses the shader requirement entirely —
+/// simpler than installing shaders to `~/Library/Preferences/DOSBox/`.
+fn ensure_dosbox_shaders(app: &AppHandle) {
+    if cfg!(target_os = "macos") {
+        return;
+    }
+
+    use tauri::Manager;
+
+    let user_shader_dir: Option<PathBuf> = if cfg!(target_os = "linux") {
+        std::env::var("XDG_CONFIG_HOME")
+            .ok()
+            .map(PathBuf::from)
+            .or_else(|| std::env::var("HOME").ok().map(|h| PathBuf::from(h).join(".config")))
+            .map(|b| b.join("dosbox").join("glshaders"))
+    } else if cfg!(target_os = "windows") {
+        std::env::var("LOCALAPPDATA")
+            .ok()
+            .map(|p| PathBuf::from(p).join("DOSBox").join("glshaders"))
+    } else {
+        None
+    };
+
+    let Some(user_shader_dir) = user_shader_dir else {
+        log::warn!("Could not determine DOSBox user config dir; shaders not installed");
+        return;
+    };
+
+    if user_shader_dir.is_dir() {
+        return;
+    }
+
+    let res_dir = match app.path().resource_dir() {
+        Ok(d) => d,
+        Err(e) => {
+            log::warn!("resource_dir() failed while installing DOSBox shaders: {}", e);
+            return;
+        }
+    };
+    let bundled = res_dir.join("dosbox-glshaders");
+    if !bundled.is_dir() {
+        log::debug!("No bundled DOSBox shaders at {}", bundled.display());
+        return;
+    }
+
+    if let Some(parent) = user_shader_dir.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            log::warn!("Failed to create DOSBox config parent dir: {}", e);
+            return;
+        }
+    }
+
+    if let Err(e) = copy_dir_recursive(&bundled, &user_shader_dir) {
+        log::warn!("Failed to install DOSBox shaders: {}", e);
+    } else {
+        log::info!("Installed DOSBox shaders to {}", user_shader_dir.display());
+    }
+}
+
 /// Launch a downloaded game via DOSBox Staging.
 #[tauri::command]
 pub fn launch_game(app: AppHandle, db_state: State<DbState>, id: i64) -> Result<String, String> {
@@ -1044,6 +1099,46 @@ pub fn launch_game(app: AppHandle, db_state: State<DbState>, id: i64) -> Result<
     // The game_folder is the second component of game_prefix (e.g. "eXoDOS" from "eXo/eXoDOS").
     let shortcode = game.shortcode.as_deref().unwrap_or("");
     let game_folder = src_game_prefix.split('/').nth(1).unwrap_or("eXoDOS");
+
+    // Auto-extract ZIP on first launch if the game directory doesn't exist yet.
+    // This mirrors LaunchBox's on-demand extraction behavior and handles games that were
+    // imported from an existing installation where ZIPs haven't been extracted.
+    if !shortcode.is_empty() {
+        let game_dir = if let Some(ld) = collection_lang_dir(source) {
+            torrent_root.join(format!("{}/{}/{}", src_game_prefix, ld, shortcode))
+        } else {
+            torrent_root.join(format!("{}/{}", src_game_prefix, shortcode))
+        };
+        if !game_dir.exists() {
+            let game_name = game.application_path.as_deref()
+                .and_then(crate::commands::setup::game_name_from_app_path)
+                .unwrap_or_else(|| game.title.clone());
+            let zip_path = torrent_root.join(format!("eXo/eXoDOS/{}.zip", game_name));
+            if zip_path.exists() {
+                log::info!("Auto-extracting {} before launch", zip_path.display());
+                let dest = torrent_root.join("eXo/eXoDOS");
+                if let Err(e) = extract_game_zip(&zip_path, &dest) {
+                    let msg = e.to_string();
+                    if msg.contains("EOCD") || msg.contains("invalid Zip") || msg.contains("Invalid archive") {
+                        // ZIP is a torrent stub or corrupted file — reset installed flag so the
+                        // user can re-download rather than hitting this error on every launch.
+                        let _ = queries::set_game_installed(&conn, id, false);
+                        return Err(format!(
+                            "Game ZIP for '{}' is incomplete or corrupted (torrent placeholder). \
+                             Please re-download the game.",
+                            game.title
+                        ));
+                    }
+                    return Err(format!("Failed to extract game before launch: {}", msg));
+                }
+            } else {
+                return Err(format!(
+                    "Game files not found for '{}'. The game may need to be re-downloaded.",
+                    game.title
+                ));
+            }
+        }
+    }
     let lp_info = collection_lang_dir(source).map(|ld| {
         let dir = torrent_root.join(format!("{}/{}/{}", src_game_prefix, ld, shortcode));
         (shortcode, ld, game_folder, dir)
@@ -1073,6 +1168,8 @@ pub fn launch_game(app: AppHandle, db_state: State<DbState>, id: i64) -> Result<
             );
         }
     }
+
+    ensure_dosbox_shaders(&app);
 
     let dosbox_bin = resolve_dosbox(&app);
     let mut cmd = Command::new(&dosbox_bin);

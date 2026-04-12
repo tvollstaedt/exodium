@@ -1,29 +1,38 @@
 {
-  "schema_version": 1,
-  "generated_at": "2026-04-06T00:00:00Z",
-  "manifest_url": "TODO: https://raw.githubusercontent.com/<user>/exodium-releases/main/manifest.json",
+  "schema_version": 2,
+  "generated_at": "2026-04-12T00:00:00Z",
+  "manifest_url": "TODO: https://raw.githubusercontent.com/tvollstaedt/exodium-releases/main/manifest.json",
   "collections": {
     "eXoDOS": {
       "torrent_infohash": "99b685d95a496e771e0ebd9d0a547257e222dd1c",
       "game_count": 7604,
-      "thumbnail_pack": {
-        "url": "TODO: https://github.com/<user>/exodium-releases/releases/download/v1/thumbnails-eXoDOS-v1.tar.gz",
-        "sha256": "TODO",
-        "size_bytes": 89400000,
-        "version": 1
+      "content_packs": {
+        "posters": {
+          "display_name": "Box Art",
+          "description": "HD game box-art thumbnails for all 7,600+ games",
+          "url": "TODO: https://github.com/tvollstaedt/exodium/releases/download/content-v1/posters-eXoDOS-v1.tar.gz",
+          "sha256": "TODO",
+          "size_bytes": 420000000,
+          "version": 1,
+          "install_path": "content/posters/eXoDOS",
+          "supersedes": []
+        }
       }
     },
     "eXoDOS_GLP": {
       "torrent_infohash": "903d04310ce42f6e287932b3293366f54e910021",
-      "game_count": 660
+      "game_count": 660,
+      "content_packs": {}
     },
     "eXoDOS_PLP": {
       "torrent_infohash": "2a452d7fe40dc728b202622fa4735bd89de49548",
-      "game_count": 0
+      "game_count": 0,
+      "content_packs": {}
     },
     "eXoDOS_SLP": {
       "torrent_infohash": "37b37fd60c04402976ed552fd4416f81a0cae889",
-      "game_count": 0
+      "game_count": 0,
+      "content_packs": {}
     }
   }
 }

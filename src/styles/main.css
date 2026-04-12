@@ -36,27 +36,9 @@ body {
 }
 
 /* ============================================
-   Window resize edges
-   ============================================ */
-.resize-edge {
-  position: fixed;
-  z-index: 9999;
-}
-
-.resize-n { top: 0; left: 6px; right: 6px; height: 6px; cursor: n-resize; }
-.resize-s { bottom: 0; left: 6px; right: 6px; height: 6px; cursor: s-resize; }
-.resize-e { top: 6px; right: 0; bottom: 6px; width: 6px; cursor: e-resize; }
-.resize-w { top: 6px; left: 0; bottom: 6px; width: 6px; cursor: w-resize; }
-.resize-ne { top: 0; right: 0; width: 6px; height: 6px; cursor: ne-resize; }
-.resize-nw { top: 0; left: 0; width: 6px; height: 6px; cursor: nw-resize; }
-.resize-se { bottom: 0; right: 0; width: 6px; height: 6px; cursor: se-resize; }
-.resize-sw { bottom: 0; left: 0; width: 6px; height: 6px; cursor: sw-resize; }
-
-/* ============================================
-   Top Bar (titleless window drag area)
+   Top Bar
    ============================================ */
 .top-bar {
-  position: relative;
   display: flex;
   align-items: center;
   height: 42px;
@@ -67,58 +49,18 @@ body {
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
 }
 
-/* Drag region fills entire top bar, sits behind everything */
-.drag-region {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-}
-
-/* All top bar children pass pointer events through by default */
-.top-bar > *:not(.drag-region) {
-  position: relative;
-  z-index: 1;
-  pointer-events: none;
-}
-
-/* Only actual interactive elements receive pointer events */
-.top-bar button,
-.top-bar input,
-.top-bar select,
-.top-bar .win-btn,
-.top-bar .icon-btn {
-  pointer-events: auto;
-}
-
-.top-bar-logo {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--accent);
-  letter-spacing: 1px;
-  text-transform: uppercase;
-  -webkit-app-region: drag;
-  padding: 0 4px;
-}
-
 .top-bar-center {
   flex: 1;
   display: flex;
   justify-content: center;
-  -webkit-app-region: no-drag;
 }
 
 .top-bar-actions {
   display: flex;
   align-items: center;
   gap: 4px;
-  -webkit-app-region: no-drag;
 }
 
-.top-bar-actions .import-status {
-  font-size: 11px;
-  color: var(--text-secondary);
-  margin-right: 4px;
-}
 
 /* Icon buttons in top bar */
 .icon-btn {
@@ -146,37 +88,149 @@ body {
   outline-offset: 2px;
 }
 
-/* Window controls */
-.window-controls {
+
+/* ── Download indicator (top bar pill) ────────────────────────────────────── */
+
+.download-indicator {
   display: flex;
-  gap: 2px;
-  -webkit-app-region: no-drag;
-  margin-left: 4px;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: rgba(251, 191, 36, 0.12);
+  border: 1px solid rgba(251, 191, 36, 0.25);
+  border-radius: 12px;
+  cursor: pointer;
+  font-size: 11px;
+  color: #fbbf24;
+  height: 26px;
+  min-width: 60px;
+  transition: background 0.15s;
 }
 
-.win-btn {
-  width: 28px;
-  height: 28px;
+.download-indicator:hover {
+  background: rgba(251, 191, 36, 0.2);
+}
+
+.download-indicator .indicator-progress .ark-progress-track {
+  width: 32px;
+  height: 3px;
+}
+
+.download-indicator-count {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.download-indicator-count::after {
+  content: " \25BC";
+  font-size: 8px;
+  opacity: 0.6;
+}
+
+/* ── Download sheet (flyout panel) ───────────────────────────────────────── */
+
+.download-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+}
+
+.download-sheet {
+  position: fixed;
+  top: 48px;
+  right: 12px;
+  width: 340px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--bg-card);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--border-radius);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+  padding: 8px 0;
+}
+
+.download-sheet-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.download-sheet-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+}
+
+.download-sheet-row:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.download-sheet-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.download-sheet-label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 4px;
+  text-transform: capitalize;
+}
+
+.download-sheet-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.download-sheet-progress-row .ark-progress {
+  flex: 1;
+}
+
+.download-sheet-status {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.download-sheet-speed {
+  font-size: 10px;
+  color: var(--accent);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.download-sheet-cancel {
+  width: 22px;
+  height: 22px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: none;
-  border: none;
-  color: var(--text-secondary);
-  border-radius: 6px;
+  border: 1px solid rgba(233, 69, 96, 0.3);
+  border-radius: 4px;
+  color: var(--danger);
   cursor: pointer;
-  transition: color 0.15s, background 0.15s;
+  font-size: 11px;
+  flex-shrink: 0;
+  transition: background 0.15s;
 }
 
-.win-btn:hover {
-  color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.08);
+.download-sheet-cancel:hover {
+  background: rgba(233, 69, 96, 0.15);
 }
 
-.win-close:hover {
-  color: white;
-  background: var(--danger);
-}
 
 /* ============================================
    Search
@@ -498,6 +552,12 @@ body {
 
 .game-section {
   display: block;
+  /* Skip rendering off-screen sections — dramatically reduces layout and paint
+     cost when scrolling through 7000+ game cards. The browser substitutes a
+     placeholder of the last-known height for hidden sections, keeping the
+     scrollbar accurate. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 600px;
 }
 
 .grid-separator {
@@ -572,7 +632,10 @@ body {
   cursor: pointer;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
   background: var(--bg-card);
-  /* no global fade-in — use IntersectionObserver for staggered entry if desired */
+  /* Isolate each card's layout/paint so appending new cards doesn't trigger
+     full-grid reflow. Combined with content-visibility on .game-section,
+     this keeps scroll performance smooth even with 7000+ cards loaded. */
+  contain: layout style paint;
 }
 
 .game-card:hover {
@@ -863,24 +926,32 @@ body {
   background: rgba(255, 255, 255, 0.08);
   border-radius: 2px;
   overflow: hidden;
+  position: relative; /* needed so the indeterminate bar can escape left/right */
 }
 
 .ark-progress-range {
   height: 100%;
   background: var(--accent);
   border-radius: 2px;
-  transition: width 0.3s;
+  will-change: width;
+  transition: width 0.6s ease-out;
 }
 
 .ark-progress-range.indeterminate {
-  width: 30%;
+  /* Overrides the determinate styles — uses animation instead of width transition */
+  position: absolute;
+  top: 0;
+  width: 35%;
+  transition: none;
   animation: indeterminate 1.5s ease-in-out infinite;
 }
 
 @keyframes indeterminate {
-  0% { margin-left: 0; width: 30%; }
-  50% { margin-left: 40%; width: 40%; }
-  100% { margin-left: 70%; width: 30%; }
+  /* Bar travels from fully off-screen left to fully off-screen right.
+     left: -42% puts the right edge (at -42% + 35% = -7%) safely off-screen,
+     so ease-in easing can't make a sliver visible at loop start. */
+  0%   { left: -42%; }
+  100% { left: 100%; }
 }
 
 /* ============================================
@@ -943,6 +1014,57 @@ body {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+}
+
+/* ── Welcome modal content-pack picker ─────────────────────────────────────── */
+
+.welcome-pack-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0 16px;
+}
+
+.welcome-pack-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: var(--border-radius);
+  background: rgba(255, 255, 255, 0.03);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.welcome-pack-option:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.welcome-pack-option.disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.welcome-pack-option input[type="radio"] {
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+.welcome-pack-label {
+  font-size: 13px;
+  color: var(--text-primary);
+  flex: 1;
+}
+
+.welcome-pack-size {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.welcome-pack-future {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
 }
 
 .reset-option {
@@ -1211,12 +1333,6 @@ body {
   padding: 32px;
 }
 
-.setup-window-controls {
-  position: fixed;
-  top: 8px;
-  right: 12px;
-  z-index: 10;
-}
 
 .setup-card {
   background: var(--bg-secondary);

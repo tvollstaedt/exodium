@@ -1,11 +1,11 @@
-import { createSignal, createEffect, Show, For } from "solid-js";
+import { createSignal, createEffect, on, Show, For } from "solid-js";
 import { Portal } from "solid-js/web";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { Progress } from "@ark-ui/solid/progress";
 import type { Game } from "../api/tauri";
 import { getGameVariants } from "../api/tauri";
 import { formatBytes, parseLangEntries, langBadgeClass, performUninstall } from "../util";
-import { thumbnailDirForCollection } from "../stores/thumbnails";
+import { bestThumbnailPath } from "../stores/thumbnails";
 import { downloads, cancelGameDownload } from "../stores/downloads";
 import { toggleFavorite } from "../stores/games";
 
@@ -24,8 +24,10 @@ export function GameCard(props: GameCardProps) {
   const [contextMenu, setContextMenu] = createSignal<{x: number, y: number} | null>(null);
   const [confirmUninstall, setConfirmUninstall] = createSignal(false);
 
-  // Sync favorited badge when the games store refreshes the prop externally.
-  createEffect(() => setFavorited(props.game.favorited));
+  // Re-sync favorited from props only when the card is reused for a different game (For loop
+  // key change). Do NOT run on favorited-flag-only changes — that would race with the
+  // optimistic update in handleToggleFavorite and cause a visible flicker.
+  createEffect(on(() => props.game.id, () => { setFavorited(props.game.favorited); }, { defer: true }));
 
   // Pre-load variant IDs for multi-lang games so download state is visible on main card.
   // createEffect re-runs when props.game.shortcode changes, handling component reuse in For loops.
@@ -38,9 +40,9 @@ export function GameCard(props: GameCardProps) {
   });
 
   const thumbSrc = () => {
-    const dir = thumbnailDirForCollection(props.game.torrent_source);
-    if (!dir || !props.game.shortcode || !props.game.has_thumbnail) { return null; }
-    return convertFileSrc(`${dir}/${props.game.shortcode}.jpg`);
+    const path = bestThumbnailPath(props.game.torrent_source, props.game.shortcode, props.game.has_thumbnail);
+    if (!path) { return null; }
+    return convertFileSrc(path);
   };
 
   const langEntries = () => parseLangEntries(props.game);

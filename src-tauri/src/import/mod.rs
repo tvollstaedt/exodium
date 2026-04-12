@@ -25,6 +25,24 @@ pub enum ImportError {
 
 pub type ImportResult<T> = Result<T, ImportError>;
 
+/// Import games from a gzipped LaunchBox XML (e.g. GLP.xml.gz bundled with the app).
+/// Decompresses on the fly and inserts parsed games into the DB.
+pub fn import_from_gz(
+    gz_path: &Path,
+    conn: &rusqlite::Connection,
+    shortcode_segment: &str,
+) -> ImportResult<usize> {
+    use flate2::read::GzDecoder;
+
+    log::info!("Opening gzipped XML: {}", gz_path.display());
+    let file = std::fs::File::open(gz_path)?;
+    let decoder = GzDecoder::new(BufReader::new(file));
+    let reader = BufReader::new(decoder);
+    let games: Vec<Game> = xml::parse_games_xml(reader, shortcode_segment)?;
+    let count = db::queries::insert_games(conn, &games)?;
+    Ok(count)
+}
+
 /// Known paths where MS-DOS.xml might live inside various eXoDOS ZIPs.
 const XML_CANDIDATES: &[&str] = &[
     "xml/all/MS-DOS.xml",

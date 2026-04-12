@@ -15,7 +15,7 @@
         "title": "Exodium",
         "width": 1280,
         "height": 800,
-        "decorations": false,
+        "decorations": true,
         "resizable": true
       }
     ],
@@ -35,6 +35,13 @@
     "externalBin": [
       "binaries/dosbox-staging"
     ],
+    "resources": {
+      "../metadata": "metadata",
+      "../torrents": "torrents",
+      "../manifest.json": "manifest.json",
+      "resources/previews/eXoDOS": "previews/eXoDOS",
+      "resources/dosbox-glshaders": "dosbox-glshaders"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

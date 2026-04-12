@@ -7,15 +7,22 @@ use crate::db::queries;
 
 use super::DbState;
 
-// ── Manifest schema ───────────────────────────────────────────────────────────
+// ── Manifest schema (v2) ─────────────────────────────────────────────────────
 
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-pub struct ThumbnailPackInfo {
+/// A downloadable content pack (posters, media, etc.) hosted as a tar.gz asset.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ContentPackInfo {
+    pub display_name: String,
+    pub description: String,
     pub url: String,
     pub sha256: String,
     pub size_bytes: u64,
     pub version: u32,
+    /// Relative path under data_dir where the pack extracts to.
+    pub install_path: String,
+    /// Pack IDs this pack replaces (e.g. media supersedes posters).
+    #[serde(default)]
+    pub supersedes: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -23,7 +30,9 @@ pub struct ThumbnailPackInfo {
 pub struct CollectionManifest {
     pub torrent_infohash: String,
     pub game_count: u32,
-    pub thumbnail_pack: Option<ThumbnailPackInfo>,
+    /// Available content packs keyed by pack ID (e.g. "posters", "media").
+    #[serde(default)]
+    pub content_packs: HashMap<String, ContentPackInfo>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -51,28 +60,36 @@ pub struct UpdateInfo {
 
 // ── Manifest loading ──────────────────────────────────────────────────────────
 
-fn load_manifest() -> Result<Manifest, String> {
+/// Load the manifest from the best available source.
+/// Dev mode reads from the project root. Production reads the bundled copy
+/// from resource_dir (shipped via bundle.resources). HTTP fetch from a remote
+/// manifest_url is a future improvement (v0.2+).
+pub(crate) fn load_manifest() -> Result<Manifest, String> {
     // Dev: read from the project root next to Cargo.toml
-    #[cfg(debug_assertions)]
-    {
-        let manifest_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .ok_or("cannot resolve project root")?
-            .join("manifest.json");
-        if manifest_path.exists() {
-            let content = std::fs::read_to_string(&manifest_path)
-                .map_err(|e| format!("cannot read manifest.json: {}", e))?;
-            return serde_json::from_str(&content)
-                .map_err(|e| format!("cannot parse manifest.json: {}", e));
-        }
-        return Err("manifest.json not found in project root".to_string());
+    let dev_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .map(|p| p.join("manifest.json"))
+        .unwrap_or_default();
+    if dev_path.exists() {
+        let content = std::fs::read_to_string(&dev_path)
+            .map_err(|e| format!("cannot read manifest.json: {}", e))?;
+        return serde_json::from_str(&content)
+            .map_err(|e| format!("cannot parse manifest.json: {}", e));
     }
 
-    // Production: HTTP fetch — not yet implemented (needs reqwest).
-    // When ready, read the URL from the manifest's own `manifest_url` field
-    // or a compile-time constant, then deserialise the response.
-    #[allow(unreachable_code)]
-    Err("Remote manifest fetch not yet implemented".to_string())
+    // Production: read the bundled copy from resource_dir.
+    if let Some(res_dir) = super::setup::RESOURCE_DIR.get() {
+        let bundled = res_dir.join("manifest.json");
+        if bundled.exists() {
+            let content = std::fs::read_to_string(&bundled)
+                .map_err(|e| format!("cannot read bundled manifest.json: {}", e))?;
+            return serde_json::from_str(&content)
+                .map_err(|e| format!("cannot parse bundled manifest.json: {}", e));
+        }
+    }
+
+    // TODO (v0.2): HTTP fetch from manifest_url as final fallback.
+    Err("manifest.json not found (dev path or resource_dir)".to_string())
 }
 
 // ── Tauri command ─────────────────────────────────────────────────────────────

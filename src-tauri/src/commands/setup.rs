@@ -1,9 +1,20 @@
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 use tokio::sync::RwLock;
+
+/// Cached Tauri resource_dir(), set once during app setup. Needed because
+/// sync helpers (bundled_metadata_dir, bundled_torrent_path) are called from
+/// contexts that don't carry an AppHandle — and without this cache they'd
+/// have to be plumbed everywhere.
+pub(crate) static RESOURCE_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+/// Called once from lib.rs' setup closure with the app's resource directory.
+pub fn init_resource_dir(dir: PathBuf) {
+    let _ = RESOURCE_DIR.set(dir);
+}
 
 use crate::db;
 use crate::db::queries;
@@ -124,17 +135,18 @@ pub async fn init_download_manager(
     };
     let collections: Vec<&str> = collections_str.split(',').collect();
 
-    let mut managers = torrent_state.0.write().await;
     let metadata_dir = bundled_metadata_dir().ok();
 
     // All collections share one librqbit session and the same data directory.
-    // The torrent files have no overlapping file paths, so all four torrents
-    // extract cleanly into <data_dir>/eXoDOS/ — matching the original eXoDOS layout.
     // Session state (.librqbit/) is stored in the app config dir, not the game data dir.
     let config_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let session = DownloadManager::create_session(&config_dir)
         .await
         .map_err(|e| e.to_string())?;
+
+    // Build all managers and do slow work (infohash, config extraction) WITHOUT holding
+    // the torrent_state write lock — archive.extract() on 7 000+ files blocks for seconds.
+    let mut new_managers: Vec<(String, Arc<DownloadManager>)> = Vec::new();
 
     for col in COLLECTION_MAP {
         if !collections.contains(&col.id) {
@@ -178,7 +190,7 @@ pub async fn init_download_manager(
                         }
                     }
                     log::info!("Initialized download manager: {}", col.id);
-                    managers.insert(col.id.to_string(), Arc::new(mgr));
+                    new_managers.push((col.id.to_string(), Arc::new(mgr)));
                 }
                 Err(e) => {
                     log::warn!("Failed to init {} download manager: {}", col.id, e);
@@ -187,8 +199,17 @@ pub async fn init_download_manager(
         }
     }
 
-    log::info!("Download managers initialized: {} (data_dir: {})", managers.len(), data_dir);
-    Ok(!managers.is_empty())
+    // Acquire write lock only for the insert — no blocking work inside.
+    let count = new_managers.len();
+    {
+        let mut managers = torrent_state.0.write().await;
+        for (id, mgr) in new_managers {
+            managers.insert(id, mgr);
+        }
+    }
+
+    log::info!("Download managers initialized: {} (data_dir: {})", count, data_dir);
+    Ok(count > 0)
 }
 
 /// Reset all data: clear DB, remove config. Returns to setup state.
@@ -198,6 +219,7 @@ pub async fn factory_reset(
     torrent_state: State<'_, TorrentState>,
     delete_game_data: bool,
 ) -> Result<(), String> {
+    log::info!("factory_reset called (delete_game_data={})", delete_game_data);
     // Read data_dir before clearing config (Mutex must not be held across await)
     let data_dir = if delete_game_data {
         let conn = db_state.0.lock().map_err(|e| e.to_string())?;
@@ -206,8 +228,17 @@ pub async fn factory_reset(
         None
     };
 
-    // Drop all download managers
-    torrent_state.0.write().await.clear();
+    // Drop all download managers. Use a timeout so a stuck reader doesn't hang forever.
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        torrent_state.0.write(),
+    ).await {
+        Ok(mut managers) => managers.clear(),
+        Err(_) => {
+            log::error!("factory_reset: timed out waiting for torrent write lock");
+            return Err("Could not stop downloads in time. Cancel any active downloads and try again.".to_string());
+        }
+    }
 
     // Reset user state without touching the game catalog.
     // Games are catalog data (from the bundled DB) — clearing them would leave
@@ -225,18 +256,29 @@ pub async fn factory_reset(
         .map_err(|e| e.to_string())?;
     }
 
-    // Optionally delete the eXoDOS game folder.
+    // Optionally delete the eXoDOS game folder + content packs + stale downloads.
     // data_dir is the PARENT of the eXoDOS folder, so we delete <data_dir>/eXoDOS/,
     // never data_dir itself (which could be the home directory).
     if let Some(dir) = data_dir {
         if !dir.is_empty() {
-            let exodos_path = std::path::Path::new(&dir).join("eXoDOS");
+            let base = std::path::Path::new(&dir);
+            let exodos_path = base.join("eXoDOS");
             if exodos_path.exists() {
                 log::info!("Deleting game data folder: {}", exodos_path.display());
                 if let Err(e) = std::fs::remove_dir_all(&exodos_path) {
                     log::error!("Failed to delete game data folder: {}", e);
                     return Err(format!("Failed to delete game data: {}", e));
                 }
+            }
+            // Also remove downloaded content packs and staging artifacts.
+            let content_path = base.join("content");
+            if content_path.exists() {
+                log::info!("Deleting content packs: {}", content_path.display());
+                let _ = std::fs::remove_dir_all(&content_path);
+            }
+            let downloads_path = base.join(".content-downloads");
+            if downloads_path.exists() {
+                let _ = std::fs::remove_dir_all(&downloads_path);
             }
         }
     }
@@ -272,6 +314,56 @@ pub fn get_thumbnail_dir(
     }
 
     Err("Thumbnail directory not found".to_string())
+}
+
+/// Get the Tier 0 preview directory for a collection.
+/// Dev: <repo>/src-tauri/resources/previews/<collection>
+/// Prod: <resource_dir>/previews/<collection>
+#[tauri::command]
+pub fn get_preview_dir(collection: String) -> Result<String, String> {
+    let dev_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("resources")
+        .join("previews")
+        .join(&collection);
+    if dev_path.exists() {
+        return Ok(dev_path.to_string_lossy().to_string());
+    }
+
+    if let Some(res_dir) = RESOURCE_DIR.get() {
+        let prod_path = res_dir.join("previews").join(&collection);
+        if prod_path.exists() {
+            return Ok(prod_path.to_string_lossy().to_string());
+        }
+    }
+
+    Err("Preview directory not found".to_string())
+}
+
+/// Get the Tier 1 poster content-pack directory for a collection.
+/// Returns <data_dir>/content/posters/<collection> if it exists.
+#[tauri::command]
+pub fn get_poster_dir(
+    db_state: State<DbState>,
+    collection: String,
+) -> Result<String, String> {
+    let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+    let data_dir = queries::get_config(&conn, "data_dir")
+        .map_err(|e| e.to_string())?
+        .ok_or("Data directory not configured")?;
+    let base = PathBuf::from(&data_dir).join("content").join("posters");
+    // Check collection-specific dir first, fall back to eXoDOS.
+    // All poster thumbnails live in the eXoDOS pack; LP collections share them.
+    let poster_path = base.join(&collection);
+    if poster_path.exists() {
+        return Ok(poster_path.to_string_lossy().to_string());
+    }
+    if collection != "eXoDOS" {
+        let fallback = base.join("eXoDOS");
+        if fallback.exists() {
+            return Ok(fallback.to_string_lossy().to_string());
+        }
+    }
+    Err("Poster directory not found".to_string())
 }
 
 /// Return the default parent directory for game storage ($HOME).
@@ -337,6 +429,11 @@ pub const COLLECTION_MAP: &[CollectionDef] = &[
 ];
 
 /// Resolve bundled metadata directory.
+///
+/// Dev mode reads straight from the repo tree via CARGO_MANIFEST_DIR. Prod
+/// mode looks inside the Tauri resource_dir cached by `init_resource_dir`
+/// at app startup. current_exe().parent() is NOT used because on macOS
+/// that's Contents/MacOS/ while bundled resources live in Contents/Resources/.
 pub fn bundled_metadata_dir() -> Result<PathBuf, String> {
     let dev_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -346,16 +443,22 @@ pub fn bundled_metadata_dir() -> Result<PathBuf, String> {
         return Ok(dev_path);
     }
 
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let prod_path = dir.join("metadata");
-            if prod_path.exists() {
-                return Ok(prod_path);
-            }
+    if let Some(res_dir) = RESOURCE_DIR.get() {
+        let prod_path = res_dir.join("metadata");
+        if prod_path.exists() {
+            return Ok(prod_path);
         }
+        return Err(format!(
+            "Bundled metadata not found in resource dir {} (dev path also missing: {})",
+            res_dir.display(),
+            dev_path.display()
+        ));
     }
 
-    Err(format!("Bundled metadata not found (checked: {})", dev_path.display()))
+    Err(format!(
+        "Bundled metadata not found: resource_dir uninitialized and dev path {} missing",
+        dev_path.display()
+    ))
 }
 
 /// Get info about the bundled torrent without starting anything.
@@ -433,9 +536,15 @@ pub async fn get_setup_status(
     db_state: State<'_, DbState>,
     torrent_state: State<'_, TorrentState>,
 ) -> Result<SetupStatus, String> {
-    let guard = torrent_state.0.read().await;
-    let manager = match guard.get("eXoDOS") {
-        Some(m) => m,
+    // Clone the Arc so we can drop the read guard before any .await points.
+    // Holding the guard across awaits blocks factory_reset's write lock indefinitely.
+    let manager_arc = {
+        let guard = torrent_state.0.read().await;
+        guard.get("eXoDOS").cloned()
+    };
+
+    let manager = match manager_arc {
+        Some(ref m) => m,
         None => {
             // Ready if data_dir is configured AND the game DB has content
             let (has_data_dir, count) = {
@@ -688,17 +797,6 @@ pub async fn setup_from_local(
         queries::set_config(&conn, "collections", &all_collections).map_err(|e| e.to_string())?;
     }
 
-    // Find !DOSmetadata.zip for DOSBox configs
-    let dosbox_zip_candidates = [
-        root.join("Content/!DOSmetadata.zip"),
-        root.join("eXo/Content/!DOSmetadata.zip"),
-        root.join("!DOSmetadata.zip"),
-    ];
-    let dosbox_zip_path = dosbox_zip_candidates
-        .iter()
-        .find(|p| p.exists())
-        .cloned();
-
     // The bundled DB already has the full game catalog — no need to re-parse the
     // eXoDOS XML (XODOSMetadata.zip is 5 GB and would block for minutes).
     // Just report how many games are in the current DB.
@@ -710,6 +808,7 @@ pub async fn setup_from_local(
 
     // Init download managers for all collections (for future game downloads).
     // Session state goes in the app config dir, game files in the existing eXoDOS tree.
+    // Build managers WITHOUT holding the write lock — create_session is async and can be slow.
     let config_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let data_path = PathBuf::from(&data_dir);
 
@@ -717,35 +816,410 @@ pub async fn setup_from_local(
         .await
         .map_err(|e| format!("Failed to init session: {}", e))?;
 
-    let mut managers = torrent_state.0.write().await;
+    let mut new_managers = Vec::new();
     for col in COLLECTION_MAP {
         if let Ok(col_torrent_path) = bundled_torrent_path(col.torrent_file) {
             match DownloadManager::new_with_session(Arc::clone(&session), &col_torrent_path, &data_path) {
-                Ok(mgr) => {
-                    managers.insert(col.id.to_string(), Arc::new(mgr));
-                }
+                Ok(mgr) => new_managers.push((col.id.to_string(), Arc::new(mgr))),
                 Err(e) => log::warn!("Failed to init {} download manager: {}", col.id, e),
             }
         }
     }
 
-    // Extract !DOSmetadata.zip (DOSBox configs) into the torrent root if found
-    if let Some(dosbox_zip) = dosbox_zip_path {
-        if let Some(main_mgr) = managers.get("eXoDOS") {
-            let torrent_root = main_mgr.torrent_root();
-            let dosbox_zip = dosbox_zip.clone();
-            tauri::async_runtime::spawn_blocking(move || {
-                log::info!("Extracting DOSBox configs to {}", torrent_root.display());
-                let file = std::fs::File::open(&dosbox_zip).map_err(|e| e.to_string())?;
-                let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
-                archive.extract(&torrent_root).map_err(|e| e.to_string())
-            })
-            .await
-            .map_err(|e| e.to_string())??;
+    // Backfill any LP collections that are absent from the DB.
+    // This happens when the DB was originally built from XODOSMetadata.zip (EN only) by the
+    // old setup path.  The bundled .xml.gz files always include all LP catalogs, so we import
+    // whichever collections are missing and then run match_torrent_indices to wire up
+    // torrent_source / game_torrent_index.
+    if let Ok(metadata_dir) = bundled_metadata_dir() {
+        for (col_id, manager) in &new_managers {
+            let col = match collection_def(col_id) {
+                Some(c) => c,
+                None => continue,
+            };
+            if col.lang_dir.is_none() {
+                continue; // base eXoDOS — skip
+            }
+
+            let already_in_db: i64 = {
+                let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+                conn.query_row(
+                    "SELECT COUNT(*) FROM games WHERE torrent_source = ?1",
+                    rusqlite::params![col_id],
+                    |r| r.get(0),
+                )
+                .unwrap_or(0)
+            };
+            if already_in_db > 0 {
+                continue;
+            }
+
+            let xml_gz = metadata_dir.join(col.metadata_file);
+            if !xml_gz.exists() {
+                log::warn!("Bundled metadata not found for {}: {}", col_id, xml_gz.display());
+                continue;
+            }
+
+            let imported = {
+                let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+                import::import_from_gz(&xml_gz, &conn, col.shortcode_segment)
+                    .unwrap_or_else(|e| {
+                        log::warn!("Failed to import {} XML: {}", col_id, e);
+                        0
+                    })
+            };
+            log::info!("Backfilled {} {} games from bundled XML", imported, col_id);
+
+            if imported > 0 {
+                // Wire up game_torrent_index and torrent_source for the newly imported rows.
+                let torrent_index = manager.index().clone();
+                let col_id_owned = col_id.clone();
+                let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+                if let Err(e) = match_torrent_indices(&conn, &torrent_index, &col_id_owned) {
+                    log::warn!("match_torrent_indices failed for {}: {}", col_id_owned, e);
+                }
+            }
+        }
+
+        // Backfill shortcodes, dosbox_conf and has_thumbnail for LP games that lack them.
+        // PLP and SLP XMLs use a path format without the "!dos/<shortcode>" segment, so their
+        // shortcodes (and derived dosbox_conf) come out as NULL after import.  Mirror the same
+        // two-step approach as generate_db.rs: exact EN title match first.
+        // This is idempotent — rows already having values are unaffected.
+        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let _ = conn.execute_batch(
+            "-- Inherit shortcode from the matching EN game by exact title
+             UPDATE games
+             SET shortcode = (
+                 SELECT en.shortcode FROM games en
+                 WHERE en.language = 'EN'
+                   AND en.shortcode IS NOT NULL
+                   AND en.title = games.title
+                 LIMIT 1
+             )
+             WHERE shortcode IS NULL;
+
+             -- Second pass: normalized title match (handles punctuation differences like
+             -- 'Foo - Bar' vs 'Foo: Bar').  Only touches LP rows still without a shortcode.
+             UPDATE games
+             SET shortcode = (
+                 SELECT en.shortcode FROM games en
+                 WHERE en.language = 'EN'
+                   AND en.shortcode IS NOT NULL
+                   AND LOWER(TRIM(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
+                         en.title, ':', ' '), '-', ' '), ',', ''), '.', ''), '  ', ' ')))
+                     = LOWER(TRIM(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
+                         games.title, ':', ' '), '-', ' '), ',', ''), '.', ''), '  ', ' ')))
+                 LIMIT 1
+             )
+             WHERE shortcode IS NULL AND language != 'EN';
+
+             -- LP games use the EN DOSBox config; backfill dosbox_conf from the EN variant
+             UPDATE games
+             SET dosbox_conf = (
+                 SELECT en.dosbox_conf FROM games en
+                 WHERE en.shortcode = games.shortcode
+                   AND en.language = 'EN'
+                   AND en.dosbox_conf IS NOT NULL
+                 LIMIT 1
+             )
+             WHERE dosbox_conf IS NULL AND shortcode IS NOT NULL;
+
+             -- Propagate has_thumbnail flag from EN variant (same shortcode = same cover art)
+             UPDATE games
+             SET has_thumbnail = 1
+             WHERE shortcode IN (
+                 SELECT shortcode FROM games WHERE language = 'EN' AND has_thumbnail = 1
+             )
+             AND has_thumbnail = 0;",
+        );
+        log::info!("LP shortcode/dosbox_conf/has_thumbnail backfill complete");
+
+        // Pass 3: pull shortcodes for LP-exclusive games from the bundled static DB.
+        // metadata/exodium.db (built by generate_db.rs) contains 100% shortcode coverage
+        // including LP-exclusive games with no EN equivalent (via generate_shortcode()).
+        // Passes 1 & 2 only matched titles present in the EN catalog; this covers the rest.
+        //
+        // ATTACH and DETACH are issued as separate calls so DETACH always runs even when an
+        // UPDATE fails — execute_batch stops at the first error, which would leave lp_static
+        // attached for the lifetime of the connection if DETACH were part of the same batch.
+        let static_db = metadata_dir.join("exodium.db");
+        if static_db.exists() {
+            let path_esc = static_db.to_string_lossy().replace('\'', "''");
+            let attach_ok = conn
+                .execute_batch(&format!("ATTACH DATABASE '{path}' AS lp_static;", path = path_esc))
+                .is_ok();
+            if attach_ok {
+                let result = conn.execute_batch(
+                    "UPDATE games
+                     SET shortcode = (
+                         SELECT s.shortcode FROM lp_static.games s
+                         WHERE s.title = games.title AND s.shortcode IS NOT NULL
+                         LIMIT 1
+                     )
+                     WHERE shortcode IS NULL AND language != 'EN';
+                     UPDATE games
+                     SET has_thumbnail = COALESCE((
+                         SELECT s.has_thumbnail FROM lp_static.games s
+                         WHERE s.title = games.title
+                         LIMIT 1
+                     ), has_thumbnail)
+                     WHERE language != 'EN' AND shortcode IS NOT NULL;
+                     UPDATE games
+                     SET dosbox_conf = (
+                         SELECT en.dosbox_conf FROM games en
+                         WHERE en.shortcode = games.shortcode
+                           AND en.language = 'EN'
+                           AND en.dosbox_conf IS NOT NULL
+                         LIMIT 1
+                     )
+                     WHERE dosbox_conf IS NULL AND shortcode IS NOT NULL;",
+                );
+                let _ = conn.execute_batch("DETACH DATABASE lp_static;");
+                match result {
+                    Ok(_) => log::info!("Pass 3: LP-exclusive shortcode backfill from static DB complete"),
+                    Err(e) => log::warn!("Pass 3: LP-exclusive shortcode backfill from static DB failed: {}", e),
+                }
+            } else {
+                log::warn!("Pass 3: failed to attach {:?}, skipping LP backfill", static_db);
+            }
+        } else {
+            log::debug!("Static exodium.db not found at {:?}, skipping Pass 3 LP backfill", static_db);
         }
     }
 
+    // Briefly acquire write lock just to insert — no awaits inside this block.
+    {
+        let mut managers = torrent_state.0.write().await;
+        for (id, mgr) in new_managers {
+            managers.insert(id, mgr);
+        }
+    }
+
+    // The user's existing eXoDOS tree already has all DOSBox configs in place.
+    // No need to extract !DOSmetadata.zip — that's only required when downloading from scratch.
+    // (init_download_manager handles the bundled configs zip for fresh installs.)
+
+    // Scan the existing eXoDOS tree to mark games that are already on disk as installed.
+    let installed_count = scan_installed_games_with_db(&db_state.0, &data_dir)
+        .unwrap_or_else(|e| { log::warn!("scan_installed_games failed: {}", e); 0 });
+    log::info!("Import from local complete: {} games, {} installed, data_dir={}", count, installed_count, data_dir);
+
     Ok(count)
+}
+
+/// Scan the eXoDOS directory tree and mark games whose directories exist on disk
+/// as `installed = 1, in_library = 1`.  Returns the number of rows updated.
+///
+/// This is called automatically at the end of `setup_from_local` and is also
+/// exposed as the `scan_installed_games` Tauri command so the user can re-run it
+/// from the Settings panel after manually adding game files.
+fn scan_installed_games_with_db(
+    db: &std::sync::Mutex<rusqlite::Connection>,
+    data_dir: &str,
+) -> Result<usize, String> {
+    // The eXoDOS torrent always creates a folder called "eXoDOS" inside data_dir.
+    // Extracted game data lives at:
+    //   eXo/eXoDOS/<shortcode>/           — English (eXoDOS)
+    //   eXo/eXoDOS/!german/<shortcode>/   — German LP (GLP)
+    //   eXo/eXoDOS/!polish/<shortcode>/   — Polish LP (PLP)
+    //   eXo/eXoDOS/!spanish/<shortcode>/  — Spanish LP (SLP)
+    //
+    // Note: eXo/eXoDOS/!dos/<shortcode>/ contains only config/script files and is
+    // ALWAYS present in any eXoDOS installation — it is NOT an indicator of game installation.
+    let game_base = PathBuf::from(data_dir)
+        .join("eXoDOS")
+        .join("eXo")
+        .join("eXoDOS");
+
+    // Reset all installed flags before the scan so that games whose extracted directory
+    // was removed are correctly flipped back to "not installed".
+    // in_library is also cleared — the scan is the authoritative source for local installs.
+    {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        conn.execute_batch("UPDATE games SET installed = 0, in_library = 0")
+            .map_err(|e| e.to_string())?;
+    }
+
+    let mut total = 0usize;
+
+    for col in COLLECTION_MAP {
+        let shortcodes: Vec<String> = if let Some(lang_dir) = col.lang_dir {
+            // LP collection: extracted game data is at game_base/<lang_dir>/<shortcode>/
+            let seg_dir = game_base.join(lang_dir);
+            if !seg_dir.is_dir() {
+                continue;
+            }
+            match std::fs::read_dir(&seg_dir) {
+                Ok(entries) => entries
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.path().is_dir())
+                    .filter_map(|e| e.file_name().into_string().ok())
+                    .collect(),
+                Err(e) => {
+                    log::warn!("scan_installed_games: cannot read {}: {}", seg_dir.display(), e);
+                    continue;
+                }
+            }
+        } else {
+            // Base EN collection: extracted game data is directly at game_base/<shortcode>/
+            // Filter out system/language dirs (starting with '!' or '.') which are always present.
+            if !game_base.is_dir() {
+                continue;
+            }
+            match std::fs::read_dir(&game_base) {
+                Ok(entries) => entries
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.path().is_dir())
+                    .filter_map(|e| e.file_name().into_string().ok())
+                    .filter(|name| !name.starts_with('!') && !name.starts_with('.'))
+                    .collect(),
+                Err(e) => {
+                    log::warn!("scan_installed_games: cannot read {}: {}", game_base.display(), e);
+                    continue;
+                }
+            }
+        };
+
+        if shortcodes.is_empty() {
+            continue;
+        }
+
+        // Build "UPDATE … WHERE shortcode IN (?, ?, …) AND torrent_source = ?"
+        let placeholders = shortcodes.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+        let sql = format!(
+            "UPDATE games SET installed = 1, in_library = 1 WHERE shortcode IN ({}) AND torrent_source = ?",
+            placeholders
+        );
+
+        // Append torrent_source as the last bind value so we can use params_from_iter.
+        let mut all_params: Vec<String> = shortcodes.clone();
+        all_params.push(col.id.to_string());
+
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let rows = conn
+            .execute(&sql, rusqlite::params_from_iter(all_params.iter()))
+            .map_err(|e| e.to_string())?;
+
+        log::info!(
+            "scan_installed_games: {} of {} dirs matched in DB for {}",
+            rows,
+            shortcodes.len(),
+            col.id
+        );
+        total += rows;
+    }
+
+    // Pass 2: detect downloaded-but-not-extracted game ZIPs → mark as installed + in_library.
+    // All eXoDOS game ZIPs live at game_base/<title with year>.zip regardless of collection.
+    // This mirrors LaunchBox behavior where games stay as ZIPs until first launch.
+    //
+    // IMPORTANT: Only match ZIPs to non-LP (base) collections.  LP collections (GLP, PLP, SLP)
+    // may share English titles with eXoDOS games; including them in the HashMap would cause
+    // title collisions where an EN ZIP incorrectly marks an LP game as installed.
+    // LP games are only considered installed when their extracted directory exists (Pass 1).
+    if game_base.is_dir() {
+        // Build lookup: zip_stem → game_id, restricted to non-LP collections.
+        let lp_sources: Vec<String> = COLLECTION_MAP
+            .iter()
+            .filter(|c| c.lang_dir.is_some())
+            .map(|c| c.id.to_string())
+            .collect();
+        let lp_placeholders = lp_sources.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+        let zip_query = format!(
+            "SELECT id, title, application_path FROM games \
+             WHERE installed = 0 AND in_library = 0 \
+             AND torrent_source NOT IN ({})",
+            lp_placeholders
+        );
+
+        let name_to_id: std::collections::HashMap<String, i64> = {
+            let conn = db.lock().map_err(|e| e.to_string())?;
+            let mut stmt = conn
+                .prepare(&zip_query)
+                .map_err(|e| e.to_string())?;
+            // Collect eagerly so stmt and conn can be dropped before the HashMap build.
+            let rows: Vec<(i64, String, Option<String>)> = stmt
+                .query_map(rusqlite::params_from_iter(lp_sources.iter()), |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                    ))
+                })
+                .map_err(|e| e.to_string())?
+                .filter_map(|r| r.ok())
+                .collect();
+            rows.into_iter()
+                .map(|(id, title, app_path)| {
+                    let name = app_path
+                        .as_deref()
+                        .and_then(game_name_from_app_path)
+                        .unwrap_or(title);
+                    (name, id)
+                })
+                .collect()
+        };
+
+        let zip_ids: Vec<i64> = match std::fs::read_dir(&game_base) {
+            Ok(entries) => entries
+                .filter_map(|e| e.ok())
+                .filter(|e| {
+                    e.path()
+                        .extension()
+                        .map_or(false, |ext| ext.eq_ignore_ascii_case("zip"))
+                        // Skip zero-byte stubs and tiny torrent placeholders (<1 KB)
+                        && e.metadata().map(|m| m.len() >= 1024).unwrap_or(false)
+                })
+                .filter_map(|e| {
+                    let stem = e.path().file_stem()?.to_string_lossy().into_owned();
+                    name_to_id.get(&stem).copied()
+                })
+                .collect(),
+            Err(e) => {
+                log::warn!(
+                    "scan_installed_games: cannot scan {} for ZIPs: {}",
+                    game_base.display(),
+                    e
+                );
+                vec![]
+            }
+        };
+
+        if !zip_ids.is_empty() {
+            let placeholders = zip_ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+            let sql = format!(
+                "UPDATE games SET installed = 1, in_library = 1 WHERE id IN ({})",
+                placeholders
+            );
+            let conn = db.lock().map_err(|e| e.to_string())?;
+            let rows = conn
+                .execute(&sql, rusqlite::params_from_iter(zip_ids.iter()))
+                .map_err(|e| e.to_string())?;
+            log::info!(
+                "scan_installed_games: {} games marked installed from ZIP scan ({} ZIPs found)",
+                rows,
+                zip_ids.len()
+            );
+            total += rows;
+        }
+    }
+
+    Ok(total)
+}
+
+/// Re-scan the eXoDOS directory tree to detect games already downloaded to disk,
+/// marking them as `installed` and `in_library`.  Returns the count of games updated.
+#[tauri::command]
+pub async fn scan_installed_games(
+    db_state: State<'_, DbState>,
+) -> Result<usize, String> {
+    let data_dir = {
+        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        queries::get_config(&conn, "data_dir").map_err(|e| e.to_string())?
+    };
+    let data_dir = data_dir.ok_or("data_dir not configured")?;
+    scan_installed_games_with_db(&db_state.0, &data_dir)
 }
 
 /// Result of validating a candidate eXoDOS installation directory.
@@ -800,28 +1274,25 @@ pub fn validate_exodos_dir(path: String) -> Result<ExodosValidation, String> {
 
 /// Resolve bundled torrent file path.
 fn bundled_torrent_path(filename: &str) -> Result<PathBuf, String> {
-    // In development, look relative to Cargo manifest
+    // Dev mode reads from the repo tree.
     let dev_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .map(|p| p.join("torrents").join(filename))
         .unwrap_or_default();
-
     if dev_path.exists() {
         return Ok(dev_path);
     }
 
-    // In production, look next to the executable
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let prod_path = dir.join("torrents").join(filename);
-            if prod_path.exists() {
-                return Ok(prod_path);
-            }
+    // Production reads from the Tauri resource_dir (cached at startup).
+    if let Some(res_dir) = RESOURCE_DIR.get() {
+        let prod_path = res_dir.join("torrents").join(filename);
+        if prod_path.exists() {
+            return Ok(prod_path);
         }
     }
 
     Err(format!(
-        "Bundled torrent '{}' not found (checked: {})",
+        "Bundled torrent '{}' not found (dev path: {})",
         filename,
         dev_path.display()
     ))

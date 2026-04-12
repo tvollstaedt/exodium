@@ -1,8 +1,6 @@
 import { createSignal, onMount, Show } from "solid-js";
 import { open } from "@tauri-apps/plugin-dialog";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Progress } from "@ark-ui/solid/progress";
-import { WindowControls } from "../components/WindowControls";
 import {
   setupFromLocal,
   validateExodosDir,
@@ -107,6 +105,9 @@ export function Setup(props: SetupProps) {
     setError("");
     try {
       await setupFromLocal(exodosDir());
+      // Re-initialize download managers via the standard path so DOSBox configs
+      // are extracted and all collections get a robust manager setup.
+      await initDownloadManager();
       props.onComplete();
     } catch (e) {
       setError(`Import failed: ${e}`);
@@ -122,12 +123,7 @@ export function Setup(props: SetupProps) {
   };
 
   return (
-    <div class="setup-page" onMouseDown={(e) => {
-      if ((e.target as HTMLElement).closest('.setup-card, .setup-window-controls')) { return; }
-      getCurrentWindow().startDragging();
-    }}>
-      <div class="setup-window-controls"><WindowControls /></div>
-
+    <div class="setup-page">
       <div class="setup-card">
         <h2>Welcome to Exodium</h2>
 

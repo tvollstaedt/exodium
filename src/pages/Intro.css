@@ -6,18 +6,9 @@
   padding: 32px;
 }
 
-.intro-window-controls {
-  position: fixed;
-  top: 8px;
-  right: 12px;
-  -webkit-app-region: no-drag;
-  z-index: 10;
-}
-
 .intro-content {
   max-width: 620px;
   width: 100%;
-  -webkit-app-region: no-drag;
 }
 
 .intro-title {

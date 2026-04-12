@@ -261,9 +261,27 @@ pub fn fetch_game_variants(conn: &Connection, shortcode: &str) -> DbResult<Vec<G
         GAME_COLUMNS
     );
     let mut stmt = conn.prepare_cached(&sql)?;
-    let games = stmt
+    let mut games = stmt
         .query_map(params![shortcode], row_to_game)?
         .collect::<Result<Vec<_>, _>>()?;
+
+    // LP overlay ZIPs (< 1 MB) are just localized bat files — they require the EN base game
+    // to function. Always show the combined total (LP overlay + EN base) so the user sees a
+    // consistent, realistic game size regardless of whether EN is already on disk.
+    if let Some(en_game) = games.iter().find(|g| g.language == "EN") {
+        let en_size = en_game.download_size.unwrap_or(0);
+        if en_size > 0 {
+            for game in &mut games {
+                if game.language != "EN" {
+                    let lp_size = game.download_size.unwrap_or(0);
+                    if lp_size < 1_000_000 {
+                        game.download_size = Some(lp_size + en_size);
+                    }
+                }
+            }
+        }
+    }
+
     Ok(games)
 }
 

@@ -90,9 +90,6 @@ export async function getGame(id: number): Promise<Game | null> {
   return invoke("get_game", { id });
 }
 
-export async function importGames(zipPath: string): Promise<number> {
-  return invoke("import_games", { zipPath });
-}
 
 export async function launchGame(id: number): Promise<string> {
   return invoke("launch_game", { id });
@@ -208,4 +205,63 @@ export interface CollectionInfo {
 
 export async function getAvailableCollections(): Promise<CollectionInfo[]> {
   return invoke("get_available_collections");
+}
+
+export async function scanInstalledGames(): Promise<number> {
+  return invoke("scan_installed_games");
+}
+
+// ── Content Packs ────────────────────────────────────────────────────────────
+
+export interface ContentPackStatus {
+  id: string;
+  display_name: string;
+  description: string;
+  size_bytes: number;
+  version: number;
+  supersedes: string[];
+  available: boolean;
+  installed: boolean;
+  installed_version?: number;
+}
+
+export interface ContentPackProgress {
+  phase: string;
+  downloaded_bytes: number;
+  total_bytes: number;
+  progress: number;
+  finished: boolean;
+  installed: boolean;
+  error: string | null;
+}
+
+export async function listContentPacks(collection: string): Promise<ContentPackStatus[]> {
+  return invoke("list_content_packs", { collection });
+}
+
+export async function installContentPack(collection: string, packId: string): Promise<void> {
+  return invoke("install_content_pack", { collection, packId });
+}
+
+export async function uninstallContentPack(collection: string, packId: string): Promise<void> {
+  return invoke("uninstall_content_pack", { collection, packId });
+}
+
+export async function getContentPackProgress(
+  collection: string,
+  packId: string,
+): Promise<ContentPackProgress | null> {
+  return invoke("get_content_pack_progress", { collection, packId });
+}
+
+export async function cancelContentPackInstall(collection: string, packId: string): Promise<void> {
+  return invoke("cancel_content_pack_install", { collection, packId });
+}
+
+export async function getPreviewDir(collection: string): Promise<string> {
+  return invoke("get_preview_dir", { collection });
+}
+
+export async function getPosterDir(collection: string): Promise<string> {
+  return invoke("get_poster_dir", { collection });
 }

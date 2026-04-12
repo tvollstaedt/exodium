@@ -160,6 +160,7 @@ def build_title_to_shortcode_from_db(db_path: str) -> dict[str, str]:
     Query the pre-built exodium.db for title→shortcode mappings.
     This is the highest-priority source because generate_db.rs is the authoritative
     shortcode generator (including LP-exclusive games via generate_shortcode()).
+    Returns an empty dict if the DB is empty or has not been generated yet.
     """
     mapping: dict[str, str] = {}
     conn = sqlite3.connect(db_path)
@@ -172,6 +173,9 @@ def build_title_to_shortcode_from_db(db_path: str) -> dict[str, str]:
                 sw = article_swap(variant)
                 if sw:
                     mapping.setdefault(normalize(prenormalize(sw)), shortcode)
+    except sqlite3.OperationalError as e:
+        print(f"  WARNING: could not read {db_path} ({e}). "
+              f"Run 'cargo run --bin generate_db' to rebuild it.")
     finally:
         conn.close()
     return mapping
@@ -255,6 +259,16 @@ def main() -> None:
             print("Error: --extra-xml requires a path argument")
             sys.exit(1)
         extra_xml = raw_args[idx + 1]
+        raw_args = raw_args[:idx] + raw_args[idx + 2:]
+
+    preview_dir: Path | None = None
+    if "--preview-dir" in raw_args:
+        idx = raw_args.index("--preview-dir")
+        if idx + 1 >= len(raw_args):
+            print("Error: --preview-dir requires a path argument")
+            sys.exit(1)
+        preview_dir = Path(raw_args[idx + 1])
+        preview_dir.mkdir(parents=True, exist_ok=True)
         raw_args = raw_args[:idx] + raw_args[idx + 2:]
 
     if "--db" in raw_args:
@@ -349,6 +363,14 @@ def main() -> None:
                     img = img.resize((new_w, new_h), Image.LANCZOS)
                     img.save(out_path, "JPEG", quality=90, optimize=True)
                     matched += 1
+                    # Generate Tier 0 low-quality preview alongside full-size.
+                    if preview_dir is not None:
+                        preview_path = preview_dir / f"{shortcode}.jpg"
+                        if not preview_path.exists() or force:
+                            pw = 80
+                            ph = max(1, int(h * pw / w))
+                            preview = img.resize((pw, ph), Image.LANCZOS)
+                            preview.save(preview_path, "JPEG", quality=40, optimize=True)
                 except Exception as e:
                     print(f"  WARN: failed to process {name}: {e}")
 

@@ -5,7 +5,7 @@ import { Progress } from "@ark-ui/solid/progress";
 import type { Game } from "../api/tauri";
 import { launchGame, getGameVariants } from "../api/tauri";
 import { formatBytes, parseLangEntries, langBadgeClass, performUninstall } from "../util";
-import { thumbnailDirForCollection } from "../stores/thumbnails";
+import { bestThumbnailPath } from "../stores/thumbnails";
 import { downloads, startGameDownload, getDownloadState, cancelGameDownload } from "../stores/downloads";
 
 interface Props {
@@ -60,10 +60,10 @@ export function GameDetailPanel(props: Props) {
 
   const thumbSrc = () => {
     const g = props.game;
-    if (!g || !g.shortcode || !g.has_thumbnail) { return null; }
-    const dir = thumbnailDirForCollection(g.torrent_source);
-    if (!dir) { return null; }
-    return convertFileSrc(`${dir}/${g.shortcode}.jpg`);
+    if (!g) { return null; }
+    const path = bestThumbnailPath(g.torrent_source, g.shortcode, g.has_thumbnail);
+    if (!path) { return null; }
+    return convertFileSrc(path);
   };
 
   const langEntries = () => props.game ? parseLangEntries(props.game) : [];

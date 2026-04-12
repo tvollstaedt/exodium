@@ -1,6 +1,4 @@
 import { createSignal, For } from "solid-js";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { WindowControls } from "../components/WindowControls";
 import "./Intro.css";
 
 interface Collection {
@@ -71,13 +69,7 @@ export function Intro(props: IntroProps) {
   };
 
   return (
-    <div class="intro-page" onMouseDown={(e) => {
-      const tag = (e.target as HTMLElement).tagName.toLowerCase();
-      if (['button', 'input', 'select', 'a', 'h1', 'h3', 'p', 'span', 'svg'].includes(tag)) return;
-      if ((e.target as HTMLElement).closest('.collection-card, .intro-window-controls')) return;
-      getCurrentWindow().startDragging();
-    }}>
-      <div class="intro-window-controls"><WindowControls /></div>
+    <div class="intro-page">
       <div class="intro-content">
         <h1 class="intro-title">Exodium</h1>
         <p class="intro-subtitle">Select the collections you want to set up</p>

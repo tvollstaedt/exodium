@@ -5,20 +5,21 @@ import { Dialog } from "@ark-ui/solid/dialog";
 import { Tooltip } from "@ark-ui/solid/tooltip";
 import { Library } from "./pages/Library";
 import { Setup } from "./pages/Setup";
-import { WindowControls } from "./components/WindowControls";
-import { WindowFrame } from "./components/WindowFrame";
 import { SearchBar } from "./components/SearchBar";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { WelcomeModal } from "./components/WelcomeModal";
+import { ContentPackSettings } from "./components/ContentPackSettings";
+import { DownloadIndicator } from "./components/DownloadIndicator";
 import {
-  importGames,
   getSetupStatus,
   initDownloadManager,
   factoryReset,
   getConfig,
   setConfig,
+  scanInstalledGames,
 } from "./api/tauri";
 import { fetchGames } from "./stores/games";
 import { loadThumbnailDir } from "./stores/thumbnails";
+import { refreshInstalledPacks } from "./stores/contentPacks";
 import "./styles/main.css";
 
 type AppPhase = "loading" | "setup" | "ready";
@@ -26,9 +27,8 @@ type AppPhase = "loading" | "setup" | "ready";
 function App() {
   const [phase, setPhase] = createSignal<AppPhase>("loading");
   const [showSettings, setShowSettings] = createSignal(false);
+  const [showWelcomeModal, setShowWelcomeModal] = createSignal(false);
   const [dataDir, setDataDir] = createSignal("");
-  const [importing, setImporting] = createSignal(false);
-  const [importStatus, setImportStatus] = createSignal("");
   const [resetError, setResetError] = createSignal("");
 
   // Derived: the actual game storage folder shown to the user.
@@ -50,8 +50,9 @@ function App() {
           console.error("Failed to init download manager:", e);
         }
         const dir = await getConfig("data_dir");
-        if (dir) setDataDir(dir);
+        if (dir) { setDataDir(dir); }
         loadThumbnailDir();
+        refreshInstalledPacks();
       } else {
         setPhase("setup");
       }
@@ -63,28 +64,15 @@ function App() {
   const handleSetupComplete = async () => {
     setPhase("ready");
     const dir = await getConfig("data_dir");
-    if (dir) setDataDir(dir);
+    if (dir) { setDataDir(dir); }
     loadThumbnailDir();
+    refreshInstalledPacks();
     fetchGames();
-  };
 
-  const handleImport = async () => {
-    const selected = await open({
-      title: "Select eXoDOS metadata ZIP",
-      filters: [{ name: "ZIP archives", extensions: ["zip"] }],
-      multiple: false,
-    });
-    if (!selected) return;
-    setImporting(true);
-    setImportStatus("Importing...");
-    try {
-      const count = await importGames(selected);
-      setImportStatus(`${count} imported`);
-      fetchGames();
-    } catch (e) {
-      setImportStatus(`Error: ${e}`);
-    } finally {
-      setImporting(false);
+    // Show the welcome modal if the user hasn't seen it yet.
+    const welcomeSeen = await getConfig("welcome_seen");
+    if (welcomeSeen !== "1") {
+      setShowWelcomeModal(true);
     }
   };
 
@@ -96,6 +84,23 @@ function App() {
     await initDownloadManager();
   };
 
+  const [scanning, setScanning] = createSignal(false);
+  const [scanResult, setScanResult] = createSignal("");
+
+  const handleRescan = async () => {
+    setScanning(true);
+    setScanResult("");
+    try {
+      const count = await scanInstalledGames();
+      setScanResult(`${count} game${count !== 1 ? "s" : ""} marked as installed`);
+      fetchGames();
+    } catch (e) {
+      setScanResult(`Error: ${e}`);
+    } finally {
+      setScanning(false);
+    }
+  };
+
   const [showResetDialog, setShowResetDialog] = createSignal(false);
   const [deleteGameData, setDeleteGameData] = createSignal(false);
 
@@ -104,12 +109,15 @@ function App() {
     setShowResetDialog(false);
     setDeleteGameData(false);
     setResetError("");
+    console.log("[reset] calling factoryReset, deleteGameData=", doDelete);
     try {
       await factoryReset(doDelete);
+      console.log("[reset] factoryReset succeeded, switching to setup");
       setPhase("setup");
       setShowSettings(false);
       setDataDir("");
     } catch (e) {
+      console.error("[reset] factoryReset failed:", e);
       setResetError(`Reset failed: ${e}`);
       setShowSettings(true);
     }
@@ -117,7 +125,6 @@ function App() {
 
   return (
     <>
-      <WindowFrame />
       <Show when={phase() === "loading"}>
         <div class="loading">Loading...</div>
       </Show>
@@ -128,21 +135,11 @@ function App() {
 
       <Show when={phase() === "ready"}>
         <div class="top-bar">
-          <div class="drag-region" onMouseDown={() => getCurrentWindow().startDragging()} />
-          <span class="top-bar-logo">Exodium</span>
           <div class="top-bar-center">
             <SearchBar />
           </div>
           <div class="top-bar-actions">
-            {importStatus() && <span class="import-status">{importStatus()}</span>}
-            <Tooltip.Root openDelay={400}>
-              <Tooltip.Trigger asChild={(props) =>
-                <button {...props()} class="icon-btn" onClick={handleImport} disabled={importing()}>
-                  {importing() ? "..." : "+"}
-                </button>
-              } />
-              <Portal><Tooltip.Positioner><Tooltip.Content class="ark-tooltip">Import ZIP</Tooltip.Content></Tooltip.Positioner></Portal>
-            </Tooltip.Root>
+            <DownloadIndicator />
             <Tooltip.Root openDelay={400}>
               <Tooltip.Trigger asChild={(props) =>
                 <button {...props()} class="icon-btn" onClick={() => setShowSettings(true)}>
@@ -152,7 +149,6 @@ function App() {
               <Portal><Tooltip.Positioner><Tooltip.Content class="ark-tooltip">Settings</Tooltip.Content></Tooltip.Positioner></Portal>
             </Tooltip.Root>
           </div>
-          <WindowControls />
         </div>
 
         <Dialog.Root open={showSettings()} onOpenChange={(e) => setShowSettings(e.open)}>
@@ -167,6 +163,18 @@ function App() {
                     <span class="setting-value">{gameFolderPath() || "Not set"}</span>
                     <button class="btn-small" onClick={handleChangeDataDir}>Change</button>
                   </div>
+                  <div class="setting-row">
+                    <span class="setting-label">Installed games</span>
+                    <span class="setting-hint">Re-scan disk to detect already-downloaded games</span>
+                    <button class="btn-small" onClick={handleRescan} disabled={scanning()}>
+                      {scanning() ? "Scanning…" : "Scan"}
+                    </button>
+                  </div>
+                  <Show when={scanResult()}>
+                    <div class="setting-hint" style="margin-top:4px">{scanResult()}</div>
+                  </Show>
+                  <div class="settings-divider" />
+                  <ContentPackSettings />
                   <div class="settings-divider" />
                   <div class="setting-row">
                     <span class="setting-label">Factory Reset</span>
@@ -215,6 +223,11 @@ function App() {
         </Dialog.Root>
 
         <Library />
+
+        <WelcomeModal
+          open={showWelcomeModal()}
+          onClose={() => setShowWelcomeModal(false)}
+        />
       </Show>
     </>
   );

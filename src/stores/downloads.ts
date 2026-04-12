@@ -14,6 +14,9 @@ const [downloads, setDownloads] = createSignal<Record<number, DownloadState>>({}
 const intervals: Record<number, ReturnType<typeof setInterval>> = {};
 // Track when a game first reached 100% without finishing (stuck detection).
 const stuckSince: Record<number, number> = {};
+// Highest progress seen per game — prevents bar from jumping backwards due to
+// librqbit stats blips or component remounts resetting the CSS transition.
+const maxProgress: Record<number, number> = {};
 
 export { downloads };
 
@@ -22,6 +25,7 @@ export function getDownloadState(gameId: number): DownloadState | undefined {
 }
 
 export function startGameDownload(gameId: number) {
+  maxProgress[gameId] = 0;
   setDownloads((prev) => ({
     ...prev,
     [gameId]: { status: "Starting download...", progress: 0, downloading: true },
@@ -31,10 +35,15 @@ export function startGameDownload(gameId: number) {
     try {
       const p = await getDownloadProgress(gameId);
       if (p) {
+        // Only allow progress to increase — prevents backwards jumps.
+        const safeProgress = Math.max(maxProgress[gameId] ?? 0, p.progress);
+        maxProgress[gameId] = safeProgress;
+
         if (p.error) {
           clearInterval(interval);
           delete intervals[gameId];
           delete stuckSince[gameId];
+          delete maxProgress[gameId];
           setDownloads((prev) => ({
             ...prev,
             [gameId]: { status: p.error!, progress: 0, downloading: false },
@@ -43,6 +52,7 @@ export function startGameDownload(gameId: number) {
           clearInterval(interval);
           delete intervals[gameId];
           delete stuckSince[gameId];
+          delete maxProgress[gameId];
           setDownloads((prev) => ({
             ...prev,
             [gameId]: { status: "Installed!", progress: 1, downloading: false },
@@ -61,9 +71,9 @@ export function startGameDownload(gameId: number) {
           delete stuckSince[gameId];
           setDownloads((prev) => ({
             ...prev,
-            [gameId]: { status: "Extracting...", progress: p.progress, downloading: true },
+            [gameId]: { status: "Extracting...", progress: safeProgress, downloading: true },
           }));
-        } else if (p.progress >= 0.999) {
+        } else if (safeProgress >= 0.999) {
           // 100% but ZIP not yet assembled — detect if stuck.
           if (!stuckSince[gameId]) { stuckSince[gameId] = Date.now(); }
           const elapsed = (Date.now() - stuckSince[gameId]) / 1000;
@@ -72,15 +82,15 @@ export function startGameDownload(gameId: number) {
             : "100%";
           setDownloads((prev) => ({
             ...prev,
-            [gameId]: { status, progress: p.progress, downloading: true },
+            [gameId]: { status, progress: safeProgress, downloading: true },
           }));
         } else {
           delete stuckSince[gameId];
           setDownloads((prev) => ({
             ...prev,
             [gameId]: {
-              status: `${(p.progress * 100).toFixed(0)}%`,
-              progress: p.progress,
+              status: `${(safeProgress * 100).toFixed(0)}%`,
+              progress: safeProgress,
               downloading: true,
             },
           }));
@@ -98,6 +108,7 @@ export function startGameDownload(gameId: number) {
     clearInterval(interval);
     delete intervals[gameId];
     delete stuckSince[gameId];
+    delete maxProgress[gameId];
     setDownloads((prev) => ({
       ...prev,
       [gameId]: { status: `Error: ${e}`, progress: 0, downloading: false },
@@ -109,6 +120,7 @@ export async function cancelGameDownload(gameId: number) {
   clearInterval(intervals[gameId]);
   delete intervals[gameId];
   delete stuckSince[gameId];
+  delete maxProgress[gameId];
   setDownloads((prev) => {
     const next = { ...prev };
     delete next[gameId];

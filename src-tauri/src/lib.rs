@@ -15,12 +15,16 @@ use tauri::Manager;
 use tokio::sync::RwLock;
 
 use commands::{
-    bundled_metadata_dir, cancel_download, check_for_updates, download_game, factory_reset,
-    get_available_collections, get_config, get_default_data_dir, get_download_progress, get_game,
-    get_game_variants, get_games, get_genres, get_section_keys, get_installed_games, uninstall_game,
-    get_setup_status, get_thumbnail_dir, get_torrent_info, import_games, init_download_manager,
-    launch_game, set_config, setup_from_local, setup_import, setup_start, toggle_favorite,
-    validate_exodos_dir, DbState, TorrentState,
+    bundled_metadata_dir, cancel_content_pack_install, cancel_download, check_for_updates,
+    download_game, factory_reset, get_available_collections, get_config,
+    get_content_pack_progress, get_default_data_dir, get_download_progress, get_game,
+    get_poster_dir, get_preview_dir,
+    get_game_variants, get_games, get_genres, get_installed_games, get_section_keys,
+    get_setup_status, get_thumbnail_dir, get_torrent_info, init_download_manager,
+    init_resource_dir, install_content_pack, launch_game, list_content_packs,
+    scan_installed_games, set_config, setup_from_local, setup_import, setup_start,
+    toggle_favorite, uninstall_content_pack, uninstall_game, validate_exodos_dir,
+    ContentPackState, DbState, TorrentState,
 };
 
 /// Copy the bundled pre-built DB to the target path.
@@ -65,6 +69,14 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            // Cache the resource_dir BEFORE any code tries to read bundled metadata,
+            // torrents, or shaders — the sync helpers in setup.rs rely on this.
+            if let Ok(res_dir) = app.path().resource_dir() {
+                init_resource_dir(res_dir);
+            } else {
+                log::warn!("resource_dir() unavailable; bundled assets may not be found");
+            }
+
             let data_dir = app
                 .path()
                 .app_data_dir()
@@ -112,39 +124,14 @@ pub fn run() {
                 }
             };
 
-            // Sync has_thumbnail flags from the thumbnail directory on disk.
-            if let Ok(metadata_dir) = commands::bundled_metadata_dir() {
-                if let Some(thumb_dir) = metadata_dir.parent().map(|p| p.join("thumbnails").join("eXoDOS")) {
-                    if thumb_dir.is_dir() {
-                        if let Ok(entries) = std::fs::read_dir(&thumb_dir) {
-                            let shortcodes: Vec<String> = entries
-                                .flatten()
-                                .filter_map(|e| {
-                                    let p = e.path();
-                                    if p.extension().and_then(|s| s.to_str()) == Some("jpg") {
-                                        p.file_stem().and_then(|s| s.to_str()).map(|s| s.to_string())
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .collect();
-                            if !shortcodes.is_empty() {
-                                let _ = conn.execute_batch("UPDATE games SET has_thumbnail = 0");
-                                for sc in &shortcodes {
-                                    let _ = conn.execute(
-                                        "UPDATE games SET has_thumbnail = 1 WHERE shortcode = ?1",
-                                        rusqlite::params![sc],
-                                    );
-                                }
-                                log::info!("Synced has_thumbnail for {} shortcodes", shortcodes.len());
-                            }
-                        }
-                    }
-                }
+            // Clean up stale content-pack download artifacts from interrupted installs.
+            if let Ok(Some(user_data_dir)) = db::queries::get_config(&conn, "data_dir") {
+                commands::content_packs::cleanup_stale_downloads(std::path::Path::new(&user_data_dir));
             }
 
             app.manage(DbState(Mutex::new(conn)));
             app.manage(TorrentState(RwLock::new(std::collections::HashMap::new())));
+            app.manage(ContentPackState::new());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -153,7 +140,6 @@ pub fn run() {
             get_installed_games,
             get_game_variants,
             get_genres,
-            import_games,
             launch_game,
             get_config,
             set_config,
@@ -175,6 +161,14 @@ pub fn run() {
             toggle_favorite,
             get_section_keys,
             validate_exodos_dir,
+            scan_installed_games,
+            list_content_packs,
+            install_content_pack,
+            uninstall_content_pack,
+            get_content_pack_progress,
+            cancel_content_pack_install,
+            get_preview_dir,
+            get_poster_dir,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

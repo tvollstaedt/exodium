@@ -144,6 +144,32 @@ impl DownloadManager {
         self.data_dir.join(&self.torrent_index.name)
     }
 
+    /// Call update_only_files with retries.
+    /// librqbit returns "can't update initializing torrent" if the torrent handle was
+    /// freshly loaded from session state and hasn't finished its init phase.
+    async fn update_files_retrying(
+        &self,
+        handle: &Arc<ManagedTorrent>,
+        selected: &HashSet<usize>,
+    ) -> anyhow::Result<()> {
+        const MAX_ATTEMPTS: u32 = 20;
+        const DELAY_MS: u64 = 300;
+        for attempt in 0..MAX_ATTEMPTS {
+            match self.session.update_only_files(handle, selected).await {
+                Ok(_) => return Ok(()),
+                Err(e) if e.to_string().contains("initializing") => {
+                    if attempt + 1 < MAX_ATTEMPTS {
+                        tokio::time::sleep(Duration::from_millis(DELAY_MS)).await;
+                    } else {
+                        return Err(e);
+                    }
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        unreachable!()
+    }
+
     /// Queue file indices for download. Adds the torrent on first call.
     pub async fn download_files(&self, file_indices: Vec<usize>) -> anyhow::Result<()> {
         {
@@ -158,7 +184,7 @@ impl DownloadManager {
         if let Some(ref handle) = *handle_guard {
             // Torrent already running — just update file selection
             let selected = self.selected_files.read().await;
-            self.session.update_only_files(handle, &selected).await?;
+            self.update_files_retrying(handle, &selected).await?;
             log::info!("Updated file selection, added: {:?}", file_indices);
         } else {
             // First download — add torrent to session now
@@ -190,10 +216,12 @@ impl DownloadManager {
             *handle_guard = Some(handle);
             log::info!("Torrent added (already_managed={already_managed}), downloading files: {:?}", file_indices);
 
-            // If the session already had this torrent, update_only_files to apply our selection.
+            // If the session already had this torrent, apply our file selection.
+            // Retry because the handle may still be in the Initializing state when
+            // AlreadyManaged is returned (session loads torrent from disk asynchronously).
             if already_managed {
                 let selected = self.selected_files.read().await;
-                self.session.update_only_files(handle_guard.as_ref().unwrap(), &selected).await?;
+                self.update_files_retrying(handle_guard.as_ref().unwrap(), &selected).await?;
             }
 
             // librqbit creates 0-byte placeholder files for all torrent entries on first add.
