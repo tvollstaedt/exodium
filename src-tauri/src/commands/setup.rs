@@ -324,10 +324,13 @@ pub fn get_thumbnail_dir(
 }
 
 /// Get the Tier 0 preview directory for a collection.
-/// Dev: <repo>/src-tauri/resources/previews/<collection>
-/// Prod: <resource_dir>/previews/<collection>
+/// Checks multiple platform-specific layouts because Tauri's bundle.resources
+/// placement varies: macOS uses Contents/Resources/, Linux deb uses
+/// /usr/lib/<pkg>/, AppImage uses <mount>/usr/lib/<pkg>/, Windows flat-installs
+/// into the install directory.
 #[tauri::command]
 pub fn get_preview_dir(collection: String) -> Result<String, String> {
+    // Dev mode: direct from repo tree.
     let dev_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("resources")
         .join("previews")
@@ -336,21 +339,58 @@ pub fn get_preview_dir(collection: String) -> Result<String, String> {
         return Ok(path_to_fwd_slash(&dev_path));
     }
 
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    // 1. Tauri's reported resource_dir (canonical)
     if let Some(res_dir) = RESOURCE_DIR.get() {
-        let prod_path = res_dir.join("previews").join(&collection);
-        if prod_path.exists() {
-            return Ok(path_to_fwd_slash(&prod_path));
-        }
-        log::warn!(
-            "get_preview_dir: {} not found in resource_dir {}",
-            collection,
-            res_dir.display()
-        );
-    } else {
-        log::warn!("get_preview_dir: RESOURCE_DIR uninitialized");
+        candidates.push(res_dir.join("previews").join(&collection));
     }
 
-    Err("Preview directory not found".to_string())
+    // 2. Next to the executable (Windows flat install, macOS Contents/MacOS)
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            candidates.push(exe_dir.join("previews").join(&collection));
+            candidates.push(exe_dir.join("resources").join("previews").join(&collection));
+            // Linux /usr layout: /usr/bin/exodium → /usr/lib/exodium/previews/
+            if let Some(usr_dir) = exe_dir.parent() {
+                candidates.push(
+                    usr_dir
+                        .join("lib")
+                        .join("exodium")
+                        .join("previews")
+                        .join(&collection),
+                );
+                candidates.push(
+                    usr_dir
+                        .join("share")
+                        .join("exodium")
+                        .join("previews")
+                        .join(&collection),
+                );
+            }
+        }
+    }
+
+    for candidate in &candidates {
+        if candidate.exists() {
+            log::info!("get_preview_dir: found at {}", candidate.display());
+            return Ok(path_to_fwd_slash(candidate));
+        }
+    }
+
+    let checked: Vec<String> = candidates
+        .iter()
+        .map(|p| p.display().to_string())
+        .collect();
+    log::warn!(
+        "get_preview_dir({}): not found. Checked: {}",
+        collection,
+        checked.join(", ")
+    );
+    Err(format!(
+        "Preview directory not found. Checked: {}",
+        checked.join(", ")
+    ))
 }
 
 /// Get the Tier 1 poster content-pack directory for a collection.

@@ -63,7 +63,9 @@ pub fn install_bundled_db(target: &Path) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    env_logger::init();
+    // Default to info-level so our diagnostic log::info! / log::warn! messages
+    // appear when users launch from a terminal. Override with RUST_LOG=debug for more.
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
