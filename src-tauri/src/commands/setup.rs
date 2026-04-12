@@ -287,6 +287,13 @@ pub async fn factory_reset(
     Ok(())
 }
 
+/// Convert a PathBuf to a forward-slash string. Tauri's convertFileSrc on
+/// the frontend expects consistent separators when we later join `${dir}/${file}`;
+/// mixed Windows backslash + frontend forward slash produces broken asset URLs.
+fn path_to_fwd_slash(p: &Path) -> String {
+    p.to_string_lossy().replace('\\', "/")
+}
+
 /// Get the thumbnail directory path.
 /// Checks: dev project dir → data_dir/thumbnails → exe dir/thumbnails
 #[tauri::command]
@@ -300,7 +307,7 @@ pub fn get_thumbnail_dir(
         .map(|p| p.join("thumbnails").join(&collection))
         .unwrap_or_default();
     if dev_path.exists() {
-        return Ok(dev_path.to_string_lossy().to_string());
+        return Ok(path_to_fwd_slash(&dev_path));
     }
 
     // Production: data_dir/thumbnails/<collection>
@@ -308,7 +315,7 @@ pub fn get_thumbnail_dir(
         if let Ok(Some(data_dir)) = queries::get_config(&conn, "data_dir") {
             let prod_path = PathBuf::from(&data_dir).join("thumbnails").join(&collection);
             if prod_path.exists() {
-                return Ok(prod_path.to_string_lossy().to_string());
+                return Ok(path_to_fwd_slash(&prod_path));
             }
         }
     }
@@ -326,14 +333,21 @@ pub fn get_preview_dir(collection: String) -> Result<String, String> {
         .join("previews")
         .join(&collection);
     if dev_path.exists() {
-        return Ok(dev_path.to_string_lossy().to_string());
+        return Ok(path_to_fwd_slash(&dev_path));
     }
 
     if let Some(res_dir) = RESOURCE_DIR.get() {
         let prod_path = res_dir.join("previews").join(&collection);
         if prod_path.exists() {
-            return Ok(prod_path.to_string_lossy().to_string());
+            return Ok(path_to_fwd_slash(&prod_path));
         }
+        log::warn!(
+            "get_preview_dir: {} not found in resource_dir {}",
+            collection,
+            res_dir.display()
+        );
+    } else {
+        log::warn!("get_preview_dir: RESOURCE_DIR uninitialized");
     }
 
     Err("Preview directory not found".to_string())
@@ -355,12 +369,12 @@ pub fn get_poster_dir(
     // All poster thumbnails live in the eXoDOS pack; LP collections share them.
     let poster_path = base.join(&collection);
     if poster_path.exists() {
-        return Ok(poster_path.to_string_lossy().to_string());
+        return Ok(path_to_fwd_slash(&poster_path));
     }
     if collection != "eXoDOS" {
         let fallback = base.join("eXoDOS");
         if fallback.exists() {
-            return Ok(fallback.to_string_lossy().to_string());
+            return Ok(path_to_fwd_slash(&fallback));
         }
     }
     Err("Poster directory not found".to_string())

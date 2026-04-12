@@ -94,8 +94,8 @@ export function GameDetailPanel(props: Props) {
     return status();
   };
 
-  const handleDownload = (gameId: number) => {
-    startGameDownload(gameId);
+  const handleDownload = (gameId: number, title?: string) => {
+    startGameDownload(gameId, title ?? props.game?.title);
   };
 
   const handleLaunch = async (gameId: number) => {
@@ -234,7 +234,7 @@ export function GameDetailPanel(props: Props) {
                         <Show when={!vDl()?.downloading && !variant.installed}>
                           <button
                             class="lang-picker-btn action-download"
-                            onClick={() => { if (variant.game_torrent_index != null) { handleDownload(vId()!); } }}
+                            onClick={() => { if (variant.game_torrent_index != null) { handleDownload(vId()!, variant.title); } }}
                           >
                             {variant.game_torrent_index != null ? `↓ ${formatBytes(variant.download_size ?? 0)}` : "—"}
                           </button>

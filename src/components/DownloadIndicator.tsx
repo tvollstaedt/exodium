@@ -62,9 +62,11 @@ export function DownloadIndicator() {
         const pct = Math.round((job.progress ?? 0) * 100);
         let status = job.phase;
         if (job.phase === "downloading") { status = `${pct}%`; }
+        // Fall back to a capitalized pack_id if no display name was provided.
+        const fallback = (key.split(":")[1] ?? key).replace(/^./, (c) => c.toUpperCase());
         result.push({
           id: `cp:${key}`,
-          label: key.split(":")[1] ?? key,
+          label: job.label ?? fallback,
           progress: job.progress ?? 0,
           status,
           speed: speeds()[`cp:${key}`] ?? "",
@@ -79,7 +81,7 @@ export function DownloadIndicator() {
       if (state.downloading) {
         result.push({
           id: `game:${id}`,
-          label: state.status,
+          label: state.title ?? `Game #${id}`,
           progress: state.progress,
           status: state.status,
           speed: "",
@@ -133,7 +135,6 @@ export function DownloadIndicator() {
           <div class="download-sheet">
             <div class="download-sheet-header">
               <span>Downloads</span>
-              <button class="btn-small" onClick={() => setShowSheet(false)}>✕</button>
             </div>
             <For each={activeDownloads()}>
               {(dl) => (

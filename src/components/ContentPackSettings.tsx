@@ -26,8 +26,9 @@ export function ContentPackSettings() {
   });
 
   const handleInstall = async (packId: string) => {
+    const pack = packs().find((p) => p.id === packId);
     try {
-      await startContentPackInstall("eXoDOS", packId);
+      await startContentPackInstall("eXoDOS", packId, pack?.display_name);
     } catch (e) {
       console.error("Install failed:", e);
     }

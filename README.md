@@ -58,6 +58,8 @@ Install the `.deb` (Debian/Ubuntu) or run the `.AppImage` directly (any distro).
 
 Run the `.msi` installer. SmartScreen may warn about an unsigned publisher — click "More info" → "Run anyway".
 
+**If downloads are stuck at 0%**: Windows Defender Firewall may be blocking BitTorrent traffic. The first time Exodium tries to download, Windows usually shows a firewall prompt — allow both "Private" and "Public" networks. If you missed it, go to Windows Security → Firewall & network protection → Allow an app through firewall, find Exodium, and enable both network types.
+
 ---
 
 ## Features

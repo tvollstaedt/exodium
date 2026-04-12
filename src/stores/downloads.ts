@@ -6,6 +6,7 @@ interface DownloadState {
   status: string;
   progress: number;
   downloading: boolean;
+  title?: string;
 }
 
 const [downloads, setDownloads] = createSignal<Record<number, DownloadState>>({});
@@ -17,6 +18,9 @@ const stuckSince: Record<number, number> = {};
 // Highest progress seen per game — prevents bar from jumping backwards due to
 // librqbit stats blips or component remounts resetting the CSS transition.
 const maxProgress: Record<number, number> = {};
+// Titles tracked separately so state updates inside the poll loop don't have
+// to re-pass the title every time.
+const titles: Record<number, string> = {};
 
 export { downloads };
 
@@ -24,11 +28,12 @@ export function getDownloadState(gameId: number): DownloadState | undefined {
   return downloads()[gameId];
 }
 
-export function startGameDownload(gameId: number) {
+export function startGameDownload(gameId: number, title?: string) {
   maxProgress[gameId] = 0;
+  if (title) { titles[gameId] = title; }
   setDownloads((prev) => ({
     ...prev,
-    [gameId]: { status: "Starting download...", progress: 0, downloading: true },
+    [gameId]: { status: "Starting download...", progress: 0, downloading: true, title },
   }));
 
   const interval = setInterval(async () => {
@@ -46,7 +51,7 @@ export function startGameDownload(gameId: number) {
           delete maxProgress[gameId];
           setDownloads((prev) => ({
             ...prev,
-            [gameId]: { status: p.error!, progress: 0, downloading: false },
+            [gameId]: { status: p.error!, progress: 0, downloading: false, title: titles[gameId] },
           }));
         } else if (p.installed) {
           clearInterval(interval);
@@ -55,7 +60,7 @@ export function startGameDownload(gameId: number) {
           delete maxProgress[gameId];
           setDownloads((prev) => ({
             ...prev,
-            [gameId]: { status: "Installed!", progress: 1, downloading: false },
+            [gameId]: { status: "Installed!", progress: 1, downloading: false, title: titles[gameId] },
           }));
           fetchGames();
           // Delay cleanup so isInstalled() stays true until fetchGames() propagates the
@@ -71,7 +76,7 @@ export function startGameDownload(gameId: number) {
           delete stuckSince[gameId];
           setDownloads((prev) => ({
             ...prev,
-            [gameId]: { status: "Extracting...", progress: safeProgress, downloading: true },
+            [gameId]: { status: "Extracting...", progress: safeProgress, downloading: true, title: titles[gameId] },
           }));
         } else if (safeProgress >= 0.999) {
           // 100% but ZIP not yet assembled — detect if stuck.
@@ -82,7 +87,7 @@ export function startGameDownload(gameId: number) {
             : "100%";
           setDownloads((prev) => ({
             ...prev,
-            [gameId]: { status, progress: safeProgress, downloading: true },
+            [gameId]: { status, progress: safeProgress, downloading: true, title: titles[gameId] },
           }));
         } else {
           delete stuckSince[gameId];
@@ -92,6 +97,7 @@ export function startGameDownload(gameId: number) {
               status: `${(safeProgress * 100).toFixed(0)}%`,
               progress: safeProgress,
               downloading: true,
+              title: titles[gameId],
             },
           }));
         }
@@ -111,7 +117,7 @@ export function startGameDownload(gameId: number) {
     delete maxProgress[gameId];
     setDownloads((prev) => ({
       ...prev,
-      [gameId]: { status: `Error: ${e}`, progress: 0, downloading: false },
+      [gameId]: { status: `Error: ${e}`, progress: 0, downloading: false, title: titles[gameId] },
     }));
   });
 }

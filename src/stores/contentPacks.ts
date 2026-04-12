@@ -52,12 +52,15 @@ export interface ContentPackJobState {
   finished: boolean;
   installed: boolean;
   error: string | null;
+  label?: string;
 }
 
 const [activeJobs, setActiveJobs] = createSignal<Record<string, ContentPackJobState>>({});
 export { activeJobs };
 
 const pollIntervals: Record<string, ReturnType<typeof setInterval>> = {};
+// Human-readable labels tracked separately (display_name from manifest).
+const jobLabels: Record<string, string> = {};
 
 function startPolling(collection: string, packId: string) {
   const key = `${collection}:${packId}`;
@@ -80,6 +83,7 @@ function startPolling(collection: string, packId: string) {
           finished: progress.finished,
           installed: progress.installed,
           error: progress.error,
+          label: jobLabels[key],
         },
       }));
 
@@ -115,7 +119,9 @@ function stopPolling(key: string) {
 
 // ── Public actions ───────────────────────────────────────────────────────────
 
-export async function startContentPackInstall(collection: string, packId: string) {
+export async function startContentPackInstall(collection: string, packId: string, displayName?: string) {
+  const key = `${collection}:${packId}`;
+  if (displayName) { jobLabels[key] = displayName; }
   await installContentPack(collection, packId);
   startPolling(collection, packId);
 }

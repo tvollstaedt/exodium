@@ -38,8 +38,9 @@ export function WelcomeModal(props: Props) {
     await setConfig("welcome_seen", "1");
     const packId = selected();
     if (packId) {
+      const pack = packs().find((p) => p.id === packId);
       try {
-        await startContentPackInstall("eXoDOS", packId);
+        await startContentPackInstall("eXoDOS", packId, pack?.display_name);
       } catch (e) {
         console.error("Failed to start content pack install:", e);
       }
