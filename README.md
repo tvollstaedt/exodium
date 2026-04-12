@@ -36,6 +36,30 @@ eXoDOS ships with a Windows-only LaunchBox frontend and requires downloading the
 
 ---
 
+## Installation
+
+Download the binary for your platform from the [latest release](https://github.com/tvollstaedt/exodium/releases/latest).
+
+### macOS
+
+Because Exodium is not yet signed with an Apple Developer ID, macOS Gatekeeper will block it on first launch with "Exodium is damaged and cannot be opened". To bypass this, run the following once after dragging the app to Applications:
+
+```bash
+xattr -cr /Applications/Exodium.app
+```
+
+This removes the quarantine attribute that macOS adds to downloaded files. The app is otherwise unmodified — the binary itself is built and distributed directly from this repo's CI pipeline.
+
+### Linux
+
+Install the `.deb` (Debian/Ubuntu) or run the `.AppImage` directly (any distro). The AppImage needs `chmod +x` first.
+
+### Windows
+
+Run the `.msi` installer. SmartScreen may warn about an unsigned publisher — click "More info" → "Run anyway".
+
+---
+
 ## Features
 
 ### Available now

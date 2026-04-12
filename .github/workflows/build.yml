@@ -122,9 +122,12 @@ jobs:
         with:
           draft: true
           generate_release_notes: true
+          # Recursive globs because upload-artifact@v4 preserves the common-prefix
+          # directory hierarchy — Linux has bundle/deb + bundle/appimage, and
+          # Windows has bundle/msi + bundle/nsis, so files end up nested.
           files: |
-            artifacts/exodium-macos/*.dmg
-            artifacts/exodium-linux/*.deb
-            artifacts/exodium-linux/*.AppImage
-            artifacts/exodium-windows/*.msi
-            artifacts/exodium-windows/*.exe
+            artifacts/**/*.dmg
+            artifacts/**/*.deb
+            artifacts/**/*.AppImage
+            artifacts/**/*.msi
+            artifacts/**/*.exe
