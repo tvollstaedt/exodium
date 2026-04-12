@@ -894,27 +894,43 @@ fn extract_game_zip(zip_path: &std::path::Path, dest: &std::path::Path) -> Resul
 }
 
 /// Resolve the DOSBox Staging binary path.
-/// Checks the bundled sidecar binary first, then falls back to the system PATH.
+/// Tauri's `externalBin` places sidecars at different locations per platform:
+///  - macOS: Exodium.app/Contents/MacOS/dosbox-staging (next to the main binary)
+///  - Windows: <install_dir>/dosbox-staging.exe (next to the main .exe)
+///  - Linux (AppImage/deb): resources/dosbox-staging (inside the resource dir)
+/// So we check `current_exe().parent()` AND `resource_dir()`, then fall back to PATH.
 fn resolve_dosbox(app: &AppHandle) -> PathBuf {
     use tauri::Manager;
     let bin = if cfg!(windows) { "dosbox-staging.exe" } else { "dosbox-staging" };
 
+    // 1. Next to the main executable (macOS Contents/MacOS/, Windows install dir).
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let candidate = dir.join(bin);
+            if candidate.exists() {
+                log::info!("Using bundled DOSBox (exe dir): {}", candidate.display());
+                return candidate;
+            }
+        }
+    }
+
+    // 2. Inside resource_dir (Linux packaging, some Windows installers).
     if let Ok(res_dir) = app.path().resource_dir() {
-        // Production bundle: Tauri strips the triple suffix and places the binary here.
         let prod = res_dir.join(bin);
         if prod.exists() {
+            log::info!("Using bundled DOSBox (resource dir): {}", prod.display());
             return prod;
         }
 
-        // Dev mode (pnpm tauri dev): resource_dir is src-tauri/; binary is in binaries/
-        // named with the Rust target triple, e.g. dosbox-staging-aarch64-apple-darwin.
+        // 3. Dev mode (pnpm tauri dev): resource_dir is src-tauri/; binary is in binaries/
+        //    named with the Rust target triple, e.g. dosbox-staging-aarch64-apple-darwin.
         let binaries_dir = res_dir.join("binaries");
         if let Ok(entries) = std::fs::read_dir(&binaries_dir) {
             for entry in entries.flatten() {
                 let name = entry.file_name();
                 let name_str = name.to_string_lossy();
                 if name_str.starts_with("dosbox-staging") {
-                    log::info!("Using bundled DOSBox: {}", entry.path().display());
+                    log::info!("Using bundled DOSBox (dev): {}", entry.path().display());
                     return entry.path();
                 }
             }
