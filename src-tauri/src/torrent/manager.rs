@@ -192,6 +192,26 @@ impl DownloadManager {
             // Explicitly set output_folder to torrent_root so downloads land in data_dir,
             // not in the session's default output folder (which is app_data_dir).
             let output_folder = self.torrent_root().to_string_lossy().into_owned();
+
+            // Windows MAX_PATH preflight: individual file paths inside the torrent
+            // add ~80-120 chars on top of the output_folder. If that combined length
+            // would exceed 260, writes fail silently and the handle stays un-advanced
+            // (user sees "Starting download..." forever). Reject upfront with a clear
+            // error advising a shorter data_dir.
+            #[cfg(target_os = "windows")]
+            {
+                const MAX_PATH: usize = 260;
+                const RESERVED_FOR_NESTED_FILES: usize = 120;
+                if output_folder.len() + RESERVED_FOR_NESTED_FILES > MAX_PATH {
+                    return Err(anyhow::anyhow!(
+                        "Data directory path is too long for Windows ({} chars, max ~{}). \
+                         Nested torrent file paths would exceed MAX_PATH (260). \
+                         Move your data directory closer to the drive root (e.g. C:\\Exodium).",
+                        output_folder.len(),
+                        MAX_PATH - RESERVED_FOR_NESTED_FILES
+                    ));
+                }
+            }
             let response = self
                 .session
                 .add_torrent(

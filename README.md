@@ -56,9 +56,29 @@ Install the `.deb` (Debian/Ubuntu) or run the `.AppImage` directly (any distro).
 
 ### Windows
 
-Run the `.msi` installer. SmartScreen may warn about an unsigned publisher — click "More info" → "Run anyway".
+Two installers are provided: `Exodium_<version>_x64-setup.exe` (NSIS) and `Exodium_<version>_x64_en-US.msi`. Both are currently **unsigned**, so Windows will block them by default. Trusted code signing is planned for a future release.
 
-**If downloads are stuck at 0%**: Windows Defender Firewall may be blocking BitTorrent traffic. The first time Exodium tries to download, Windows usually shows a firewall prompt — allow both "Private" and "Public" networks. If you missed it, go to Windows Security → Firewall & network protection → Allow an app through firewall, find Exodium, and enable both network types.
+**Recommended: NSIS `.exe` + Unblock-File**
+
+1. Download `Exodium_<version>_x64-setup.exe`.
+2. Open PowerShell and unblock the downloaded file:
+
+   ```powershell
+   Unblock-File "$HOME\Downloads\Exodium_<version>_x64-setup.exe"
+   ```
+3. Run the installer normally. SmartScreen may still show a warning — click "More info" → "Run anyway".
+
+If `Unblock-File` is unavailable, right-click the `.exe` → Properties → tick "Unblock" at the bottom of the General tab → OK.
+
+**Alternative: admin-extract the `.msi`** (useful if Group Policy blocks unsigned MSIs)
+
+```cmd
+msiexec /a "path\to\Exodium_<version>_x64_en-US.msi" /qb TARGETDIR=C:\Exodium
+```
+
+This unpacks the payload to `C:\Exodium\` without invoking Windows Installer's policy checks. Run `C:\Exodium\Exodium.exe` directly — no Start Menu entry, but fully functional.
+
+**If downloads are stuck at 0%**: check `%APPDATA%\Exodium\logs\exodium.log` for error details. Firewall issues are one possible cause — allow both "Private" and "Public" networks for Exodium under Windows Security → Firewall & network protection → Allow an app through firewall.
 
 ---
 

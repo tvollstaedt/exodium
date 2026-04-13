@@ -289,6 +289,27 @@ body {
   overflow-y: auto;
   overflow-x: hidden;
   padding: 0 80px 20px 20px;
+  /* Reserve scrollbar space in layout so the native Windows scrollbar (~16px,
+     always visible) doesn't overlap the fixed-position jump bar on the right.
+     macOS/Linux use overlay scrollbars so the reserved gutter is a no-op there. */
+  scrollbar-gutter: stable;
+}
+
+/* Theme-matched thin scrollbar for WebKit/Chromium (all Tauri platforms
+   currently use WebView2/WKWebView/WebKitGTK — all webkit-derived). Falls
+   back to the OS default on engines that don't implement these pseudos. */
+.library::-webkit-scrollbar {
+  width: 8px;
+}
+.library::-webkit-scrollbar-track {
+  background: transparent;
+}
+.library::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+}
+.library::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
 }
 
 /* ── Tab bar ── */

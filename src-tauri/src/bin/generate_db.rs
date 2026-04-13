@@ -393,6 +393,7 @@ fn main() {
             .collect();
 
         let tx = conn.unchecked_transaction().unwrap();
+        let mut missing: Vec<String> = Vec::new();
         {
             let mut update = tx
                 .prepare_cached("UPDATE games SET has_thumbnail = 1 WHERE shortcode = ?1")
@@ -401,11 +402,20 @@ fn main() {
                 if thumb_dir.join(format!("{}.jpg", sc)).exists() {
                     update.execute(params![sc]).unwrap();
                     thumb_count += 1;
+                } else {
+                    missing.push(sc.clone());
                 }
             }
         }
         tx.commit().unwrap();
         println!("Marked {} shortcodes with thumbnails ({} without)", thumb_count, shortcodes.len() - thumb_count);
+        if !missing.is_empty() {
+            // Log a sample of missing shortcodes so CI build logs help diagnose
+            // the thumbnail coverage gap without reading the DB after the fact.
+            let sample: Vec<&String> = missing.iter().take(30).collect();
+            println!("  Sample of shortcodes without a bundled thumbnail ({} of {}): {:?}",
+                sample.len(), missing.len(), sample);
+        }
     }
 
     // Populate dosbox_variant from metadata/dosbox.txt

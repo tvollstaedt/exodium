@@ -378,7 +378,12 @@ def main() -> None:
     print(f"\nDone: {total} thumbnails in {output_dir}")
     print(f"  New: {matched}  Already existed: {skipped}  Unmatched: {len(unmatched)}")
     if unmatched:
-        print(f"  First 10 unmatched: {unmatched[:10]}")
+        # Show a longer sample so the CI build log is useful for diagnosing
+        # which specific LP titles fail title→shortcode lookup.
+        sample = unmatched[:30]
+        print(f"  First {len(sample)} unmatched titles (of {len(unmatched)}):")
+        for n in sample:
+            print(f"    {n}")
 
 
 if __name__ == "__main__":

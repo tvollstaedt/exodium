@@ -61,16 +61,84 @@ pub fn install_bundled_db(target: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Tee writer: duplicates every write to stderr and a file handle.
+/// Used so env_logger output appears in the terminal (dev) AND a persistent
+/// log file (prod/Windows-GUI where stderr is detached).
+struct TeeWriter {
+    file: std::sync::Mutex<std::fs::File>,
+}
+
+impl std::io::Write for TeeWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let _ = std::io::stderr().write_all(buf);
+        if let Ok(mut f) = self.file.lock() {
+            let _ = f.write_all(buf);
+        }
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        let _ = std::io::stderr().flush();
+        if let Ok(mut f) = self.file.lock() {
+            let _ = f.flush();
+        }
+        Ok(())
+    }
+}
+
+/// Initialize env_logger with a tee target. Returns the log file path for
+/// diagnostic logging. Falls back to stderr-only if the file can't be opened.
+fn init_logger(log_dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    use std::io::Write;
+    let _ = std::fs::create_dir_all(log_dir);
+    let log_path = log_dir.join("exodium.log");
+    let file_result = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path);
+
+    let env = env_logger::Env::default().default_filter_or("info");
+    let mut builder = env_logger::Builder::from_env(env);
+
+    match file_result {
+        Ok(file) => {
+            // Write a session separator so the log file is readable across runs.
+            let mut file = file;
+            // Simple epoch timestamp so we don't pull in the chrono crate just
+            // for a session header (pattern matches content_packs::chrono_now).
+            let epoch_secs = std::time::SystemTime::now()
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let _ = writeln!(file, "\n=== exodium session start (epoch {}) ===", epoch_secs);
+            let tee = TeeWriter { file: std::sync::Mutex::new(file) };
+            builder.target(env_logger::Target::Pipe(Box::new(tee))).init();
+            Some(log_path)
+        }
+        Err(_) => {
+            // Fall back to stderr-only if we can't open the log file.
+            builder.init();
+            None
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Default to info-level so our diagnostic log::info! / log::warn! messages
-    // appear when users launch from a terminal. Override with RUST_LOG=debug for more.
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            // Initialize the logger as early as possible so later setup steps' log
+            // output is captured. `app_log_dir()` resolves to platform conventions:
+            //   Windows:  %APPDATA%\com.redfox.exodium\logs
+            //   macOS:    ~/Library/Logs/com.redfox.exodium
+            //   Linux:    ~/.local/share/com.redfox.exodium/logs
+            let log_dir = app.path().app_log_dir().ok();
+            let log_path = log_dir.as_deref().and_then(init_logger);
+            if let Some(ref p) = log_path {
+                log::info!("Log file: {}", p.display());
+            }
+
             // Cache the resource_dir BEFORE any code tries to read bundled metadata,
             // torrents, or shaders — the sync helpers in setup.rs rely on this.
             if let Ok(res_dir) = app.path().resource_dir() {

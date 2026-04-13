@@ -50,7 +50,12 @@ export function bestThumbnailPath(
   shortcode: string | null | undefined,
   hasThumbnail: boolean,
 ): string | null {
-  if (!shortcode || !hasThumbnail) { return null; }
+  if (!shortcode || !hasThumbnail) {
+    if (hasThumbnail && !shortcode) {
+      console.warn("[thumbnails] miss: has_thumbnail=true but shortcode is empty", { collection });
+    }
+    return null;
+  }
 
   // Tier 2 (media) would go here when implemented —
   // const mediaDir = mediaDirForCollection(collection);
@@ -65,6 +70,38 @@ export function bestThumbnailPath(
   const prevDir = previewDirForCollection(collection);
   if (prevDir) { return `${prevDir}/${shortcode}.jpg`; }
 
+  console.warn("[thumbnails] miss: no tier dir resolved", { collection, shortcode });
+  return null;
+}
+
+/** Normalize a title into a possible thumbnail filename stem.
+ *
+ *  Strips all non-alphanumerics (incl. spaces, colons, apostrophes, diacritics
+ *  after decomposition). Preserves case because some bundled thumbnails are
+ *  title-case-keyed (e.g. `DasAmt.jpg`) rather than shortcode-keyed. Used as
+ *  a fallback when the DB shortcode produces a 404 on disk — `GameCard` tries
+ *  this after the primary `bestThumbnailPath` img fails to load. */
+export function normalizeTitleKey(title: string): string {
+  return title
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")  // strip combining marks
+    .replace(/[^A-Za-z0-9]/g, "");
+}
+
+/** Fallback thumbnail path keyed by normalized title rather than shortcode.
+ *  Returns null if no tier dir is available or the title normalises to empty. */
+export function titleFallbackThumbnailPath(
+  collection: string | null | undefined,
+  title: string | null | undefined,
+  hasThumbnail: boolean,
+): string | null {
+  if (!title || !hasThumbnail) { return null; }
+  const key = normalizeTitleKey(title);
+  if (!key) { return null; }
+  const posterDir = posterDirForCollection(collection);
+  if (posterDir) { return `${posterDir}/${key}.jpg`; }
+  const prevDir = previewDirForCollection(collection);
+  if (prevDir) { return `${prevDir}/${key}.jpg`; }
   return null;
 }
 
