@@ -1,6 +1,6 @@
 [package]
 name = "exodium"
-version = "0.2.2"
+version = "0.2.3"
 description = "Cross-platform eXoDOS game launcher"
 authors = ["redfox"]
 edition = "2021"

@@ -52,9 +52,17 @@ export function GameCard(props: GameCardProps) {
   });
 
   const thumbSrc = () => {
+    // Primary: shortcode-keyed bundled or poster file (only if DB flagged it).
+    // Fallback: speculative title-derived 8-char key, matching generate_shortcode().
+    //   The fallback ignores has_thumbnail on purpose — it catches LP-exclusive
+    //   games whose file exists in the bundle but whose DB row has has_thumbnail=0
+    //   because generate_db.rs didn't know about the generated shortcode mapping.
+    //   If there's no matching file, <img onError> will fire handleImgError and
+    //   we set imgError to hide the tile.
     const path = thumbAttempt() === "primary"
-      ? bestThumbnailPath(props.game.torrent_source, props.game.shortcode, props.game.has_thumbnail)
-      : titleFallbackThumbnailPath(props.game.torrent_source, props.game.title, props.game.has_thumbnail);
+      ? (bestThumbnailPath(props.game.torrent_source, props.game.shortcode, props.game.has_thumbnail)
+         ?? titleFallbackThumbnailPath(props.game.torrent_source, props.game.title))
+      : titleFallbackThumbnailPath(props.game.torrent_source, props.game.title);
     if (!path) { return null; }
     return convertFileSrc(path);
   };

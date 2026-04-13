@@ -74,28 +74,35 @@ export function bestThumbnailPath(
   return null;
 }
 
-/** Normalize a title into a possible thumbnail filename stem.
+/** Derive a candidate thumbnail filename stem from a title, mirroring the
+ *  Rust `generate_shortcode()` in src-tauri/src/bin/generate_db.rs:
+ *    - decompose diacritics and strip combining marks
+ *    - keep only ASCII alphanumerics
+ *    - truncate to the first 8 characters
  *
- *  Strips all non-alphanumerics (incl. spaces, colons, apostrophes, diacritics
- *  after decomposition). Preserves case because some bundled thumbnails are
- *  title-case-keyed (e.g. `DasAmt.jpg`) rather than shortcode-keyed. Used as
- *  a fallback when the DB shortcode produces a 404 on disk — `GameCard` tries
- *  this after the primary `bestThumbnailPath` img fails to load. */
+ *  This matches the LP-exclusive bundled thumbnails like `DasAmt.jpg`,
+ *  `BerlinWa.jpg` (from "Berlin Wall"), etc. Used as a fallback when the
+ *  DB shortcode either doesn't match a bundled file or is missing entirely
+ *  (e.g. has_thumbnail=0 for LP-exclusive games whose DB build didn't see
+ *  the file on disk but the bundled pack actually contains it). */
 export function normalizeTitleKey(title: string): string {
-  return title
+  const stripped = title
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")  // strip combining marks
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^A-Za-z0-9]/g, "");
+  return stripped.slice(0, 8);
 }
 
-/** Fallback thumbnail path keyed by normalized title rather than shortcode.
- *  Returns null if no tier dir is available or the title normalises to empty. */
+/** Fallback thumbnail path keyed by normalized title. Intentionally ignores
+ *  `hasThumbnail` — the DB's has_thumbnail flag only reflects files the build
+ *  pipeline matched, but the bundle may contain additional files generated
+ *  under `generate_shortcode()` rules that the LP backfill missed. Worth a
+ *  speculative lookup; the browser's <img onError> handles the miss. */
 export function titleFallbackThumbnailPath(
   collection: string | null | undefined,
   title: string | null | undefined,
-  hasThumbnail: boolean,
 ): string | null {
-  if (!title || !hasThumbnail) { return null; }
+  if (!title) { return null; }
   const key = normalizeTitleKey(title);
   if (!key) { return null; }
   const posterDir = posterDirForCollection(collection);
