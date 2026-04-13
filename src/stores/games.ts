@@ -13,6 +13,18 @@ export async function getFavoriteGames(): Promise<Game[]> {
   return result.games;
 }
 
+// Bumped with the gameId whenever a game's installed/in_library state changes
+// (download-install complete, uninstall). Consumers (Library shelves, detail
+// panel) watch this to refresh derived views that come from separate DB
+// queries. The value is `{ id, ts }` so Solid treats every change as distinct
+// even when the same game is uninstalled-then-reinstalled in rapid succession.
+const [lastGameLibraryChange, setLastGameLibraryChange] =
+  createSignal<{ id: number; ts: number } | null>(null);
+export { lastGameLibraryChange };
+export function notifyGameLibraryChanged(id: number) {
+  setLastGameLibraryChange({ id, ts: Date.now() });
+}
+
 const [games, setGames] = createSignal<Game[]>([]);
 const [totalGames, setTotalGames] = createSignal(0);
 const [loading, setLoading] = createSignal(false);

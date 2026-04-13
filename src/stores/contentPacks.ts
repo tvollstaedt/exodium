@@ -127,8 +127,22 @@ export async function startContentPackInstall(collection: string, packId: string
 }
 
 export async function cancelContentPackJob(collection: string, packId: string) {
-  await cancelContentPackInstall(collection, packId);
-  stopPolling(`${collection}:${packId}`);
+  const key = `${collection}:${packId}`;
+  // Stop polling and clear UI state up-front so the card returns to "Install"
+  // immediately. The backend marks the job failed with error "Cancelled"
+  // asynchronously; by then we no longer care about its final state.
+  stopPolling(key);
+  setActiveJobs((prev) => {
+    if (!prev[key]) { return prev; }
+    const next = { ...prev };
+    delete next[key];
+    return next;
+  });
+  try {
+    await cancelContentPackInstall(collection, packId);
+  } catch (e) {
+    console.error("Cancel failed:", e);
+  }
 }
 
 export async function removeContentPack(collection: string, packId: string) {

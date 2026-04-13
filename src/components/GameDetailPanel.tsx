@@ -1,7 +1,7 @@
 import { createSignal, createEffect, Show, For, onCleanup, onMount } from "solid-js";
 import { Portal } from "solid-js/web";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { Progress } from "@ark-ui/solid/progress";
+import { AutoProgress } from "./ProgressBar";
 import type { Game } from "../api/tauri";
 import { launchGame, getGameVariants } from "../api/tauri";
 import { formatBytes, parseLangEntries, langBadgeClass, performUninstall } from "../util";
@@ -174,11 +174,7 @@ export function GameDetailPanel(props: Props) {
                 </Show>
                 <Show when={!isInstalled() && isDownloading()}>
                   <div class="game-detail-btn btn-downloading">
-                    <Progress.Root value={currentProgress() * 100} class="ark-progress mini">
-                      <Progress.Track class="ark-progress-track">
-                        <Progress.Range class="ark-progress-range" />
-                      </Progress.Track>
-                    </Progress.Root>
+                    <AutoProgress value={currentProgress()} class="mini" />
                     <span>{dlState()?.status}</span>
                   </div>
                   <button class="game-detail-btn btn-cancel" onClick={() => cancelGameDownload(props.game!.id!)}>
@@ -192,7 +188,7 @@ export function GameDetailPanel(props: Props) {
                       : `↓ Download ${props.game!.download_size ? formatBytes(props.game!.download_size) : ""}`}
                   </button>
                 </Show>
-                <Show when={(isInstalled() || props.game!.in_library) && props.game!.id != null}>
+                <Show when={!isDownloading() && (isInstalled() || props.game!.in_library) && props.game!.id != null}>
                   <button class="game-detail-btn btn-uninstall" onClick={() => handleUninstall(props.game!.id!)}>
                     Uninstall
                   </button>
@@ -219,11 +215,7 @@ export function GameDetailPanel(props: Props) {
                         <span class="game-detail-lang-title">{variant.title}</span>
                         <Show when={vDl()?.downloading}>
                           <div class="game-detail-lang-progress">
-                            <Progress.Root value={(vDl()?.progress ?? 0) * 100} class="ark-progress mini">
-                              <Progress.Track class="ark-progress-track">
-                                <Progress.Range class="ark-progress-range" />
-                              </Progress.Track>
-                            </Progress.Root>
+                            <AutoProgress value={vDl()?.progress ?? 0} class="mini" />
                           </div>
                           <button class="lang-picker-btn action-cancel" onClick={() => cancelGameDownload(vId()!)}>✕</button>
                         </Show>

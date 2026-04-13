@@ -1,6 +1,6 @@
 import { createSignal } from "solid-js";
 import { cancelDownload, downloadGame, getDownloadProgress } from "../api/tauri";
-import { fetchGames } from "./games";
+import { fetchGames, notifyGameLibraryChanged } from "./games";
 
 interface DownloadState {
   status: string;
@@ -63,6 +63,7 @@ export function startGameDownload(gameId: number, title?: string) {
             [gameId]: { status: "Installed!", progress: 1, downloading: false, title: titles[gameId] },
           }));
           fetchGames();
+          notifyGameLibraryChanged(gameId);
           // Delay cleanup so isInstalled() stays true until fetchGames() propagates the
           // updated installed flag from the DB into the games store.
           setTimeout(() => {

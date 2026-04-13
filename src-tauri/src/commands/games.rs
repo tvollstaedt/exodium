@@ -273,6 +273,31 @@ pub async fn get_download_progress(
         p.installed = already_installed;
     }
 
+    // Disk-based completion fallback: librqbit's in-memory file_progress can
+    // stall short of total_bytes for files that are in fact fully written to
+    // disk — observed when multiple parallel downloads share a torrent and
+    // the per-file stat lags behind actual assembly. The bug manifests as
+    // "Waiting for last pieces..." forever, only recovering on app restart
+    // (when session state is reloaded from disk). If the target file exists
+    // with the expected size, trust the disk over the stats.
+    if let Some(ref mut p) = progress {
+        if !p.finished && p.total_bytes > 0 && p.progress >= 0.99 {
+            if let Some(zip_path) = manager.file_output_path(game_idx) {
+                if let Ok(meta) = std::fs::metadata(&zip_path) {
+                    if meta.len() >= p.total_bytes {
+                        log::info!(
+                            "Disk-based completion: {} fully assembled ({} bytes) but librqbit stats lagged at {}. Treating as finished.",
+                            title, meta.len(), p.downloaded_bytes
+                        );
+                        p.downloaded_bytes = p.total_bytes;
+                        p.progress = 1.0;
+                        p.finished = true;
+                    }
+                }
+            }
+        }
+    }
+
     // Extract !DOSmetadata.zip if it just finished downloading (check main eXoDOS manager)
     if let Some(ref main_mgr) = main_mgr_opt {
         if let Some(dosbox_meta) = main_mgr.index().find_dosbox_metadata_zip() {
@@ -943,21 +968,17 @@ fn resolve_dosbox(app: &AppHandle) -> PathBuf {
 
 /// Install DOSBox Staging glshaders into the user config dir if missing.
 ///
-/// On Linux and Windows, DOSBox aborts at startup with "Fallback shader
-/// 'interpolation/bilinear' not found" unless it finds glshaders in the
-/// user config dir. The shader pack is bundled as a Tauri resource
-/// (`bundle.resources` maps `resources/dosbox-glshaders` → `dosbox-glshaders`
-/// inside resource_dir). Here we copy it to the user config dir on first
-/// launch; subsequent launches see the dir already exists and no-op.
+/// DOSBox aborts at startup with "Fallback shader 'interpolation/bilinear'
+/// not found" unless it finds glshaders in the user config dir. The shader
+/// pack is bundled as a Tauri resource (`bundle.resources` maps
+/// `resources/dosbox-glshaders` → `dosbox-glshaders` inside resource_dir).
+/// Here we copy it to the user config dir on first launch; subsequent
+/// launches see the dir already exists and no-op.
 ///
-/// macOS is skipped because launch_game writes a last-wins conf fragment
-/// (`output = texture`) that bypasses the shader requirement entirely —
-/// simpler than installing shaders to `~/Library/Preferences/DOSBox/`.
+/// On macOS this is only needed when the user opts into CRT shaders —
+/// otherwise launch_game writes `output = texture` (SDL renderer, no
+/// shader pipeline) which sidesteps the startup check entirely.
 fn ensure_dosbox_shaders(app: &AppHandle) {
-    if cfg!(target_os = "macos") {
-        return;
-    }
-
     use tauri::Manager;
 
     let user_shader_dir: Option<PathBuf> = if cfg!(target_os = "linux") {
@@ -970,6 +991,10 @@ fn ensure_dosbox_shaders(app: &AppHandle) {
         std::env::var("LOCALAPPDATA")
             .ok()
             .map(|p| PathBuf::from(p).join("DOSBox").join("glshaders"))
+    } else if cfg!(target_os = "macos") {
+        std::env::var("HOME")
+            .ok()
+            .map(|h| PathBuf::from(h).join("Library").join("Preferences").join("DOSBox").join("glshaders"))
     } else {
         None
     };
@@ -1022,6 +1047,18 @@ pub fn launch_game(app: AppHandle, db_state: State<DbState>, id: i64) -> Result<
     let data_dir = queries::get_config(&conn, "data_dir")
         .map_err(|e| e.to_string())?
         .ok_or("Data directory not configured. Run setup first.")?;
+
+    // Read global user preferences. These are set via Settings → Game Defaults
+    // and layered as a last-wins DOSBox -conf fragment so they override per-game
+    // glshader / fullscreen without mutating eXoDOS's bundled confs.
+    let global_glshader = queries::get_config(&conn, "global_glshader")
+        .map_err(|e| e.to_string())?
+        .unwrap_or_else(|| "default".to_string());
+    let default_fullscreen = queries::get_config(&conn, "default_fullscreen")
+        .map_err(|e| e.to_string())?
+        .unwrap_or_else(|| "window".to_string());
+    let crt_auto_enabled = global_glshader == "crt-auto";
+    let fullscreen_enabled = default_fullscreen == "fullscreen";
 
     if !game.installed {
         return Err(format!("{} is not installed. Download it first.", game.title));
@@ -1185,7 +1222,16 @@ pub fn launch_game(app: AppHandle, db_state: State<DbState>, id: i64) -> Result<
         }
     }
 
+    // Linux/Windows need shaders for DOSBox to start at all. macOS only needs
+    // them if CRT auto is enabled (otherwise `output = texture` sidesteps the
+    // shader pipeline). Avoid writing files to the user's macOS prefs dir
+    // unless they've actually opted into shader-based rendering.
+    #[cfg(not(target_os = "macos"))]
     ensure_dosbox_shaders(&app);
+    #[cfg(target_os = "macos")]
+    if crt_auto_enabled {
+        ensure_dosbox_shaders(&app);
+    }
 
     let dosbox_bin = resolve_dosbox(&app);
     let mut cmd = Command::new(&dosbox_bin);
@@ -1198,19 +1244,40 @@ pub fn launch_game(app: AppHandle, db_state: State<DbState>, id: i64) -> Result<
     }
 
     // macOS: the standalone binary extracted from the .app DMG lacks the bundle's
-    // Contents/Resources/glshaders/, so DOSBox aborts when it can't find the mandatory
-    // 'interpolation/bilinear' fallback shader. Override output to 'texture' (SDL
-    // hardware renderer, no shaders required) via a last-wins conf fragment.
-    // This conf is written once per data_dir and reused on subsequent launches.
+    // Contents/Resources/glshaders/, so DOSBox aborts when it can't find the
+    // mandatory 'interpolation/bilinear' fallback shader. Default path is to
+    // force `output = texture` (SDL hardware renderer, no shader pipeline) via
+    // a last-wins conf fragment — sidesteps the shader requirement entirely.
+    // If the user enabled CRT shaders globally we skip this override and rely
+    // on ensure_dosbox_shaders having installed the pack into
+    // ~/Library/Preferences/DOSBox/glshaders (see that function).
     #[cfg(target_os = "macos")]
-    let macos_override_conf = {
-        let conf_path = std::path::Path::new(&data_dir).join("exodium_macos_dosbox.conf");
-        std::fs::write(&conf_path, "[sdl]\noutput = texture\n")
-            .map_err(|e| format!("Failed to write macOS override conf: {e}"))?;
-        conf_path
-    };
-    #[cfg(target_os = "macos")]
-    cmd.arg("-conf").arg(&macos_override_conf);
+    {
+        if !crt_auto_enabled {
+            let conf_path = std::path::Path::new(&data_dir).join("exodium_macos_dosbox.conf");
+            std::fs::write(&conf_path, "[sdl]\noutput = texture\n")
+                .map_err(|e| format!("Failed to write macOS override conf: {e}"))?;
+            cmd.arg("-conf").arg(&conf_path);
+        }
+    }
+
+    // Global user-preference overrides (all platforms, applied LAST so they win
+    // against per-game and options.conf settings). Only written when at least
+    // one override is active — avoids creating a stray empty file on disk for
+    // users who leave both settings at defaults.
+    if crt_auto_enabled || fullscreen_enabled {
+        let mut frag = String::new();
+        if fullscreen_enabled {
+            frag.push_str("[sdl]\nfullscreen = true\n");
+        }
+        if crt_auto_enabled {
+            frag.push_str("[render]\nglshader = crt-auto\n");
+        }
+        let conf_path = std::path::Path::new(&data_dir).join("exodium_global_overrides.conf");
+        std::fs::write(&conf_path, &frag)
+            .map_err(|e| format!("Failed to write global override conf: {e}"))?;
+        cmd.arg("-conf").arg(&conf_path);
+    }
 
     // macOS dev builds: the binary extracted from the .app DMG has a bundle-anchored
     // code signature that becomes invalid without the surrounding bundle. Re-sign

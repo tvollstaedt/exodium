@@ -1,15 +1,24 @@
 import { uninstallGame } from "./api/tauri";
-import { fetchGames } from "./stores/games";
+import { fetchGames, notifyGameLibraryChanged } from "./stores/games";
+import { getDownloadState, cancelGameDownload } from "./stores/downloads";
 
 export async function performUninstall(
   gameId: number,
   setStatus: (s: string) => void,
   onSuccess?: () => void | Promise<void>,
 ): Promise<void> {
+  // If a download is in flight, cancel it before removing the directory —
+  // otherwise the torrent writer races the uninstall and can leave partial
+  // files or error out mid-extract.
+  if (getDownloadState(gameId)?.downloading) {
+    setStatus("Cancelling download…");
+    await cancelGameDownload(gameId);
+  }
   setStatus("Uninstalling...");
   try {
     await uninstallGame(gameId);
     fetchGames();
+    notifyGameLibraryChanged(gameId);
     await onSuccess?.();
     setStatus("Uninstalled");
     setTimeout(() => setStatus(""), 2000);

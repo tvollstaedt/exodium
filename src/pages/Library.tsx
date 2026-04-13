@@ -8,16 +8,42 @@ import {
   sortBy, setSortBy,
   collectionFilter, setCollectionFilter,
   getFavoriteGames,
-  updateGameFavorited,
+  lastGameLibraryChange,
 } from "../stores/games";
-import { getGenres, getInstalledGames, getConfig, getAvailableCollections, getSectionKeys, type Game } from "../api/tauri";
+import { getGame, getGenres, getInstalledGames, getConfig, getAvailableCollections, getSectionKeys, type Game } from "../api/tauri";
 import { GameCard } from "../components/GameCard";
 import { GameDetailPanel } from "../components/GameDetailPanel";
 import { Select } from "../components/Select";
 
 type Tab = "library" | "browse";
 
-const gameIds = (games: Game[]) => games.map(g => g.id).sort().join(",");
+/** Merge fresh DB results into an existing shelf list, preserving the previous
+ *  object reference for any game whose state flags didn't change. This keeps
+ *  <For>'s reference-based keying stable: unchanged cards don't remount (no
+ *  flicker), only cards whose state flipped get re-rendered with new data.
+ *
+ *  Previously these shelves guarded refresh on ID-set equality — that missed
+ *  the case where a pre-favorited game becomes installed: same IDs, different
+ *  state, no refresh, stale card. */
+function mergeShelfList(prev: Game[], fresh: Game[]): Game[] {
+  const prevById = new Map(prev.map(g => [g.id, g]));
+  return fresh.map(f => {
+    const old = prevById.get(f.id);
+    // available_languages is part of the equality check because a variant
+    // of a multi-lang game (e.g. DE) can transition independently of the
+    // primary row (EN) — its state shows up in the primary's badges via
+    // available_languages like "EN:0,DE:2". Without this, shelf cards
+    // display stale language badges after installing a sibling variant.
+    if (old
+      && old.installed === f.installed
+      && old.in_library === f.in_library
+      && old.favorited === f.favorited
+      && old.available_languages === f.available_languages) {
+      return old;
+    }
+    return f;
+  });
+}
 
 type Section = { label: string; games: Game[]; index: number };
 
@@ -48,6 +74,26 @@ export function Library() {
     const updated = games().find(g => g.id === dg.id);
     if (updated && (updated.installed !== dg.installed || updated.in_library !== dg.in_library)) {
       setDetailGame(updated);
+    }
+  });
+
+  // Whenever a game's installed/in_library state changes (download completes
+  // or uninstall finishes), refresh the shelves and re-sync the detail panel.
+  // The shelves come from separate DB queries, so fetchGames() alone isn't
+  // enough. detailGame() can hold an object that no longer matches reality
+  // — fetch the fresh row directly by id to be sure.
+  createEffect(() => {
+    const change = lastGameLibraryChange();
+    if (!change) { return; }
+    refreshInstalled();
+    refreshFavorites();
+    const dg = detailGame();
+    if (dg?.id === change.id) {
+      getGame(change.id).then((fresh) => {
+        if (fresh && detailGame()?.id === change.id) {
+          setDetailGame(fresh);
+        }
+      }).catch(() => {});
     }
   });
 
@@ -139,20 +185,28 @@ export function Library() {
 
   const refreshInstalled = async () => {
     try {
-      const installed = await getInstalledGames();
-      if (gameIds(installed) !== gameIds(installedGames())) { setInstalledGames(installed); }
-    } catch {}
+      const fresh = await getInstalledGames();
+      setInstalledGames((prev) => mergeShelfList(prev, fresh));
+    } catch (e) {
+      console.warn("[Library] refreshInstalled failed:", e);
+    }
   };
 
   const refreshFavorites = async () => {
     try {
-      const favs = await getFavoriteGames();
-      if (gameIds(favs) !== gameIds(favoriteGames())) { setFavoriteGames(favs); }
-    } catch {}
+      const fresh = await getFavoriteGames();
+      setFavoriteGames((prev) => mergeShelfList(prev, fresh));
+    } catch (e) {
+      console.warn("[Library] refreshFavorites failed:", e);
+    }
   };
 
   const handleFavoriteChanged = (id: number, favorited: boolean) => {
-    updateGameFavorited(id, favorited);
+    // NOTE: do NOT call updateGameFavorited here. That creates a new object in
+    // games() via spread, which forces <For> to unmount/remount the card whose
+    // star was just clicked — visible as a flicker (thumb reloads, etc).
+    // The card already tracks favorited state optimistically in its own signal;
+    // games() will heal on the next refetch.
     if (!favorited) {
       setFavoriteGames(prev => prev.filter(g => g.id !== id));
     } else {

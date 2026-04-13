@@ -1,5 +1,5 @@
 import { createSignal, createEffect, Show, For } from "solid-js";
-import { Progress } from "@ark-ui/solid/progress";
+import { AutoProgress } from "./ProgressBar";
 import { listContentPacks, type ContentPackStatus } from "../api/tauri";
 import {
   activeJobs,
@@ -52,10 +52,8 @@ export function ContentPackSettings() {
 
   return (
     <>
-      <div class="setting-row" style="flex-direction: column; align-items: flex-start; gap: 4px">
-        <span class="setting-label">Content Packs</span>
-        <span class="setting-hint">Optional downloads that enhance your library with box art and media.</span>
-      </div>
+      <h3 class="settings-section-title">Content Packs</h3>
+      <p class="settings-section-hint">Optional downloads that enhance your library with box art and media.</p>
 
       <For each={packs()} fallback={<span class="setting-hint">No content packs available.</span>}>
         {(pack) => {
@@ -87,26 +85,22 @@ export function ContentPackSettings() {
           };
 
           return (
-            <div class="setting-row" style="flex-wrap: wrap; gap: 8px">
-              <span class="setting-label">{pack.display_name}</span>
-              <span class="setting-hint">{pack.description} (~{formatBytes(pack.size_bytes)})</span>
+            <div class="pack-row">
+              <div class="pack-info">
+                <span class="pack-name">{pack.display_name}</span>
+                <span class="pack-desc">{pack.description} · {formatBytes(pack.size_bytes)}</span>
+              </div>
 
-              {/* Active download: progress bar + status + cancel */}
+              {/* Active download: status label + cancel on the right; progress bar fills row below */}
               <Show when={isActive()}>
-                <div style="width: 100%; display: flex; align-items: center; gap: 8px">
-                  <div style="flex: 1">
-                    <Progress.Root value={progress() * 100} class="ark-progress mini">
-                      <Progress.Track class="ark-progress-track">
-                        <Progress.Range class="ark-progress-range" />
-                      </Progress.Track>
-                    </Progress.Root>
-                  </div>
-                  <span class="setting-hint" style="white-space: nowrap; flex: none">{statusText()}</span>
-                  <button class="btn-small btn-danger" onClick={() => handleCancel(pack.id)}>✕</button>
+                <span class="pack-status-inline">{statusText()}</span>
+                <button class="btn-small btn-danger" onClick={() => handleCancel(pack.id)}>Cancel</button>
+                <div class="pack-progress">
+                  <AutoProgress value={progress()} class="mini" indeterminate={job()?.phase !== "downloading" || undefined} />
                 </div>
               </Show>
 
-              {/* Error from a finished job */}
+              {/* Error from a finished (non-cancelled) job */}
               <Show when={!isActive() && job()?.error}>
                 <span class="error" style="width: 100%; margin: 0; padding: 6px 10px; font-size: 11px">{job()!.error}</span>
               </Show>
@@ -114,12 +108,12 @@ export function ContentPackSettings() {
               {/* Idle states */}
               <Show when={!isActive() && !job()}>
                 <Show when={pack.installed}>
-                  <span class="setting-hint" style="flex: none">Installed (v{pack.installed_version})</span>
+                  <span class="pack-status-inline">Installed · v{pack.installed_version}</span>
                   <button class="btn-small btn-danger" onClick={() => handleUninstall(pack.id)}>Remove</button>
                 </Show>
 
                 <Show when={!pack.installed && isSupersededByInstalled()}>
-                  <span class="setting-hint" style="flex: none">Included in another pack</span>
+                  <span class="pack-status-inline">Included in another pack</span>
                 </Show>
 
                 <Show when={!pack.installed && !isSupersededByInstalled() && !isFuture()}>
@@ -127,7 +121,7 @@ export function ContentPackSettings() {
                 </Show>
 
                 <Show when={isFuture()}>
-                  <span class="setting-hint" style="flex: none">Coming soon</span>
+                  <span class="pack-status-inline">Coming soon</span>
                 </Show>
               </Show>
             </div>

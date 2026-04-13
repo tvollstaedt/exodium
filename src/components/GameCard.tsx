@@ -1,7 +1,7 @@
-import { createSignal, createEffect, on, Show, For } from "solid-js";
+import { createSignal, createEffect, on, onCleanup, Show, For } from "solid-js";
 import { Portal } from "solid-js/web";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { Progress } from "@ark-ui/solid/progress";
+import { CircularProgress } from "./ProgressBar";
 import type { Game } from "../api/tauri";
 import { getGameVariants } from "../api/tauri";
 import { formatBytes, parseLangEntries, langBadgeClass, performUninstall } from "../util";
@@ -23,6 +23,9 @@ export function GameCard(props: GameCardProps) {
   const [variants, setVariants] = createSignal<Game[]>([]);
   const [contextMenu, setContextMenu] = createSignal<{x: number, y: number} | null>(null);
   const [confirmUninstall, setConfirmUninstall] = createSignal(false);
+  const [favAnimating, setFavAnimating] = createSignal(false);
+  let favAnimTimeout: number | undefined;
+  onCleanup(() => { if (favAnimTimeout) { clearTimeout(favAnimTimeout); } });
 
   // Re-sync favorited from props only when the card is reused for a different game (For loop
   // key change). Do NOT run on favorited-flag-only changes — that would race with the
@@ -60,6 +63,9 @@ export function GameCard(props: GameCardProps) {
 
   const handleContextMenu = (e: MouseEvent) => {
     if ((!props.game.installed && !props.game.in_library) || props.game.id == null) { return; }
+    // Don't offer uninstall while a download is in flight — performUninstall
+    // would cancel it first, but exposing both actions side-by-side is confusing.
+    if (isDownloading()) { return; }
     e.preventDefault();
     setConfirmUninstall(false);
     setContextMenu({ x: e.clientX, y: e.clientY });
@@ -81,6 +87,14 @@ export function GameCard(props: GameCardProps) {
     if (props.game.id == null) { return; }
     const prev = favorited();
     setFavorited(!prev);
+    // Retrigger CSS animation by flipping off-then-on across a frame — just
+    // setting true-to-true wouldn't restart a keyframe animation already in
+    // flight (e.g. double-click taps). Clear any previously-scheduled
+    // turn-off so a second click within 500ms doesn't clip its own animation.
+    if (favAnimTimeout) { clearTimeout(favAnimTimeout); }
+    setFavAnimating(false);
+    requestAnimationFrame(() => setFavAnimating(true));
+    favAnimTimeout = window.setTimeout(() => setFavAnimating(false), 500);
     try {
       const next = await toggleFavorite(props.game.id);
       setFavorited(next);
@@ -105,6 +119,20 @@ export function GameCard(props: GameCardProps) {
             onError={() => setImgError(true)}
           />
         </Show>
+        <Show when={isDownloading()}>
+          <div class="game-card-download-overlay">
+            <CircularProgress value={currentProgress()} size={64} strokeWidth={5}>
+              <Show when={currentProgress() > 0} fallback={<span class="circular-progress-pct muted">…</span>}>
+                <span class="circular-progress-pct">{Math.round(currentProgress() * 100)}%</span>
+              </Show>
+            </CircularProgress>
+            <Show when={props.game.id != null}>
+              <button class="game-card-overlay-cancel"
+                title="Cancel download"
+                onClick={(e) => { e.stopPropagation(); cancelGameDownload(props.game.id!); }}>✕</button>
+            </Show>
+          </div>
+        </Show>
         <div class="game-card-body">
           <div class="game-card-title">{props.game.title}</div>
           <div class="game-card-meta">
@@ -126,16 +154,7 @@ export function GameCard(props: GameCardProps) {
             </Show>
             <Show when={!status()}>
               <Show when={isDownloading()}>
-                <Progress.Root value={currentProgress() * 100} class="ark-progress mini">
-                  <Progress.Track class="ark-progress-track">
-                    <Progress.Range class="ark-progress-range" />
-                  </Progress.Track>
-                </Progress.Root>
                 <span class="card-action-label action-downloading">{dlState()?.status}</span>
-                <Show when={props.game.id != null}>
-                  <button class="card-cancel-btn" title="Cancel download"
-                    onClick={(e) => { e.stopPropagation(); cancelGameDownload(props.game.id!); }}>✕</button>
-                </Show>
               </Show>
               <Show when={!isDownloading() && props.game.installed}>
                 <span class="card-action-label action-installed">▶ Play</span>
@@ -155,10 +174,20 @@ export function GameCard(props: GameCardProps) {
 
       <Show when={props.game.id != null && props.showFavoriteBtn !== false}>
         <button
-          class={`favorite-btn${favorited() ? " is-favorited" : ""}`}
+          class={`favorite-btn${favorited() ? " is-favorited" : ""}${favAnimating() ? " animating" : ""}`}
           onClick={handleToggleFavorite}
           title={favorited() ? "Remove from favorites" : "Add to favorites"}
-        >★</button>
+        >
+          <span class="fav-star">★</span>
+          <Show when={favAnimating() && favorited()}>
+            <span class="fav-ring" />
+            <span class="fav-sparks">
+              <For each={[0, 1, 2, 3, 4, 5]}>
+                {(i) => <span class="fav-spark" style={{ "--angle": `${i * 60}deg` }} />}
+              </For>
+            </span>
+          </Show>
+        </button>
       </Show>
 
       <Show when={contextMenu()}>

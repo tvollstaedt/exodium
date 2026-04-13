@@ -1,6 +1,6 @@
 import { createSignal, Show, For, onCleanup } from "solid-js";
 import { Portal } from "solid-js/web";
-import { Progress } from "@ark-ui/solid/progress";
+import { AutoProgress } from "./ProgressBar";
 import { downloads, cancelGameDownload } from "../stores/downloads";
 import { activeJobs, cancelContentPackJob } from "../stores/contentPacks";
 import { formatBytes } from "../util";
@@ -121,11 +121,7 @@ export function DownloadIndicator() {
         onClick={() => setShowSheet(!showSheet())}
         title={`${totalCount()} download${totalCount() > 1 ? "s" : ""} in progress`}
       >
-        <Progress.Root value={avgProgress() * 100} class="ark-progress indicator-progress">
-          <Progress.Track class="ark-progress-track">
-            <Progress.Range class="ark-progress-range" />
-          </Progress.Track>
-        </Progress.Root>
+        <AutoProgress value={avgProgress()} class="indicator-progress" />
         <span class="download-indicator-count">{totalCount()}</span>
       </button>
 
@@ -142,11 +138,7 @@ export function DownloadIndicator() {
                   <div class="download-sheet-info">
                     <span class="download-sheet-label">{dl.label}</span>
                     <div class="download-sheet-progress-row">
-                      <Progress.Root value={dl.progress * 100} class="ark-progress mini">
-                        <Progress.Track class="ark-progress-track">
-                          <Progress.Range class="ark-progress-range" />
-                        </Progress.Track>
-                      </Progress.Root>
+                      <AutoProgress value={dl.progress} class="mini" />
                       <span class="download-sheet-status">{dl.status}</span>
                       <Show when={dl.speed}>
                         <span class="download-sheet-speed">{dl.speed}</span>
