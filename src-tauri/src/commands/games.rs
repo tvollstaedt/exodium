@@ -1262,17 +1262,20 @@ pub fn launch_game(app: AppHandle, db_state: State<DbState>, id: i64) -> Result<
     }
 
     // Global user-preference overrides (all platforms, applied LAST so they win
-    // against per-game and options.conf settings). Only written when at least
-    // one override is active — avoids creating a stray empty file on disk for
-    // users who leave both settings at defaults.
-    if crt_auto_enabled || fullscreen_enabled {
-        let mut frag = String::new();
-        if fullscreen_enabled {
-            frag.push_str("[sdl]\nfullscreen = true\n");
-        }
-        if crt_auto_enabled {
-            frag.push_str("[render]\nglshader = crt-auto\n");
-        }
+    // against per-game and options.conf settings). Always written and always
+    // authoritative — for BOTH the on and off states. Reason: in DOSBox Staging
+    // 0.82+ the default `glshader` is `crt-auto`, and ~90% of eXoDOS per-game
+    // configs don't explicitly set glshader, so without an active "off" override
+    // the user's unchecked CRT toggle would still get crt-auto from Staging's
+    // default. Same logic applies to fullscreen — write the explicit value so
+    // the user's UI state always wins, regardless of what eXoDOS configs or
+    // DOSBox defaults say.
+    {
+        let glshader_val = if crt_auto_enabled { "crt-auto" } else { "sharp" };
+        let fullscreen_val = if fullscreen_enabled { "true" } else { "false" };
+        let frag = format!(
+            "[sdl]\nfullscreen = {fullscreen_val}\n[render]\nglshader = {glshader_val}\n"
+        );
         let conf_path = std::path::Path::new(&data_dir).join("exodium_global_overrides.conf");
         std::fs::write(&conf_path, &frag)
             .map_err(|e| format!("Failed to write global override conf: {e}"))?;
