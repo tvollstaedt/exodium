@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-Generate shortcode-keyed thumbnail JPEGs from an eXoDOS metadata ZIP.
+Generate content-addressed thumbnail JPEGs from an eXoDOS metadata ZIP.
+
+Filenames are SHA-256(normalized title)[:16] so the identifier is stable,
+collision-proof, and independent of shortcode naming. The same hash function
+is implemented in src-tauri/src/bin/generate_db.rs::thumbnail_key — both sides
+must agree or the frontend lookup will miss.
 
 Works for the main eXoDOS pack and all language packs (GLP/SLP/PLP).
 Each pack uses platform 'MS-DOS' so image paths are always
@@ -12,11 +17,10 @@ Usage:
 
     metadata_zip   Path to XODOSMetadata.zip / eXoDOS_GLP_Metadata.zip / etc.
     xml_gz         Matching bundled catalogue: metadata/MS-DOS.xml.gz, GLP.xml.gz, etc.
-    output_dir     Destination for shortcode-keyed JPEGs (e.g. thumbnails/eXoDOS)
+    output_dir     Destination for <hash>.jpg files (e.g. thumbnails/eXoDOS)
     --force        Overwrite already-existing thumbnails
-    --db           Path to metadata/exodium.db — used as highest-priority shortcode
-                   source so LP-exclusive thumbnails get the correct generate_shortcode()
-                   name (e.g. ElDesafi.jpg) rather than the zip bat directory name
+    --db           Path to metadata/exodium.db — used as highest-priority title
+                   source because generate_db.rs imports the canonical XML title
     --extra-xml    Additional XML catalogue to merge as fallback (e.g. MS-DOS.xml.gz
                    for GLP, which includes German box art for EN-catalog games)
 
@@ -24,6 +28,7 @@ Dependencies: Pillow  (pip3 install Pillow)
 """
 
 import gzip
+import hashlib
 import io
 import re
 import sqlite3
@@ -32,6 +37,23 @@ import unicodedata
 import zipfile
 from pathlib import Path
 from xml.etree import ElementTree as ET
+
+
+def thumbnail_normalize(title: str) -> str:
+    """
+    Canonical form of a title for hashing. Must match the Rust implementation
+    in src-tauri/src/bin/generate_db.rs::thumbnail_normalize exactly:
+      1. Trim whitespace
+      2. Lowercase (ASCII; non-ASCII letters pass through)
+      3. Collapse internal whitespace to a single space
+    """
+    return " ".join(title.strip().lower().split())
+
+
+def thumbnail_key(title: str) -> str:
+    """SHA-256(normalized title)[:16] — the content-addressed filename stem."""
+    normalized = thumbnail_normalize(title)
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
 
 try:
     from PIL import Image
@@ -126,14 +148,16 @@ _SKIP_STEMS = {"install", "alternate launcher"}
 _YEAR_SUFFIX = re.compile(r"\s*\(\d{4}\)\s*$")
 
 
-def build_title_to_shortcode_from_zip(zip_path: str) -> dict[str, str]:
+def build_lookup_from_zip(zip_path: str) -> dict[str, str]:
     """
-    Build a title→shortcode map from the zip's internal game directory structure.
+    Build a normalized-title→raw-title map from the zip's bat-file paths.
 
-    Scans bat files at eXo/eXoDOS/!dos/!<lang>/<SC>/<Title> (Year).bat and maps
-    normalize(title) → SC.  Covers language-pack-exclusive games whose XML
-    ApplicationPath uses a flat !<lang>/<title>.bat path with no shortcode dir
-    (SLP, PLP).  Has no effect on packs whose XML already provides shortcodes.
+    Previously returned shortcodes; now returns the raw canonical title string
+    so we can compute `thumbnail_key(raw_title)` at save time. The bat-stem
+    title is the best we can recover from zip structure alone — it's what the
+    LaunchBox app wrote as a filename-safe variant of the XML Title. If the
+    same game is also present in the primary XML, the XML builder wins (richer
+    punctuation; better for matching the hash we compute in generate_db.rs).
     """
     mapping: dict[str, str] = {}
     with zipfile.ZipFile(zip_path, "r") as zf:
@@ -141,38 +165,37 @@ def build_title_to_shortcode_from_zip(zip_path: str) -> dict[str, str]:
             m = _BAT_RE.match(name)
             if m is None:
                 continue
-            sc, bat_stem = m.group(1), m.group(2)
+            _sc, bat_stem = m.group(1), m.group(2)
             if bat_stem.lower() in _SKIP_STEMS or "/Extras/" in name:
                 continue
             title = _YEAR_SUFFIX.sub("", bat_stem).strip()
             if not title:
                 continue
             for variant in title_variants(title):
-                mapping.setdefault(normalize(prenormalize(variant)), sc)
+                mapping.setdefault(normalize(prenormalize(variant)), title)
                 sw = article_swap(variant)
                 if sw:
-                    mapping.setdefault(normalize(prenormalize(sw)), sc)
+                    mapping.setdefault(normalize(prenormalize(sw)), title)
     return mapping
 
 
-def build_title_to_shortcode_from_db(db_path: str) -> dict[str, str]:
+def build_lookup_from_db(db_path: str) -> dict[str, str]:
     """
-    Query the pre-built exodium.db for title→shortcode mappings.
-    This is the highest-priority source because generate_db.rs is the authoritative
-    shortcode generator (including LP-exclusive games via generate_shortcode()).
-    Returns an empty dict if the DB is empty or has not been generated yet.
+    Build a normalized-title→raw-title map from the pre-built exodium.db.
+    DB wins over zip/XML because generate_db.rs uses the canonical XML title
+    imported at build time — the exact string we want to hash.
     """
     mapping: dict[str, str] = {}
     conn = sqlite3.connect(db_path)
     try:
-        for title, shortcode in conn.execute(
-            "SELECT title, shortcode FROM games WHERE shortcode IS NOT NULL AND shortcode != ''"
+        for (title,) in conn.execute(
+            "SELECT title FROM games WHERE title IS NOT NULL AND title != ''"
         ):
             for variant in title_variants(title):
-                mapping.setdefault(normalize(prenormalize(variant)), shortcode)
+                mapping.setdefault(normalize(prenormalize(variant)), title)
                 sw = article_swap(variant)
                 if sw:
-                    mapping.setdefault(normalize(prenormalize(sw)), shortcode)
+                    mapping.setdefault(normalize(prenormalize(sw)), title)
     except sqlite3.OperationalError as e:
         print(f"  WARNING: could not read {db_path} ({e}). "
               f"Run 'cargo run --bin generate_db' to rebuild it.")
@@ -181,10 +204,9 @@ def build_title_to_shortcode_from_db(db_path: str) -> dict[str, str]:
     return mapping
 
 
-def build_title_to_shortcode(xml_gz_path: str) -> dict[str, str]:
+def build_lookup_from_xml(xml_gz_path: str) -> dict[str, str]:
     """
-    Parse an XML catalogue and return a map of normalized_title → shortcode.
-    Shortcode is extracted from ApplicationPath: eXo\\eXoDOS\\<SC>\\dosbox.conf
+    Parse an XML catalogue and return a normalized-title→raw-title map.
     Both the canonical LaunchBox title ("Amt, Das") and the natural-order form
     ("Das Amt") are indexed so that image files using either convention match.
     """
@@ -194,46 +216,32 @@ def build_title_to_shortcode(xml_gz_path: str) -> dict[str, str]:
 
     for game in tree.findall(".//Game"):
         title_el = game.find("Title")
-        app_path_el = game.find("ApplicationPath")
-        if title_el is None or app_path_el is None:
+        if title_el is None:
             continue
         title = (title_el.text or "").strip()
-        app_path = (app_path_el.text or "").replace("\\", "/")
-        # Path format: eXo/eXoDOS/!dos/<shortcode>/game.bat
-        # (possibly with a language dir: eXo/eXoDOS/!dos/!german/<shortcode>/game.bat)
-        dos_idx = app_path.find("/!dos/")
-        if dos_idx == -1:
+        if not title:
             continue
-        after_dos = app_path[dos_idx + 6:]
-        # Skip language sub-dir (starts with !)
-        if after_dos.startswith("!"):
-            lang_end = after_dos.find("/")
-            if lang_end == -1:
-                continue
-            after_dos = after_dos[lang_end + 1:]
-        sc_end = after_dos.find("/")
-        shortcode = after_dos[:sc_end] if sc_end != -1 else after_dos
-        if shortcode and title:
-            for variant in title_variants(title):
-                mapping.setdefault(normalize(prenormalize(variant)), shortcode)
-                swapped = article_swap(variant)
-                if swapped:
-                    mapping.setdefault(normalize(prenormalize(swapped)), shortcode)
+        for variant in title_variants(title):
+            mapping.setdefault(normalize(prenormalize(variant)), title)
+            swapped = article_swap(variant)
+            if swapped:
+                mapping.setdefault(normalize(prenormalize(swapped)), title)
 
     return mapping
 
 
-def lookup(title_to_sc: dict[str, str], title: str) -> str | None:
-    """Try all title variants (full, subtitle-stripped) and article-swapped forms."""
+def lookup(title_to_raw: dict[str, str], title: str) -> str | None:
+    """Try all title variants (full, subtitle-stripped) and article-swapped forms.
+       Returns the raw title string to hash, or None if no match."""
     for variant in title_variants(title):
-        sc = title_to_sc.get(normalize(prenormalize(variant)))
-        if sc:
-            return sc
+        raw = title_to_raw.get(normalize(prenormalize(variant)))
+        if raw:
+            return raw
         swapped = article_swap(variant)
         if swapped:
-            sc = title_to_sc.get(normalize(prenormalize(swapped)))
-            if sc:
-                return sc
+            raw = title_to_raw.get(normalize(prenormalize(swapped)))
+            if raw:
+                return raw
     return None
 
 
@@ -291,38 +299,38 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Priority order (highest first):
-    # 1. DB shortcodes (authoritative — generate_db.rs is the source of truth)
+    # 1. DB titles (authoritative — generate_db.rs imported the canonical XML title)
     # 2. Zip bat structure (covers LP-exclusive games not in the primary XML)
     # 3. Primary XML catalogue
     # 4. Extra XML catalogue (fallback)
 
-    title_to_sc: dict[str, str] = {}
+    title_lookup: dict[str, str] = {}
 
     if db_path:
-        print(f"Loading shortcodes from {db_path}...")
-        title_to_sc = build_title_to_shortcode_from_db(db_path)
-        print(f"  {len(title_to_sc)} keys from DB (authoritative)")
+        print(f"Loading titles from {db_path}...")
+        title_lookup = build_lookup_from_db(db_path)
+        print(f"  {len(title_lookup)} keys from DB (authoritative)")
 
-    zip_map = build_title_to_shortcode_from_zip(metadata_zip_path)
-    before = len(title_to_sc)
+    zip_map = build_lookup_from_zip(metadata_zip_path)
+    before = len(title_lookup)
     for k, v in zip_map.items():
-        title_to_sc.setdefault(k, v)
-    print(f"  +{len(title_to_sc) - before} additional keys from zip structure")
+        title_lookup.setdefault(k, v)
+    print(f"  +{len(title_lookup) - before} additional keys from zip structure")
 
-    print(f"Parsing {xml_gz_path} for title→shortcode mapping...")
-    xml_map = build_title_to_shortcode(xml_gz_path)
-    before = len(title_to_sc)
+    print(f"Parsing {xml_gz_path} for title lookup...")
+    xml_map = build_lookup_from_xml(xml_gz_path)
+    before = len(title_lookup)
     for k, v in xml_map.items():
-        title_to_sc.setdefault(k, v)
-    print(f"  +{len(title_to_sc) - before} additional keys from XML")
+        title_lookup.setdefault(k, v)
+    print(f"  +{len(title_lookup) - before} additional keys from XML")
 
     if extra_xml:
         print(f"Merging extra catalogue {extra_xml}...")
-        extra_map = build_title_to_shortcode(extra_xml)
-        before = len(title_to_sc)
+        extra_map = build_lookup_from_xml(extra_xml)
+        before = len(title_lookup)
         for k, v in extra_map.items():
-            title_to_sc.setdefault(k, v)
-        print(f"  +{len(title_to_sc) - before} additional keys")
+            title_lookup.setdefault(k, v)
+        print(f"  +{len(title_lookup) - before} additional keys")
 
     print(f"Opening {metadata_zip_path}...")
     with zipfile.ZipFile(metadata_zip_path, "r") as zf:
@@ -341,14 +349,18 @@ def main() -> None:
             if i > 0 and i % 500 == 0:
                 print(f"  {i}/{len(box_front)}  matched={matched}  skipped={skipped}  unmatched={len(unmatched)}")
 
-            title = image_stem_to_title(name)
-            shortcode = lookup(title_to_sc, title)
+            stem_title = image_stem_to_title(name)
+            raw_title = lookup(title_lookup, stem_title)
 
-            if not shortcode:
+            if not raw_title:
                 unmatched.append(name)
                 continue
 
-            out_path = output_dir / f"{shortcode}.jpg"
+            # Content-addressed filename: SHA-256(normalized raw title)[:16].
+            # Same hash function the Rust side uses to populate games.thumbnail_key
+            # so both ends agree on the filename without any intermediate mapping.
+            key = thumbnail_key(raw_title)
+            out_path = output_dir / f"{key}.jpg"
             if out_path.exists() and not force:
                 skipped += 1
                 continue
@@ -365,7 +377,7 @@ def main() -> None:
                     matched += 1
                     # Generate Tier 0 low-quality preview alongside full-size.
                     if preview_dir is not None:
-                        preview_path = preview_dir / f"{shortcode}.jpg"
+                        preview_path = preview_dir / f"{key}.jpg"
                         if not preview_path.exists() or force:
                             pw = 80
                             ph = max(1, int(h * pw / w))

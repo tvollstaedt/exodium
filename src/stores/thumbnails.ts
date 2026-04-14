@@ -47,68 +47,19 @@ export function thumbnailDirForCollection(collectionId: string | null | undefine
  */
 export function bestThumbnailPath(
   collection: string | null | undefined,
-  shortcode: string | null | undefined,
-  hasThumbnail: boolean,
+  thumbnailKey: string | null | undefined,
 ): string | null {
-  if (!shortcode || !hasThumbnail) {
-    if (hasThumbnail && !shortcode) {
-      console.warn("[thumbnails] miss: has_thumbnail=true but shortcode is empty", { collection });
-    }
-    return null;
-  }
+  if (!thumbnailKey) { return null; }
 
-  // Tier 2 (media) would go here when implemented —
-  // const mediaDir = mediaDirForCollection(collection);
-  // if (mediaDir) { return `${mediaDir}/${shortcode}/poster.jpg`; }
-
-  // Tier 1: poster pack on disk (posterDirForCollection falls back to eXoDOS
-  // for LP collections, and returns null if no pack is installed).
+  // Tier 1: runtime-downloaded poster pack. posterDirForCollection falls back
+  // to the eXoDOS pack dir for LP collections (LP variants share EN covers).
   const posterDir = posterDirForCollection(collection);
-  if (posterDir) { return `${posterDir}/${shortcode}.jpg`; }
+  if (posterDir) { return `${posterDir}/${thumbnailKey}.jpg`; }
 
-  // Tier 0: bundled preview (always available if has_thumbnail).
+  // Tier 0: bundled preview shipped with the app.
   const prevDir = previewDirForCollection(collection);
-  if (prevDir) { return `${prevDir}/${shortcode}.jpg`; }
+  if (prevDir) { return `${prevDir}/${thumbnailKey}.jpg`; }
 
-  console.warn("[thumbnails] miss: no tier dir resolved", { collection, shortcode });
-  return null;
-}
-
-/** Derive a candidate thumbnail filename stem from a title, mirroring the
- *  Rust `generate_shortcode()` in src-tauri/src/bin/generate_db.rs:
- *    - decompose diacritics and strip combining marks
- *    - keep only ASCII alphanumerics
- *    - truncate to the first 8 characters
- *
- *  This matches the LP-exclusive bundled thumbnails like `DasAmt.jpg`,
- *  `BerlinWa.jpg` (from "Berlin Wall"), etc. Used as a fallback when the
- *  DB shortcode either doesn't match a bundled file or is missing entirely
- *  (e.g. has_thumbnail=0 for LP-exclusive games whose DB build didn't see
- *  the file on disk but the bundled pack actually contains it). */
-export function normalizeTitleKey(title: string): string {
-  const stripped = title
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^A-Za-z0-9]/g, "");
-  return stripped.slice(0, 8);
-}
-
-/** Fallback thumbnail path keyed by normalized title. Intentionally ignores
- *  `hasThumbnail` — the DB's has_thumbnail flag only reflects files the build
- *  pipeline matched, but the bundle may contain additional files generated
- *  under `generate_shortcode()` rules that the LP backfill missed. Worth a
- *  speculative lookup; the browser's <img onError> handles the miss. */
-export function titleFallbackThumbnailPath(
-  collection: string | null | undefined,
-  title: string | null | undefined,
-): string | null {
-  if (!title) { return null; }
-  const key = normalizeTitleKey(title);
-  if (!key) { return null; }
-  const posterDir = posterDirForCollection(collection);
-  if (posterDir) { return `${posterDir}/${key}.jpg`; }
-  const prevDir = previewDirForCollection(collection);
-  if (prevDir) { return `${prevDir}/${key}.jpg`; }
   return null;
 }
 

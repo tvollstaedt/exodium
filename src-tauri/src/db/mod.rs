@@ -59,5 +59,20 @@ fn migrate(conn: &Connection) -> DbResult<()> {
     // Ensure index exists (safe for both new and migrated DBs)
     conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_games_favorited ON games(favorited)")?;
 
+    // Content-addressed thumbnail identifier (SHA-256(normalized title)[:16]).
+    // Supersedes shortcode-derived filenames; populated by generate_db.rs at
+    // build time and copied from EN → LP variants by the backfill in setup.rs.
+    let has_thumbnail_key: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('games') WHERE name = 'thumbnail_key'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+        > 0;
+    if !has_thumbnail_key {
+        conn.execute_batch("ALTER TABLE games ADD COLUMN thumbnail_key TEXT")?;
+    }
+
     Ok(())
 }

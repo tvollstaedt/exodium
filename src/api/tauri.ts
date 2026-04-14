@@ -33,6 +33,10 @@ export interface Game {
   download_size: number | null;
   has_thumbnail: boolean;
   dosbox_variant: string | null;
+  /** SHA-256(normalized title)[:16] — filename stem for the bundled or
+   *  content-pack thumbnail. Null when no title was available at DB-build
+   *  time (very rare). Frontend builds `<preview_dir>/${thumbnail_key}.jpg`. */
+  thumbnail_key: string | null;
 }
 
 export interface GameList {

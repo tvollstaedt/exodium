@@ -65,6 +65,36 @@ fn normalize_title(title: &str) -> String {
     t.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// Normalize a title to its canonical form for thumbnail-key hashing.
+///
+/// Must match the Python implementation in scripts/gen_thumbnails.py exactly
+/// so the generator and the DB agree on filenames. Steps:
+///   1. Trim leading/trailing whitespace
+///   2. Lowercase (ASCII; non-ASCII letters pass through unchanged)
+///   3. Collapse internal whitespace to a single space
+///
+/// Deliberately simpler than `normalize_title()` (which strips articles,
+/// years, edition suffixes for fuzzy matching) — the hash must be stable
+/// across every place the same title appears, so we apply as little
+/// transformation as possible.
+fn thumbnail_normalize(title: &str) -> String {
+    title
+        .trim()
+        .to_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// SHA-256 of the normalized title, truncated to 16 hex chars. This is the
+/// content-addressed filename stem for the game's thumbnail.
+fn thumbnail_key(title: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let normalized = thumbnail_normalize(title);
+    let hash = format!("{:x}", Sha256::digest(normalized.as_bytes()));
+    hash[..16].to_string()
+}
+
 /// Generate a unique shortcode from a game title.
 /// Produces codes like "ACCEsina", "5razy5", "1939" matching the eXoDOS style.
 fn generate_shortcode(
@@ -379,42 +409,124 @@ fn main() {
         .unwrap();
     println!("Filled dosbox_conf for {} LP games from EN counterparts", dosbox_filled);
 
-    // Mark games that have thumbnails on disk
-    let thumb_dir = root.join("thumbnails/eXoDOS");
-    if thumb_dir.exists() {
-        let mut thumb_count = 0usize;
-        let mut stmt = conn
-            .prepare("SELECT DISTINCT shortcode FROM games WHERE shortcode IS NOT NULL")
-            .unwrap();
-        let shortcodes: Vec<String> = stmt
-            .query_map([], |row| row.get(0))
-            .unwrap()
-            .filter_map(|r| r.ok())
-            .collect();
-
+    // Populate thumbnail_key in three passes:
+    //   1. Every EN game hashes its own title.
+    //   2. Every LP variant that shares an EN shortcode copies its EN primary's
+    //      hash, so language variants render the same cover art.
+    //   3. Any game still without a key (LP-exclusive) hashes its own title.
+    {
         let tx = conn.unchecked_transaction().unwrap();
-        let mut missing: Vec<String> = Vec::new();
+
+        // Pass 1: EN games — hash own title.
+        let en_titles: Vec<(i64, String)> = {
+            let mut stmt = tx
+                .prepare("SELECT id, title FROM games WHERE language = 'EN'")
+                .unwrap();
+            stmt.query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))
+                .unwrap()
+                .filter_map(|r| r.ok())
+                .collect()
+        };
         {
             let mut update = tx
-                .prepare_cached("UPDATE games SET has_thumbnail = 1 WHERE shortcode = ?1")
+                .prepare_cached("UPDATE games SET thumbnail_key = ?1 WHERE id = ?2")
                 .unwrap();
-            for sc in &shortcodes {
-                if thumb_dir.join(format!("{}.jpg", sc)).exists() {
-                    update.execute(params![sc]).unwrap();
+            for (id, title) in &en_titles {
+                update.execute(params![thumbnail_key(title), id]).unwrap();
+            }
+        }
+        println!("  thumbnail_key pass 1 (EN own-title): {} games", en_titles.len());
+
+        // Pass 2: LP variants — copy EN's hash where shortcode matches.
+        let pass2 = tx
+            .execute(
+                "UPDATE games
+                 SET thumbnail_key = (
+                     SELECT en.thumbnail_key FROM games en
+                     WHERE en.language = 'EN'
+                       AND en.shortcode = games.shortcode
+                       AND en.thumbnail_key IS NOT NULL
+                     LIMIT 1
+                 )
+                 WHERE thumbnail_key IS NULL
+                   AND shortcode IS NOT NULL
+                   AND language != 'EN'",
+                [],
+            )
+            .unwrap_or(0);
+        println!("  thumbnail_key pass 2 (LP shared with EN): {} games", pass2);
+
+        // Pass 3: LP-exclusive — hash own title.
+        let residual: Vec<(i64, String)> = {
+            let mut stmt = tx
+                .prepare("SELECT id, title FROM games WHERE thumbnail_key IS NULL")
+                .unwrap();
+            stmt.query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))
+                .unwrap()
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+        {
+            let mut update = tx
+                .prepare_cached("UPDATE games SET thumbnail_key = ?1 WHERE id = ?2")
+                .unwrap();
+            for (id, title) in &residual {
+                update.execute(params![thumbnail_key(title), id]).unwrap();
+            }
+        }
+        println!("  thumbnail_key pass 3 (LP-exclusive own-title): {} games", residual.len());
+
+        tx.commit().unwrap();
+    }
+
+    // Mark games whose thumbnail file actually exists on disk (bundled pack).
+    // has_thumbnail is now secondary to thumbnail_key but kept so the frontend
+    // can skip image loads for known-absent files.
+    let thumb_dir = root.join("thumbnails/eXoDOS");
+    if thumb_dir.exists() {
+        let tx = conn.unchecked_transaction().unwrap();
+        let keyed_games: Vec<(i64, String)> = {
+            let mut stmt = tx
+                .prepare("SELECT id, thumbnail_key FROM games WHERE thumbnail_key IS NOT NULL")
+                .unwrap();
+            stmt.query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect()
+        };
+        let mut thumb_count = 0usize;
+        let mut missing: Vec<(String, i64)> = Vec::new();
+        {
+            let mut update = tx
+                .prepare_cached("UPDATE games SET has_thumbnail = 1 WHERE id = ?1")
+                .unwrap();
+            for (id, key) in &keyed_games {
+                if thumb_dir.join(format!("{}.jpg", key)).exists() {
+                    update.execute(params![id]).unwrap();
                     thumb_count += 1;
                 } else {
-                    missing.push(sc.clone());
+                    missing.push((key.clone(), *id));
                 }
             }
         }
         tx.commit().unwrap();
-        println!("Marked {} shortcodes with thumbnails ({} without)", thumb_count, shortcodes.len() - thumb_count);
+        println!(
+            "Marked {} of {} games with thumbnails on disk",
+            thumb_count,
+            keyed_games.len()
+        );
         if !missing.is_empty() {
-            // Log a sample of missing shortcodes so CI build logs help diagnose
-            // the thumbnail coverage gap without reading the DB after the fact.
-            let sample: Vec<&String> = missing.iter().take(30).collect();
-            println!("  Sample of shortcodes without a bundled thumbnail ({} of {}): {:?}",
-                sample.len(), missing.len(), sample);
+            // Log a sample of missing hashes so CI build output helps diagnose
+            // coverage gaps (title mismatch between gen_thumbnails.py and XML).
+            let sample: Vec<&(String, i64)> = missing.iter().take(10).collect();
+            println!(
+                "  Sample of thumbnail_keys without a file on disk ({} of {}): {:?}",
+                sample.len(),
+                missing.len(),
+                sample
+            );
         }
     }
 

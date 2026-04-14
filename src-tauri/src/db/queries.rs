@@ -9,7 +9,7 @@ const GAME_COLUMNS: &str =
      description, notes, source, application_path, dosbox_conf,
      status, region, max_players, language, shortcode, torrent_source,
      in_library, installed, game_torrent_index, gamedata_torrent_index, download_size,
-     has_thumbnail, dosbox_variant, favorited";
+     has_thumbnail, dosbox_variant, favorited, thumbnail_key";
 
 fn row_to_game(row: &Row) -> rusqlite::Result<Game> {
     Ok(Game {
@@ -45,6 +45,7 @@ fn row_to_game(row: &Row) -> rusqlite::Result<Game> {
         has_thumbnail: row.get::<_, i32>(28).unwrap_or(0) != 0,
         dosbox_variant: row.get(29)?,
         favorited: row.get::<_, i32>(30).unwrap_or(0) != 0,
+        thumbnail_key: row.get(31)?,
     })
 }
 
@@ -464,6 +465,7 @@ mod tests {
             download_size: None,
             has_thumbnail: false,
             dosbox_variant: None,
+            thumbnail_key: None,
         }
     }
 

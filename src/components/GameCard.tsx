@@ -5,7 +5,7 @@ import { CircularProgress } from "./ProgressBar";
 import type { Game } from "../api/tauri";
 import { getGameVariants } from "../api/tauri";
 import { formatBytes, parseLangEntries, langBadgeClass, performUninstall } from "../util";
-import { bestThumbnailPath, titleFallbackThumbnailPath } from "../stores/thumbnails";
+import { bestThumbnailPath } from "../stores/thumbnails";
 import { downloads, cancelGameDownload } from "../stores/downloads";
 import { toggleFavorite } from "../stores/games";
 
@@ -19,9 +19,6 @@ interface GameCardProps {
 export function GameCard(props: GameCardProps) {
   const [status, setStatus] = createSignal("");
   const [imgError, setImgError] = createSignal(false);
-  // Tracks which thumbnail attempt is currently displayed: primary (shortcode-keyed)
-  // → fallback (title-keyed). On primary error we try the fallback once before giving up.
-  const [thumbAttempt, setThumbAttempt] = createSignal<"primary" | "fallback">("primary");
   const [favorited, setFavorited] = createSignal(props.game.favorited);
   const [variants, setVariants] = createSignal<Game[]>([]);
   const [contextMenu, setContextMenu] = createSignal<{x: number, y: number} | null>(null);
@@ -35,11 +32,8 @@ export function GameCard(props: GameCardProps) {
   // optimistic update in handleToggleFavorite and cause a visible flicker.
   createEffect(on(() => props.game.id, () => { setFavorited(props.game.favorited); }, { defer: true }));
 
-  // Reset thumbnail attempt when the card is reused for a different game.
-  createEffect(on(() => props.game.id, () => {
-    setThumbAttempt("primary");
-    setImgError(false);
-  }, { defer: true }));
+  // Reset imgError when the card is reused for a different game (For-loop key change).
+  createEffect(on(() => props.game.id, () => { setImgError(false); }, { defer: true }));
 
   // Pre-load variant IDs for multi-lang games so download state is visible on main card.
   // createEffect re-runs when props.game.shortcode changes, handling component reuse in For loops.
@@ -52,39 +46,9 @@ export function GameCard(props: GameCardProps) {
   });
 
   const thumbSrc = () => {
-    // Primary: shortcode-keyed bundled or poster file (only if DB flagged it).
-    // Fallback: speculative title-derived 8-char key, matching generate_shortcode().
-    //   The fallback ignores has_thumbnail on purpose — it catches LP-exclusive
-    //   games whose file exists in the bundle but whose DB row has has_thumbnail=0
-    //   because generate_db.rs didn't know about the generated shortcode mapping.
-    //   If there's no matching file, <img onError> will fire handleImgError and
-    //   we set imgError to hide the tile.
-    const path = thumbAttempt() === "primary"
-      ? (bestThumbnailPath(props.game.torrent_source, props.game.shortcode, props.game.has_thumbnail)
-         ?? titleFallbackThumbnailPath(props.game.torrent_source, props.game.title))
-      : titleFallbackThumbnailPath(props.game.torrent_source, props.game.title);
+    const path = bestThumbnailPath(props.game.torrent_source, props.game.thumbnail_key);
     if (!path) { return null; }
     return convertFileSrc(path);
-  };
-
-  const handleImgError = () => {
-    if (thumbAttempt() === "primary") {
-      // Primary (shortcode-keyed) failed — try title-normalized fallback once.
-      // If it also misses we'll fall through here a second time and stop trying.
-      console.warn("[thumbnails] primary miss, trying title fallback", {
-        title: props.game.title,
-        shortcode: props.game.shortcode,
-        collection: props.game.torrent_source,
-      });
-      setThumbAttempt("fallback");
-    } else {
-      console.warn("[thumbnails] fallback miss, no cover available", {
-        title: props.game.title,
-        shortcode: props.game.shortcode,
-        collection: props.game.torrent_source,
-      });
-      setImgError(true);
-    }
   };
 
   const langEntries = () => parseLangEntries(props.game);
@@ -155,7 +119,7 @@ export function GameCard(props: GameCardProps) {
             src={thumbSrc()!}
             alt=""
             loading="lazy"
-            onError={handleImgError}
+            onError={() => setImgError(true)}
           />
         </Show>
         <Show when={isDownloading()}>

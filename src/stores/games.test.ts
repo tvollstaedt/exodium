@@ -37,6 +37,7 @@ function makeGame(overrides: Partial<{ id: number; title: string; favorited: boo
     download_size: null,
     has_thumbnail: false,
     dosbox_variant: null,
+    thumbnail_key: null,
   };
 }
 

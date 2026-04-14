@@ -34,4 +34,8 @@ pub struct Game {
     pub download_size: Option<i64>,
     pub has_thumbnail: bool,
     pub dosbox_variant: Option<String>,
+    /// SHA-256(normalized title)[:16] hex. Filename for the bundled or
+    /// content-pack thumbnail. Null when no title is available or the game
+    /// predates the content-addressed thumbnail scheme.
+    pub thumbnail_key: Option<String>,
 }

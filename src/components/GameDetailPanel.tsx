@@ -61,7 +61,7 @@ export function GameDetailPanel(props: Props) {
   const thumbSrc = () => {
     const g = props.game;
     if (!g) { return null; }
-    const path = bestThumbnailPath(g.torrent_source, g.shortcode, g.has_thumbnail);
+    const path = bestThumbnailPath(g.torrent_source, g.thumbnail_key);
     if (!path) { return null; }
     return convertFileSrc(path);
   };

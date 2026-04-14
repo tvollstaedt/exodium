@@ -985,9 +985,23 @@ pub async fn setup_from_local(
              WHERE shortcode IN (
                  SELECT shortcode FROM games WHERE language = 'EN' AND has_thumbnail = 1
              )
-             AND has_thumbnail = 0;",
+             AND has_thumbnail = 0;
+
+             -- Propagate thumbnail_key from EN variant so LP variants share the
+             -- EN primary's cover-art filename (same content-addressed hash).
+             UPDATE games
+             SET thumbnail_key = (
+                 SELECT en.thumbnail_key FROM games en
+                 WHERE en.language = 'EN'
+                   AND en.shortcode = games.shortcode
+                   AND en.thumbnail_key IS NOT NULL
+                 LIMIT 1
+             )
+             WHERE thumbnail_key IS NULL
+               AND shortcode IS NOT NULL
+               AND language != 'EN';",
         );
-        log::info!("LP shortcode/dosbox_conf/has_thumbnail backfill complete");
+        log::info!("LP shortcode/dosbox_conf/has_thumbnail/thumbnail_key backfill complete");
 
         // Pass 3: pull shortcodes for LP-exclusive games from the bundled static DB.
         // metadata/exodium.db (built by generate_db.rs) contains 100% shortcode coverage
@@ -1019,6 +1033,13 @@ pub async fn setup_from_local(
                          LIMIT 1
                      ), has_thumbnail)
                      WHERE language != 'EN' AND shortcode IS NOT NULL;
+                     UPDATE games
+                     SET thumbnail_key = COALESCE((
+                         SELECT s.thumbnail_key FROM lp_static.games s
+                         WHERE s.title = games.title AND s.thumbnail_key IS NOT NULL
+                         LIMIT 1
+                     ), thumbnail_key)
+                     WHERE thumbnail_key IS NULL AND language != 'EN';
                      UPDATE games
                      SET dosbox_conf = (
                          SELECT en.dosbox_conf FROM games en

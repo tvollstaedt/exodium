@@ -149,6 +149,7 @@ fn xml_game_to_game(x: XmlGame, shortcode_segment: &str) -> Game {
         has_thumbnail: false,
         dosbox_variant: None, // populated later by generate_db from dosbox.txt
         favorited: false,
+        thumbnail_key: None, // populated by generate_db from normalized title
     }
 }
 
