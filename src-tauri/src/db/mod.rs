@@ -74,12 +74,34 @@ fn migrate(conn: &Connection) -> DbResult<()> {
         conn.execute_batch("ALTER TABLE games ADD COLUMN thumbnail_key TEXT")?;
     }
 
-    // Populate any NULL thumbnail_key values from the title hash. Handles two
-    // cases: (1) existing v0.2.x DBs that just got the column added, and
-    // (2) any row whose thumbnail_key got wiped by a re-import. Cheap no-op
-    // when every row is already populated. Must match the Python/Rust hash
-    // function in scripts/gen_thumbnails.py and src-tauri/src/bin/generate_db.rs
-    // or the filename lookup will miss.
+    // Force thumbnail_key recomputation whenever the hash or canonical-matcher
+    // algorithms change. Bumped on every release that alters:
+    //   - title_thumbnail_key() (the hash function itself), or
+    //   - title_canonical() (LP↔EN propagation rule)
+    // Bump history:
+    //   v1 — initial content-addressed (title.trim().lowercase().whitespace-collapse)
+    //   v2 — stripped-alnum hash + basic article drop
+    //   v3 — marketing-modifier drop + British/American spelling folds
+    //   v4 — stop-word prepositions + standalone "1"/"i" dropped
+    //
+    // Without this check, existing users keep their old thumbnail_key values
+    // and the new canonical matcher never runs against them — bundled files
+    // use current hashes, DB rows use old hashes, every card 404s.
+    const CURRENT_HASH_VERSION: &str = "4";
+    let stored_version: Option<String> =
+        queries::get_config(conn, "thumbnail_hash_version").ok().flatten();
+    if stored_version.as_deref() != Some(CURRENT_HASH_VERSION) {
+        log::info!(
+            "thumbnail_hash_version changed ({:?} → {}), recomputing all keys",
+            stored_version, CURRENT_HASH_VERSION
+        );
+        conn.execute_batch("UPDATE games SET thumbnail_key = NULL")?;
+    }
+
+    // Populate any NULL thumbnail_key values from the title hash. Handles:
+    //   (1) existing v0.2.x DBs that just got the column added,
+    //   (2) any row whose thumbnail_key got wiped by a re-import, and
+    //   (3) the version-bump recompute above.
     populate_thumbnail_keys(conn)?;
 
     // Ensure LP variants share their EN primary's cover art even when shortcode
@@ -87,6 +109,10 @@ fn migrate(conn: &Connection) -> DbResult<()> {
     // "same" game). Runs after populate so every row has a key to potentially
     // overwrite.
     propagate_lp_thumbnail_keys(conn)?;
+
+    if stored_version.as_deref() != Some(CURRENT_HASH_VERSION) {
+        queries::set_config(conn, "thumbnail_hash_version", CURRENT_HASH_VERSION)?;
+    }
 
     Ok(())
 }
@@ -137,21 +163,27 @@ fn title_canonical(title: &str) -> String {
 
     // Tokens to drop entirely — they're noise when matching LP↔EN titles:
     //   - articles: "the", "a", "an" (LaunchBox's ", The" suffix convention)
-    //   - structural connectors that LP packs often omit:
-    //       "part", "book", "chapter", "volume", "episode"
-    //   - marketing modifiers that appear unevenly across language packs:
-    //       "enhanced", "version", "edition", "gold", "deluxe", "special",
-    //       "cd", "cdrom", "vga", "ega", "collectors", "limited", "talkie",
-    //       "sci", "remake"
-    //   - common British/American spelling noise: "judgement" normalized to
-    //       "judgment" (handled as a token substitution below, not a drop)
+    //   - stop-word prepositions/conjunctions that LP packs include or omit
+    //       inconsistently: "in", "of", "and", "to", "for", "on"
+    //   - "first in series" markers — LP packs often add "1"/"i" where EN
+    //       has no number (the first game's sequel is "2" but the first
+    //       itself is unnumbered). Standalone "1" and "i" drops, higher
+    //       numbers stay (they distinguish "Larry 2" from "Larry 3").
+    //   - structural connectors: "part", "book", "chapter", "volume", "episode"
+    //   - marketing modifiers: "enhanced", "version", "edition", "gold",
+    //       "deluxe", "special", "cd", "cdrom", "vga", "ega", "collectors",
+    //       "limited", "talkie", "sci", "remake"
+    //   - British/American spelling noise is folded below (not dropped)
     //
     // Dropping these is deliberately aggressive — we accept the occasional
     // false positive (e.g. two unrelated games whose canonical forms collide
-    // because all differentiating words were modifiers) in exchange for
-    // catching the bulk of LP title drift.
+    // because all differentiating words were stopwords) in exchange for
+    // catching the bulk of LP title drift. Game titles distinctive enough to
+    // matter have multiple content words.
     const DROP_TOKENS: &[&str] = &[
         "the", "a", "an",
+        "in", "of", "and", "to", "for", "on",
+        "1", "i",
         "part", "book", "chapter", "volume", "episode",
         "enhanced", "version", "edition", "gold", "deluxe", "special",
         "cd", "cdrom", "vga", "ega", "collectors", "collector",
