@@ -10,10 +10,10 @@
         "posters": {
           "display_name": "Box Art",
           "description": "HD game box-art thumbnails for all 7,600+ games",
-          "url": "https://github.com/tvollstaedt/exodium/releases/download/content-v1/posters-eXoDOS-v1.tar.gz",
-          "sha256": "731e2f61487c5128989cef80222fccc60fa25c1eb477d9f95061aa4bc1ad901a",
-          "size_bytes": 400818046,
-          "version": 1,
+          "url": "https://github.com/tvollstaedt/exodium/releases/download/content-v2/posters-eXoDOS-v2.tar.gz",
+          "sha256": "d7693c4a2ccf0de536f6ca91d9966ba7d9a876466859557c77dc79e589453ed2",
+          "size_bytes": 402291945,
+          "version": 2,
           "install_path": "content/posters/eXoDOS",
           "supersedes": []
         }
