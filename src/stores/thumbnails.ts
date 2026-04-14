@@ -49,18 +49,27 @@ export function bestThumbnailPath(
   collection: string | null | undefined,
   thumbnailKey: string | null | undefined,
 ): string | null {
-  if (!thumbnailKey) { return null; }
+  const [first] = thumbnailCandidates(collection, thumbnailKey);
+  return first ?? null;
+}
 
-  // Tier 1: runtime-downloaded poster pack. posterDirForCollection falls back
-  // to the eXoDOS pack dir for LP collections (LP variants share EN covers).
+/** Return every available thumbnail path for a game, poster (Tier 1) first,
+ *  preview (Tier 0) second. GameCard renders the first and swaps to the next
+ *  on `<img onError>` — this is the robust way to handle a *stale* poster pack
+ *  (left over from a previous Exodium version with shortcode-keyed files)
+ *  where the pack dir exists on disk but the specific hash-keyed file inside
+ *  doesn't. Without the fallback, the browser 404s and the tile goes blank. */
+export function thumbnailCandidates(
+  collection: string | null | undefined,
+  thumbnailKey: string | null | undefined,
+): string[] {
+  if (!thumbnailKey) { return []; }
+  const out: string[] = [];
   const posterDir = posterDirForCollection(collection);
-  if (posterDir) { return `${posterDir}/${thumbnailKey}.jpg`; }
-
-  // Tier 0: bundled preview shipped with the app.
+  if (posterDir) { out.push(`${posterDir}/${thumbnailKey}.jpg`); }
   const prevDir = previewDirForCollection(collection);
-  if (prevDir) { return `${prevDir}/${thumbnailKey}.jpg`; }
-
-  return null;
+  if (prevDir) { out.push(`${prevDir}/${thumbnailKey}.jpg`); }
+  return out;
 }
 
 // ── Load / refresh tier directories ──────────────────────────────────────────

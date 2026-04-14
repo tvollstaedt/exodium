@@ -196,7 +196,13 @@ pub fn run() {
 
             // Clean up stale content-pack download artifacts from interrupted installs.
             if let Ok(Some(user_data_dir)) = db::queries::get_config(&conn, "data_dir") {
-                commands::content_packs::cleanup_stale_downloads(std::path::Path::new(&user_data_dir));
+                let user_data_path = std::path::Path::new(&user_data_dir);
+                commands::content_packs::cleanup_stale_downloads(user_data_path);
+                // Remove content packs whose installed version is lower than the
+                // current manifest (e.g. v0.2.x shortcode-keyed posters after the
+                // v0.3.x hash-keyed rebuild). Without this the 404s for every
+                // game card flood the tauri::protocol::asset error log.
+                commands::content_packs::cleanup_stale_content_packs(&conn, user_data_path);
             }
 
             app.manage(DbState(Mutex::new(conn)));

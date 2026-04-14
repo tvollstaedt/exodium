@@ -39,21 +39,18 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 
 
-def thumbnail_normalize(title: str) -> str:
-    """
-    Canonical form of a title for hashing. Must match the Rust implementation
-    in src-tauri/src/bin/generate_db.rs::thumbnail_normalize exactly:
-      1. Trim whitespace
-      2. Lowercase (ASCII; non-ASCII letters pass through)
-      3. Collapse internal whitespace to a single space
-    """
-    return " ".join(title.strip().lower().split())
-
-
 def thumbnail_key(title: str) -> str:
-    """SHA-256(normalized title)[:16] — the content-addressed filename stem."""
-    normalized = thumbnail_normalize(title)
-    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
+    """
+    SHA-256(alnum-only lowercase title)[:16] — the content-addressed filename
+    stem. Must match src-tauri/src/db/mod.rs::title_thumbnail_key and
+    src-tauri/src/bin/generate_db.rs::thumbnail_key exactly.
+
+    The stripped-alnum rule merges punctuation variants ("3-K Trivia",
+    "3K Trivia", "3, K. Trivia!" all hash the same) so trivial drift between
+    XML / zip / image filenames doesn't break lookup.
+    """
+    norm = "".join(c for c in title.lower() if c.isascii() and c.isalnum())
+    return hashlib.sha256(norm.encode("utf-8")).hexdigest()[:16]
 
 try:
     from PIL import Image
@@ -334,12 +331,28 @@ def main() -> None:
 
     print(f"Opening {metadata_zip_path}...")
     with zipfile.ZipFile(metadata_zip_path, "r") as zf:
+        # Primary: Box - Front images. Extensions include .gif because some
+        # older eXoDOS entries (e.g. "3-D Pitfall") ship animated-era GIFs
+        # as their only box-front asset; Pillow handles GIF → JPEG fine.
+        allowed_ext = (".png", ".jpg", ".jpeg", ".gif", ".webp")
         box_front = [
             n for n in zf.namelist()
             if n.startswith("Images/MS-DOS/Box - Front/")
-            and n.lower().endswith((".png", ".jpg", ".jpeg"))
+            and n.lower().endswith(allowed_ext)
         ]
-        print(f"  {len(box_front)} box-front images found")
+        # Fallback layer: for titles with NO Box - Front entry at all, use
+        # Fanart - Box - Front (e.g. "3-K Trivia" only ships fan-rendered
+        # cover art, no official box scan). Index primary titles first so
+        # fanart only fills genuine gaps and never overrides.
+        primary_titles = {image_stem_to_title(n) for n in box_front}
+        fanart = [
+            n for n in zf.namelist()
+            if n.startswith("Images/MS-DOS/Fanart - Box - Front/")
+            and n.lower().endswith(allowed_ext)
+            and image_stem_to_title(n) not in primary_titles
+        ]
+        box_front.extend(fanart)
+        print(f"  {len(box_front) - len(fanart)} Box - Front + {len(fanart)} Fanart fallback images")
 
         matched = 0
         skipped = 0

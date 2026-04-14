@@ -627,6 +627,57 @@ pub async fn cancel_content_pack_install(
 
 // ── Startup cleanup of stale download artifacts ──────────────────────────────
 
+/// Called once at startup. Uninstalls any content pack whose recorded
+/// installed version is lower than the current manifest's version for that
+/// pack — used to flush out e.g. shortcode-keyed v1 poster packs left over
+/// from a previous Exodium release. Logs a list of what was removed; fails
+/// open (keeps going) if the manifest or install dir can't be read.
+pub fn cleanup_stale_content_packs(conn: &rusqlite::Connection, data_dir: &Path) {
+    let Ok(manifest) = load_manifest() else {
+        log::debug!("cleanup_stale_content_packs: manifest unavailable, skipping");
+        return;
+    };
+    let installed = read_installed_packs(conn);
+    let data_dir_str = data_dir.to_string_lossy().to_string();
+
+    let mut removed = 0usize;
+    for (col_id, col_packs) in &installed {
+        let Some(col_manifest) = manifest.collections.get(col_id) else { continue };
+        for (pack_id, installed_pack) in col_packs {
+            let Some(info) = col_manifest.content_packs.get(pack_id) else { continue };
+            if installed_pack.version >= info.version {
+                continue; // up-to-date
+            }
+            let install_path = resolve_pack_install_dir(
+                &data_dir_str,
+                col_id,
+                pack_id,
+                &col_manifest.content_packs,
+            );
+            log::info!(
+                "Removing stale content pack {}/{} (installed v{}, manifest v{})",
+                col_id, pack_id, installed_pack.version, info.version
+            );
+            if install_path.exists() {
+                if let Err(e) = std::fs::remove_dir_all(&install_path) {
+                    log::warn!(
+                        "Failed to remove stale pack dir {}: {}",
+                        install_path.display(), e
+                    );
+                    continue;
+                }
+            }
+            if let Err(e) = mark_pack_uninstalled(conn, col_id, pack_id) {
+                log::warn!("Failed to clear installed_packs record for {}/{}: {}", col_id, pack_id, e);
+            }
+            removed += 1;
+        }
+    }
+    if removed > 0 {
+        log::info!("cleanup_stale_content_packs: removed {} stale pack(s)", removed);
+    }
+}
+
 /// Called once from lib.rs setup closure. Removes .tmp and .staging leftovers
 /// from interrupted installs that are older than 1 hour.
 pub fn cleanup_stale_downloads(data_dir: &Path) {

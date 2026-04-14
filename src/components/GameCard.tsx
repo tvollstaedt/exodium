@@ -5,7 +5,7 @@ import { CircularProgress } from "./ProgressBar";
 import type { Game } from "../api/tauri";
 import { getGameVariants } from "../api/tauri";
 import { formatBytes, parseLangEntries, langBadgeClass, performUninstall } from "../util";
-import { bestThumbnailPath } from "../stores/thumbnails";
+import { thumbnailCandidates } from "../stores/thumbnails";
 import { downloads, cancelGameDownload } from "../stores/downloads";
 import { toggleFavorite } from "../stores/games";
 
@@ -19,6 +19,10 @@ interface GameCardProps {
 export function GameCard(props: GameCardProps) {
   const [status, setStatus] = createSignal("");
   const [imgError, setImgError] = createSignal(false);
+  // Index into `thumbnailCandidates()` — advances on each <img onError> so
+  // a stale poster dir (shortcode-keyed files from a previous Exodium version)
+  // still falls through to the bundled preview on 404.
+  const [thumbIdx, setThumbIdx] = createSignal(0);
   const [favorited, setFavorited] = createSignal(props.game.favorited);
   const [variants, setVariants] = createSignal<Game[]>([]);
   const [contextMenu, setContextMenu] = createSignal<{x: number, y: number} | null>(null);
@@ -32,8 +36,8 @@ export function GameCard(props: GameCardProps) {
   // optimistic update in handleToggleFavorite and cause a visible flicker.
   createEffect(on(() => props.game.id, () => { setFavorited(props.game.favorited); }, { defer: true }));
 
-  // Reset imgError when the card is reused for a different game (For-loop key change).
-  createEffect(on(() => props.game.id, () => { setImgError(false); }, { defer: true }));
+  // Reset thumbnail state when the card is reused for a different game (For-loop key change).
+  createEffect(on(() => props.game.id, () => { setImgError(false); setThumbIdx(0); }, { defer: true }));
 
   // Pre-load variant IDs for multi-lang games so download state is visible on main card.
   // createEffect re-runs when props.game.shortcode changes, handling component reuse in For loops.
@@ -45,10 +49,21 @@ export function GameCard(props: GameCardProps) {
       .catch(() => {});
   });
 
+  const thumbCandidates = () => thumbnailCandidates(props.game.torrent_source, props.game.thumbnail_key);
   const thumbSrc = () => {
-    const path = bestThumbnailPath(props.game.torrent_source, props.game.thumbnail_key);
+    const path = thumbCandidates()[thumbIdx()];
     if (!path) { return null; }
     return convertFileSrc(path);
+  };
+
+  const handleImgError = () => {
+    // Advance to next candidate (e.g. poster URL 404'd → try bundled preview).
+    // If we've exhausted them all, hide the tile.
+    if (thumbIdx() + 1 < thumbCandidates().length) {
+      setThumbIdx(thumbIdx() + 1);
+    } else {
+      setImgError(true);
+    }
   };
 
   const langEntries = () => parseLangEntries(props.game);
@@ -119,7 +134,7 @@ export function GameCard(props: GameCardProps) {
             src={thumbSrc()!}
             alt=""
             loading="lazy"
-            onError={() => setImgError(true)}
+            onError={handleImgError}
           />
         </Show>
         <Show when={isDownloading()}>

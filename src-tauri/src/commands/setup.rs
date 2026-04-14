@@ -935,6 +935,17 @@ pub async fn setup_from_local(
             }
         }
 
+        // Populate thumbnail_key for every game whose row got its hash wiped
+        // by `import_bundled_metadata`'s clear_games() + XML re-import above.
+        // Without this the library would show no covers after first-run setup
+        // even though the bundled preview pack has everything. Shared helper
+        // in db::populate_thumbnail_keys uses the same hash function as
+        // gen_thumbnails.py and generate_db.rs.
+        {
+            let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+            db::populate_thumbnail_keys(&conn).map_err(|e| e.to_string())?;
+        }
+
         // Backfill shortcodes, dosbox_conf and has_thumbnail for LP games that lack them.
         // PLP and SLP XMLs use a path format without the "!dos/<shortcode>" segment, so their
         // shortcodes (and derived dosbox_conf) come out as NULL after import.  Mirror the same
@@ -987,8 +998,11 @@ pub async fn setup_from_local(
              )
              AND has_thumbnail = 0;
 
-             -- Propagate thumbnail_key from EN variant so LP variants share the
-             -- EN primary's cover-art filename (same content-addressed hash).
+             -- Overwrite LP variants' thumbnail_key with EN's hash so German/
+             -- Polish/Spanish versions share the EN primary's cover art. This
+             -- runs after populate_thumbnail_keys set every row to its own-title
+             -- hash, so LP rows here lose their per-language hash in favor of
+             -- the shared EN hash. Rows without an EN match keep their own.
              UPDATE games
              SET thumbnail_key = (
                  SELECT en.thumbnail_key FROM games en
@@ -997,9 +1011,14 @@ pub async fn setup_from_local(
                    AND en.thumbnail_key IS NOT NULL
                  LIMIT 1
              )
-             WHERE thumbnail_key IS NULL
-               AND shortcode IS NOT NULL
-               AND language != 'EN';",
+             WHERE shortcode IS NOT NULL
+               AND language != 'EN'
+               AND EXISTS (
+                   SELECT 1 FROM games en
+                   WHERE en.language = 'EN'
+                     AND en.shortcode = games.shortcode
+                     AND en.thumbnail_key IS NOT NULL
+               );",
         );
         log::info!("LP shortcode/dosbox_conf/has_thumbnail/thumbnail_key backfill complete");
 
@@ -1061,6 +1080,18 @@ pub async fn setup_from_local(
         } else {
             log::debug!("Static exodium.db not found at {:?}, skipping Pass 3 LP backfill", static_db);
         }
+
+        // Any rows still with NULL thumbnail_key (Pass 3 static-DB backfill
+        // might have added new rows without keys) get their own-title hash.
+        db::populate_thumbnail_keys(&conn).map_err(|e| e.to_string())?;
+
+        // Final pass: match LP titles to EN via canonical form (article-
+        // stripped, word-numbers-as-digits, etc.) and overwrite LP's
+        // thumbnail_key with EN's. Catches the ~575 LP games whose auto-
+        // generated shortcode diverged from EN but whose titles are clearly
+        // the same game (e.g. PL "Legend of Kyrandia Book 2" ↔ EN
+        // "The Legend of Kyrandia: Book Two").
+        db::propagate_lp_thumbnail_keys(&conn).map_err(|e| e.to_string())?;
     }
 
     // Briefly acquire write lock just to insert — no awaits inside this block.

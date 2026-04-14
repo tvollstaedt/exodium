@@ -65,33 +65,21 @@ fn normalize_title(title: &str) -> String {
     t.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Normalize a title to its canonical form for thumbnail-key hashing.
+/// Normalize a title for thumbnail-key hashing: lowercase + keep only ASCII
+/// alphanumerics. Must match the Python implementation in gen_thumbnails.py
+/// and the lib implementation in src-tauri/src/db/mod.rs::title_thumbnail_key.
 ///
-/// Must match the Python implementation in scripts/gen_thumbnails.py exactly
-/// so the generator and the DB agree on filenames. Steps:
-///   1. Trim leading/trailing whitespace
-///   2. Lowercase (ASCII; non-ASCII letters pass through unchanged)
-///   3. Collapse internal whitespace to a single space
-///
-/// Deliberately simpler than `normalize_title()` (which strips articles,
-/// years, edition suffixes for fuzzy matching) — the hash must be stable
-/// across every place the same title appears, so we apply as little
-/// transformation as possible.
-fn thumbnail_normalize(title: &str) -> String {
-    title
-        .trim()
-        .to_lowercase()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-/// SHA-256 of the normalized title, truncated to 16 hex chars. This is the
-/// content-addressed filename stem for the game's thumbnail.
+/// The stripped-alnum rule means "3-K Trivia", "3K Trivia", and "3 k trivia"
+/// all hash to the same filename — punctuation and spacing drift across XML
+/// vs zip vs image filenames no longer breaks lookup.
 fn thumbnail_key(title: &str) -> String {
     use sha2::{Digest, Sha256};
-    let normalized = thumbnail_normalize(title);
-    let hash = format!("{:x}", Sha256::digest(normalized.as_bytes()));
+    let norm: String = title
+        .to_lowercase()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect();
+    let hash = format!("{:x}", Sha256::digest(norm.as_bytes()));
     hash[..16].to_string()
 }
 
@@ -477,6 +465,14 @@ fn main() {
         println!("  thumbnail_key pass 3 (LP-exclusive own-title): {} games", residual.len());
 
         tx.commit().unwrap();
+    }
+
+    // Pass 4: LP↔EN canonical title matching for cases where shortcode-based
+    // sharing missed. Handles article-stripped + word/Roman-numeral folding
+    // (e.g. PL "Legend of Kyrandia Book 2" → EN "The Legend of Kyrandia: Book
+    // Two"). Overwrites LP thumbnail_key with EN's so variants share cover art.
+    if let Err(e) = exodium_lib::db::propagate_lp_thumbnail_keys(&conn) {
+        log::warn!("Pass 4 (LP canonical-title propagation) failed: {}", e);
     }
 
     // Mark games whose thumbnail file actually exists on disk (bundled pack).
