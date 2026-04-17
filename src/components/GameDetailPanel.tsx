@@ -2,11 +2,14 @@ import { createSignal, createEffect, Show, For, onCleanup, onMount } from "solid
 import { Portal } from "solid-js/web";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { AutoProgress } from "./ProgressBar";
-import type { Game } from "../api/tauri";
+import { Lightbox } from "./Lightbox";
+import { ManualViewer } from "./ManualViewer";
+import type { Game, GameMetadata } from "../api/tauri";
 import { launchGame, getGameVariants } from "../api/tauri";
 import { formatBytes, parseLangEntries, langBadgeClass, performUninstall } from "../util";
 import { bestThumbnailPath } from "../stores/thumbnails";
 import { downloads, startGameDownload, getDownloadState, cancelGameDownload } from "../stores/downloads";
+import { loadGameMetadata } from "../stores/metadata";
 
 interface Props {
   game: Game | null;
@@ -18,6 +21,12 @@ export function GameDetailPanel(props: Props) {
   const [variants, setVariants] = createSignal<Game[]>([]);
   const [status, setStatus] = createSignal("");
   const [imgError, setImgError] = createSignal(false);
+  const [metadata, setMetadata] = createSignal<GameMetadata | null>(null);
+  const [metadataLoading, setMetadataLoading] = createSignal(false);
+  const [brokenImages, setBrokenImages] = createSignal(new Set<number>());
+  const [lightboxOpen, setLightboxOpen] = createSignal(false);
+  const [lightboxStart, setLightboxStart] = createSignal(0);
+  const [manualOpen, setManualOpen] = createSignal(false);
 
   createEffect(() => {
     const g = props.game;
@@ -25,12 +34,26 @@ export function GameDetailPanel(props: Props) {
     setImgError(false);
     setStatus("");
     setVariants([]);
+    setMetadata(null);
+    setBrokenImages(new Set<number>());
+    setLightboxOpen(false);
+    setManualOpen(false);
     if (g.shortcode && isMultiLang()) {
       const shortcode = g.shortcode;
       getGameVariants(shortcode).then((v) => {
         // Guard: game may have changed while the async call was in flight
         if (props.game?.shortcode === shortcode) { setVariants(v); }
       }).catch(() => {});
+    }
+    // Fetch metadata for the detail panel's Media section. Returns null
+    // silently when no pack is installed or the title has no entry in the
+    // extracted metadata zip.
+    if (g.title && g.torrent_source) {
+      const gameId = g.id;
+      setMetadataLoading(true);
+      loadGameMetadata(g.torrent_source, g.title, g.shortcode ?? null)
+        .then((m) => { if (props.game?.id === gameId) { setMetadata(m); } })
+        .finally(() => setMetadataLoading(false));
     }
   });
 
@@ -278,8 +301,70 @@ export function GameDetailPanel(props: Props) {
             <Show when={props.game!.notes}>
               <div class="game-detail-notes">{props.game!.notes}</div>
             </Show>
+
+            <Show when={metadataLoading()}>
+              <div class="game-detail-loading">Loading media…</div>
+            </Show>
+
+            {/* Media: manual + screenshots/art — only renders if the metadata
+                content pack has assets for this game's shortcode. */}
+            <Show when={!metadataLoading() && metadata() && (metadata()!.manual_path || metadata()!.images.length > 0)}>
+              <div class="game-detail-media">
+                <Show when={metadata()!.manual_path}>
+                  <div class="game-detail-section-label">Manual</div>
+                  <div class="game-detail-manual-row">
+                    <button class="game-detail-btn btn-manual" onClick={() => setManualOpen(true)}>
+                      📖 View manual
+                    </button>
+                  </div>
+                </Show>
+                {(() => {
+                  const visible = () => (metadata()?.images ?? []).filter((_, i) => !brokenImages().has(i));
+                  return (
+                    <Show when={metadata()!.images.length > 0 && visible().length > 0}>
+                      <div class="game-detail-section-label">
+                        Screenshots &amp; Art
+                        <span class="section-count">{visible().length}</span>
+                      </div>
+                      <div class="game-detail-gallery-strip">
+                        <For each={metadata()!.images}>
+                          {(path, i) => (
+                            <img
+                              src={convertFileSrc(path)}
+                              class="gallery-thumb"
+                              loading="lazy"
+                              alt=""
+                              onClick={() => {
+                                const vi = visible().indexOf(path);
+                                setLightboxStart(vi >= 0 ? vi : 0);
+                                setLightboxOpen(true);
+                              }}
+                              onError={() => setBrokenImages((prev) => new Set(prev).add(i()))}
+                              style={{ display: brokenImages().has(i()) ? "none" : undefined }}
+                            />
+                          )}
+                        </For>
+                      </div>
+                    </Show>
+                  );
+                })()}
+              </div>
+            </Show>
           </div>
         </div>
+
+        <Lightbox
+          images={(metadata()?.images ?? []).filter((_, i) => !brokenImages().has(i))}
+          startIndex={lightboxStart()}
+          open={lightboxOpen()}
+          onClose={() => setLightboxOpen(false)}
+        />
+        <ManualViewer
+          path={metadata()?.manual_path ?? null}
+          kind={metadata()?.manual_kind ?? null}
+          open={manualOpen()}
+          onClose={() => setManualOpen(false)}
+        />
       </Portal>
     </Show>
   );

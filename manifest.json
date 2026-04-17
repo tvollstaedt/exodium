@@ -13,8 +13,19 @@
           "url": "https://github.com/tvollstaedt/exodium/releases/download/content-v3/posters-eXoDOS-v3.tar.gz",
           "sha256": "a8d9f9c7c05e0b4689dcf1ae7d6893c5b5ff7bb8db08f709bcd5b4add99c96e0",
           "size_bytes": 394685501,
-          "version": 3,
-          "install_path": "content/posters/eXoDOS",
+          "version": 4,
+          "install_path": "content/posters",
+          "supersedes": []
+        },
+        "metadata": {
+          "display_name": "Game Metadata",
+          "description": "Screenshots, fanart, and additional box-art variants for all 7,600+ games (sourced from the eXoDOS torrent)",
+          "url": "",
+          "sha256": "",
+          "torrent_file_path": "Content/XODOSMetadata.zip",
+          "size_bytes": 4900000000,
+          "version": 1,
+          "install_path": "content/metadata/eXoDOS",
           "supersedes": []
         }
       }
@@ -22,17 +33,53 @@
     "eXoDOS_GLP": {
       "torrent_infohash": "903d04310ce42f6e287932b3293366f54e910021",
       "game_count": 660,
-      "content_packs": {}
+      "content_packs": {
+        "metadata": {
+          "display_name": "Game Metadata (German)",
+          "description": "German screenshots and box-art variants for the GLP collection (sourced from the GLP torrent)",
+          "url": "",
+          "sha256": "",
+          "torrent_file_path": "Content/eXoDOS_GLP_Metadata.zip",
+          "size_bytes": 24000000000,
+          "version": 1,
+          "install_path": "content/metadata/eXoDOS_GLP",
+          "supersedes": []
+        }
+      }
     },
     "eXoDOS_PLP": {
       "torrent_infohash": "2a452d7fe40dc728b202622fa4735bd89de49548",
       "game_count": 0,
-      "content_packs": {}
+      "content_packs": {
+        "metadata": {
+          "display_name": "Game Metadata (Polish)",
+          "description": "Polish screenshots and box-art variants for the PLP collection (sourced from the PLP torrent)",
+          "url": "",
+          "sha256": "",
+          "torrent_file_path": "Content/eXoDOS_PLP_Metadata.zip",
+          "size_bytes": 0,
+          "version": 1,
+          "install_path": "content/metadata/eXoDOS_PLP",
+          "supersedes": []
+        }
+      }
     },
     "eXoDOS_SLP": {
       "torrent_infohash": "37b37fd60c04402976ed552fd4416f81a0cae889",
       "game_count": 0,
-      "content_packs": {}
+      "content_packs": {
+        "metadata": {
+          "display_name": "Game Metadata (Spanish)",
+          "description": "Spanish screenshots and box-art variants for the SLP collection (sourced from the SLP torrent)",
+          "url": "",
+          "sha256": "",
+          "torrent_file_path": "Content/eXoDOS_SLP_Metadata.zip",
+          "size_bytes": 0,
+          "version": 1,
+          "install_path": "content/metadata/eXoDOS_SLP",
+          "supersedes": []
+        }
+      }
     }
   }
 }

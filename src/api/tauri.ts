@@ -269,3 +269,17 @@ export async function getPreviewDir(collection: string): Promise<string> {
 export async function getPosterDir(collection: string): Promise<string> {
   return invoke("get_poster_dir", { collection });
 }
+
+export interface GameMetadata {
+  manual_path: string | null;
+  manual_kind: "pdf" | "txt" | "html" | null;
+  images: string[];
+}
+
+export async function getGameMetadata(
+  collection: string,
+  title: string,
+  shortcode: string | null,
+): Promise<GameMetadata> {
+  return invoke("get_game_metadata", { collection, title, shortcode });
+}

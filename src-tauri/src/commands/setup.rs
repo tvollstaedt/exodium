@@ -5,6 +5,8 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 use tokio::sync::RwLock;
 
+use crate::db::normalize_alnum;
+
 /// Cached Tauri resource_dir(), set once during app setup. Needed because
 /// sync helpers (bundled_metadata_dir, bundled_torrent_path) are called from
 /// contexts that don't carry an AppHandle — and without this cache they'd
@@ -418,6 +420,211 @@ pub fn get_poster_dir(
         }
     }
     Err("Poster directory not found".to_string())
+}
+
+/// Metadata payload for a single game.
+///
+/// Manuals are deferred to v2 (they live inside individual game ZIPs, not
+/// XODOSMetadata.zip) so `manual_path` / `manual_kind` are always None today —
+/// kept in the struct to avoid a future breaking frontend change.
+#[derive(Debug, Serialize)]
+pub struct GameMetadata {
+    pub manual_path: Option<String>,
+    pub manual_kind: Option<String>,
+    pub images: Vec<String>,
+}
+
+/// Category-priority for the gallery strip. Ordered by typical visual impact
+/// and resolution quality in LaunchBox's database: 3D box renders lead (1-2 MB
+/// PNGs at 1500-2000 px), then the authentic 2D box art (smaller JPGs), then
+/// back/spine/disc packaging, screenshots, fanart, advertisements, posters,
+/// and the long tail. Folder names match XODOSMetadata.zip's `Images/MS-DOS/`
+/// tree exactly.
+const IMAGE_CATEGORY_ORDER: &[&str] = &[
+    "Box - 3D",
+    "Box - Front",
+    "Box - Back",
+    "Box - Spine",
+    "Cart - Front",
+    "Cart - Back",
+    "Disc",
+    "Clear Logo",
+    "Screenshot - Gameplay",
+    "Screenshot - Title",
+    "Screenshot - Game Title",
+    "Screenshot - Game Select",
+    "Screenshot - Game Over",
+    "Screenshot - High Scores",
+    "Fanart - Box - Front",
+    "Fanart - Background",
+    "Fanart - Disc",
+    "Advertisement Flyer - Front",
+    "Advertisement Flyer - Back",
+    "Poster",
+    "Banner",
+    "Arcade - Marquee",
+];
+
+/// Strip a trailing `-NN` (hyphen + digits) from a filename stem so
+/// "Capitalism-03" matches title "Capitalism" exactly rather than collision-
+/// matching into "Capitalism Plus". Returns the stripped stem or the original.
+fn strip_trailing_suffix_num(stem: &str) -> &str {
+    if let Some(idx) = stem.rfind('-') {
+        let tail = &stem[idx + 1..];
+        if !tail.is_empty() && tail.chars().all(|c| c.is_ascii_digit()) {
+            return &stem[..idx];
+        }
+    }
+    stem
+}
+
+/// Recursively walk a category directory, collecting image files whose
+/// (suffix-stripped, normalized) stem equals `target_norm`. Depth-limited to
+/// 3 levels to handle `<category>/<region>/file` nesting without ever going
+/// off into pathological trees.
+fn collect_matches_recursive(
+    dir: &Path,
+    depth: usize,
+    target_norm: &str,
+    priority: usize,
+    out: &mut std::collections::BTreeMap<usize, Vec<String>>,
+) {
+    if depth > 3 {
+        return;
+    }
+    let Ok(iter) = std::fs::read_dir(dir) else { return };
+    for entry in iter.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_matches_recursive(&path, depth + 1, target_norm, priority, out);
+            continue;
+        }
+        let ext = path
+            .extension()
+            .and_then(|s| s.to_str())
+            .map(|s| s.to_ascii_lowercase())
+            .unwrap_or_default();
+        if !matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "webp" | "gif") {
+            continue;
+        }
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+        let base_stem = strip_trailing_suffix_num(stem);
+        if normalize_alnum(base_stem) == target_norm {
+            // Tauri's asset protocol can't serve files whose names start with
+            // '.' (dots are treated as path-traversal components in the URL).
+            // Rename them on first encounter — only affects 2 games in the
+            // entire eXoDOS collection ("...A Personal Nightmare", ".386 Spys").
+            let serve_path = if path.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with('.'))
+            {
+                let clean_name = path.file_name().unwrap().to_string_lossy()
+                    .trim_start_matches('.').to_string();
+                let clean = path.with_file_name(&clean_name);
+                if !clean.exists() {
+                    let _ = std::fs::rename(&path, &clean);
+                }
+                clean
+            } else {
+                path
+            };
+            if serve_path.exists() {
+                out.entry(priority).or_default().push(path_to_fwd_slash(&serve_path));
+            }
+        }
+    }
+}
+
+/// Scan the installed metadata content pack for a game's image assets.
+/// Walks `<install_dir>/Images/MS-DOS/<category>/` folders and collects every
+/// file whose (suffix-stripped, normalized) stem equals the normalized game
+/// title. Returns empty images (not an error) when the pack isn't installed —
+/// the frontend renders a Media section only if something is present.
+#[tauri::command]
+pub async fn get_game_metadata(
+    db_state: State<'_, DbState>,
+    collection: String,
+    title: String,
+    #[allow(unused_variables)] shortcode: Option<String>,
+) -> Result<GameMetadata, String> {
+    let data_dir = {
+        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        queries::get_config(&conn, "data_dir")
+            .map_err(|e| e.to_string())?
+            .ok_or("Data directory not configured")?
+    };
+
+    tauri::async_runtime::spawn_blocking(move || {
+        scan_game_metadata(&data_dir, &collection, &title)
+    })
+    .await
+    .map_err(|e| format!("metadata scan panicked: {}", e))?
+}
+
+fn scan_game_metadata(
+    data_dir: &str,
+    collection: &str,
+    title: &str,
+) -> Result<GameMetadata, String> {
+    let base = PathBuf::from(data_dir).join("content").join("metadata");
+
+    // LP collections fall back to the main eXoDOS metadata if their own pack
+    // isn't installed (mirrors get_poster_dir). Both are checked so an
+    // LP-installed user still picks up eXoDOS box art when no LP pack exists.
+    let mut roots: Vec<PathBuf> = vec![base.join(collection)];
+    if collection != "eXoDOS" {
+        roots.push(base.join("eXoDOS"));
+    }
+
+    let target_norm = normalize_alnum(title);
+    let mut by_category: std::collections::BTreeMap<usize, Vec<String>> =
+        std::collections::BTreeMap::new();
+
+    for root in &roots {
+        let images_root = root.join("Images").join("MS-DOS");
+        if !images_root.is_dir() {
+            continue;
+        }
+        let Ok(dir_iter) = std::fs::read_dir(&images_root) else { continue };
+        for entry in dir_iter.flatten() {
+            let category_path = entry.path();
+            if !category_path.is_dir() {
+                continue;
+            }
+            let category_name = category_path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_string();
+            let priority = IMAGE_CATEGORY_ORDER
+                .iter()
+                .position(|n| *n == category_name)
+                .unwrap_or(usize::MAX);
+
+            collect_matches_recursive(
+                &category_path,
+                0,
+                &target_norm,
+                priority,
+                &mut by_category,
+            );
+        }
+        if !by_category.is_empty() {
+            break;
+        }
+    }
+
+    let mut images: Vec<String> = Vec::new();
+    for (_, mut paths) in by_category {
+        paths.sort();
+        images.extend(paths);
+    }
+
+    Ok(GameMetadata {
+        manual_path: None,
+        manual_kind: None,
+        images,
+    })
 }
 
 /// Return the default parent directory for game storage ($HOME).

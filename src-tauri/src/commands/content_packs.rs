@@ -189,7 +189,8 @@ pub fn list_content_packs(
                 size_bytes: info.size_bytes,
                 version: info.version,
                 supersedes: info.supersedes.clone(),
-                available: !info.url.starts_with("TODO"),
+                available: info.torrent_file_path.is_some()
+                    || (!info.url.is_empty() && !info.url.starts_with("TODO")),
                 installed: inst.is_some(),
                 installed_version: inst.map(|i| i.version),
             }
@@ -222,8 +223,13 @@ pub async fn install_content_pack(
         .clone();
     let col_packs = col.content_packs.clone();
 
-    // Guard: reject packs with placeholder URLs.
-    if pack_info.url.starts_with("TODO") {
+    // Guard: reject packs without a real source. Torrent-sourced packs (via
+    // torrent_file_path) are always considered available since librqbit runs
+    // against the collection's already-loaded torrent.
+    let has_torrent_source = pack_info.torrent_file_path.is_some();
+    let has_http_source =
+        !pack_info.url.is_empty() && !pack_info.url.starts_with("TODO");
+    if !has_torrent_source && !has_http_source {
         return Err(format!("'{}' is not yet available for download.", pack_info.display_name));
     }
 
@@ -377,7 +383,147 @@ async fn do_install_full(
         }
     }
 
-    do_install(jobs, data_dir, pack_info, key, cancel).await
+    if pack_info.torrent_file_path.is_some() {
+        do_install_torrent(jobs, app_handle, data_dir, collection, pack_info, key, cancel).await
+    } else {
+        do_install(jobs, data_dir, pack_info, key, cancel).await
+    }
+}
+
+/// Torrent-sourced install: queue the target file in the collection's torrent,
+/// poll progress, then extract the downloaded ZIP to the install directory.
+///
+/// Leaves the ZIP in place after extraction so the torrent keeps seeding and
+/// a future re-install can skip the download if the extracted dir is deleted.
+async fn do_install_torrent(
+    jobs: &Arc<RwLock<HashMap<String, ContentPackJob>>>,
+    app_handle: &AppHandle,
+    data_dir: &str,
+    collection: &str,
+    pack_info: &ContentPackInfo,
+    key: &str,
+    cancel: Arc<AtomicBool>,
+) -> Result<(), String> {
+    use tauri::Manager;
+
+    let torrent_file_path = pack_info
+        .torrent_file_path
+        .as_ref()
+        .ok_or("torrent_file_path missing")?;
+
+    // Resolve the collection's download manager.
+    let manager = {
+        let ts: State<crate::commands::TorrentState> = app_handle.state();
+        let guard = ts.0.read().await;
+        guard
+            .get(collection)
+            .cloned()
+            .ok_or_else(|| format!("No torrent manager for collection '{}'", collection))?
+    };
+
+    // Locate the file inside the torrent's index.
+    let file_index = manager
+        .index()
+        .find_by_path(torrent_file_path)
+        .ok_or_else(|| {
+            format!(
+                "File '{}' not found in {} torrent",
+                torrent_file_path, collection
+            )
+        })?
+        .index;
+
+    // Queue selective download (idempotent — safe to call even if already selected).
+    manager
+        .download_files(vec![file_index])
+        .await
+        .map_err(|e| format!("Failed to queue torrent download: {}", e))?;
+
+    // Poll for completion, updating progress on the job.
+    loop {
+        if cancel.load(Ordering::Relaxed) {
+            manager.deselect_file(file_index).await;
+            return Err("Cancelled".to_string());
+        }
+
+        let progress = manager.file_progress(file_index).await;
+        if let Some(p) = progress {
+            let mut jmap = jobs.write().await;
+            if let Some(job) = jmap.get_mut(key) {
+                job.downloaded_bytes = p.downloaded_bytes;
+                job.total_bytes = p.total_bytes;
+            }
+            if p.finished {
+                break;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+
+    // ── Extract the downloaded ZIP into a staging dir, then atomic-rename. ──
+    {
+        let mut jmap = jobs.write().await;
+        if let Some(job) = jmap.get_mut(key) {
+            job.phase = "extracting".to_string();
+        }
+    }
+
+    let zip_path = manager
+        .file_output_path(file_index)
+        .ok_or("Cannot resolve downloaded file path")?;
+
+    let install_dir = safe_join(Path::new(data_dir), &pack_info.install_path)?;
+    let staging_dir = Path::new(data_dir)
+        .join(".content-downloads")
+        .join(format!("{}.staging", key.replace(':', "_")));
+
+    // Clean stale staging.
+    let _ = std::fs::remove_dir_all(&staging_dir);
+    std::fs::create_dir_all(&staging_dir)
+        .map_err(|e| format!("Cannot create staging dir: {}", e))?;
+
+    let staging_clone = staging_dir.clone();
+    let zip_clone = zip_path.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), String> {
+        let file = std::fs::File::open(&zip_clone)
+            .map_err(|e| format!("Cannot open downloaded zip: {}", e))?;
+        let mut archive =
+            zip::ZipArchive::new(file).map_err(|e| format!("Invalid zip archive: {}", e))?;
+        archive
+            .extract(&staging_clone)
+            .map_err(|e| format!("Zip extraction failed: {}", e))?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("Extract task panicked: {}", e))??;
+
+    // Commit: replace install_dir with staging.
+    {
+        let mut jmap = jobs.write().await;
+        if let Some(job) = jmap.get_mut(key) {
+            job.phase = "installing".to_string();
+        }
+    }
+
+    if let Some(parent) = install_dir.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Cannot create install parent dir: {}", e))?;
+    }
+    if install_dir.exists() {
+        std::fs::remove_dir_all(&install_dir)
+            .map_err(|e| format!("Cannot remove old install: {}", e))?;
+    }
+    if std::fs::rename(&staging_dir, &install_dir).is_err() {
+        copy_dir_recursive(&staging_dir, &install_dir)?;
+        let _ = std::fs::remove_dir_all(&staging_dir);
+    }
+
+    log::info!(
+        "Content pack installed (torrent): {} → {}",
+        pack_info.display_name,
+        install_dir.display()
+    );
+    Ok(())
 }
 
 /// The actual download → verify → extract → commit pipeline.

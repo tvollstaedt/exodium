@@ -26,8 +26,10 @@ src-tauri/resources/dosbox-glshaders/
 *.swp
 *~
 
-# Generated DB (uncompressed — only .db.gz ships)
+# Generated DB (uncompressed — only .db.gz ships) + SQLite WAL artifacts
 metadata/*.db
+metadata/*.db-shm
+metadata/*.db-wal
 
 # Claude Code
 .claude/

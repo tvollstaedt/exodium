@@ -124,13 +124,18 @@ fn migrate(conn: &Connection) -> DbResult<()> {
 /// ASCII alphanumerics. This means "3-K Trivia" and "3K Trivia" and
 /// "3, K. Trivia!" all hash to the same filename — punctuation variants
 /// across XML / zip / image filenames merge automatically.
-fn title_thumbnail_key(title: &str) -> String {
-    use sha2::{Digest, Sha256};
-    let norm: String = title
-        .to_lowercase()
+/// Lowercase + strip to ASCII alphanumeric only. Shared by the thumbnail hash
+/// and the metadata image-file matcher in `commands::setup`.
+pub fn normalize_alnum(s: &str) -> String {
+    s.to_lowercase()
         .chars()
         .filter(|c| c.is_ascii_alphanumeric())
-        .collect();
+        .collect()
+}
+
+fn title_thumbnail_key(title: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let norm = normalize_alnum(title);
     let hash = format!("{:x}", Sha256::digest(norm.as_bytes()));
     hash[..16].to_string()
 }

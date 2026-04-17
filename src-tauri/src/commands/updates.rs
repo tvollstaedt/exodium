@@ -9,7 +9,11 @@ use super::DbState;
 
 // ── Manifest schema (v2) ─────────────────────────────────────────────────────
 
-/// A downloadable content pack (posters, media, etc.) hosted as a tar.gz asset.
+/// A downloadable content pack. Two source kinds:
+///   - HTTP tar.gz (url + sha256): externally hosted release asset
+///   - Torrent-sourced ZIP (torrent_file_path): a file inside the collection's
+///     existing torrent. librqbit handles piece-level integrity, so sha256 is
+///     redundant and left empty.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ContentPackInfo {
     pub display_name: String,
@@ -23,6 +27,11 @@ pub struct ContentPackInfo {
     /// Pack IDs this pack replaces (e.g. media supersedes posters).
     #[serde(default)]
     pub supersedes: Vec<String>,
+    /// If set, install via torrent selective-download instead of HTTP. Value
+    /// is the file path inside the collection's torrent
+    /// (e.g. "Content/XODOSMetadata.zip"). The extractor expects a .zip.
+    #[serde(default)]
+    pub torrent_file_path: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

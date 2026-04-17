@@ -165,9 +165,21 @@ export function Library() {
     const scroll = () => {
       const el = document.querySelector<HTMLElement>(`[data-section-label="${CSS.escape(label)}"]`);
       if (!el || !libraryRef) { return; }
-      const rect = el.getBoundingClientRect();
+      // .grid-separator is position:sticky, so its bounding rect reports the
+      // stuck position (~separatorTop) once its section has been scrolled past
+      // — measuring it directly would make scrollBy a no-op. Measure the
+      // adjacent .game-grid sibling (in normal flow) and back out the
+      // separator's rendered height to land the letter at the sticky slot.
+      const grid = el.nextElementSibling as HTMLElement | null;
+      const anchor = grid ?? el;
+      const rect = anchor.getBoundingClientRect();
       const containerRect = libraryRef.getBoundingClientRect();
-      libraryRef.scrollBy({ top: rect.top - containerRect.top - (parseInt(separatorTop()) || 100), behavior: "smooth" });
+      const sepHeight = grid ? el.offsetHeight : 0;
+      const targetTop = parseInt(separatorTop()) || 100;
+      libraryRef.scrollBy({
+        top: rect.top - containerRect.top - targetTop - sepHeight,
+        behavior: "smooth",
+      });
     };
     const el = document.querySelector(`[data-section-label="${CSS.escape(label)}"]`);
     if (el) {
@@ -347,7 +359,7 @@ export function Library() {
         <div class="sections-list">
           <For each={sections()}>
             {(section) => (
-              <div class="game-section">
+              <>
                 <Show when={section.label}>
                   <div
                     id={`sep-${section.index}`}
@@ -358,7 +370,7 @@ export function Library() {
                     {section.label}
                   </div>
                 </Show>
-                <div class="game-grid">
+                <div class="game-grid game-section">
                   <For each={section.games}>
                     {(game) => (
                       <GameCard
@@ -369,7 +381,7 @@ export function Library() {
                     )}
                   </For>
                 </div>
-              </div>
+              </>
             )}
           </For>
         </div>
