@@ -38,4 +38,10 @@ pub struct Game {
     /// content-pack thumbnail. Null when no title is available or the game
     /// predates the content-addressed thumbnail scheme.
     pub thumbnail_key: Option<String>,
+    /// LaunchBox ManualPath (e.g. "Manuals\MS-DOS\Capitalism (1995).pdf").
+    /// Relative to the torrent root. Null when no manual exists.
+    pub manual_path: Option<String>,
+    /// ISO 8601 timestamp (UTC) of the last time the game was launched.
+    /// Used for ordering only — convert to local time if displaying to user.
+    pub last_played: Option<String>,
 }

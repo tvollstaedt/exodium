@@ -10,7 +10,7 @@ import {
   getFavoriteGames,
   lastGameLibraryChange,
 } from "../stores/games";
-import { getGame, getGenres, getInstalledGames, getConfig, getAvailableCollections, getSectionKeys, type Game } from "../api/tauri";
+import { getGame, getGenres, getInstalledGames, getRecentlyPlayed, getConfig, getAvailableCollections, getSectionKeys, type Game } from "../api/tauri";
 import { GameCard } from "../components/GameCard";
 import { GameDetailPanel } from "../components/GameDetailPanel";
 import { Select } from "../components/Select";
@@ -62,6 +62,7 @@ export function Library() {
   const [sectionLabels, setSectionLabels] = createSignal<string[]>([]);
   const [activeTab, setActiveTab] = createSignal<Tab>("browse");
   const [genres, setGenres] = createSignal<string[]>([]);
+  const [recentGames, setRecentGames] = createSignal<Game[]>([]);
   const [installedGames, setInstalledGames] = createSignal<Game[]>([]);
   const [favoriteGames, setFavoriteGames] = createSignal<Game[]>([]);
   const [collections, setCollections] = createSignal<{id: string, label: string}[]>([]);
@@ -85,6 +86,7 @@ export function Library() {
   createEffect(() => {
     const change = lastGameLibraryChange();
     if (!change) { return; }
+    refreshRecent();
     refreshInstalled();
     refreshFavorites();
     const dg = detailGame();
@@ -148,7 +150,7 @@ export function Library() {
   const refreshSectionKeys = async () => {
     try {
       const keys = await getSectionKeys(sortBy(), searchQuery(), genreFilter(), collectionFilter(), false);
-      if (keys.length > 0) { setSectionLabels(keys); }
+      setSectionLabels(keys);
     } catch (e) {
       console.warn("[sectionKeys] failed:", e);
     }
@@ -160,6 +162,21 @@ export function Library() {
     if (backend.length > 0) { return backend; }
     return [...new Set(sections().map(s => s.label).filter(Boolean))];
   });
+
+  // Compact display label for the narrow jump bar. Full label is kept for
+  // data-section-label matching (jumpToSection) and the title tooltip.
+  const jumpBarDisplayLabel = (label: string): string => {
+    // Star ratings: "★★★★☆" → "4", "Unrated" → "?"
+    const stars = label.match(/^[★☆]+$/);
+    if (stars) {
+      return String((label.match(/★/g) || []).length);
+    }
+    if (label === "Unrated") { return "?"; }
+    // Year: "1992" stays "1992" (4 chars fits)
+    // Genre: truncate long names for jump bar
+    if (label.length > 8) { return label.slice(0, 7) + "…"; }
+    return label;
+  };
 
   const jumpToSection = async (label: string) => {
     const scroll = () => {
@@ -194,6 +211,15 @@ export function Library() {
     { value: "", label: "All Genres" },
     ...genres().map((g) => ({ value: g, label: g })),
   ]);
+
+  const refreshRecent = async () => {
+    try {
+      const fresh = await getRecentlyPlayed(12);
+      setRecentGames((prev) => mergeShelfList(prev, fresh));
+    } catch (e) {
+      console.warn("[Library] refreshRecent failed:", e);
+    }
+  };
 
   const refreshInstalled = async () => {
     try {
@@ -238,6 +264,13 @@ export function Library() {
   };
 
   onMount(async () => {
+    // Load recently played first — if any exist, auto-switch to My Library tab.
+    const recent = await getRecentlyPlayed(12).catch(() => [] as Game[]);
+    setRecentGames(recent);
+    if (recent.length > 0) {
+      setActiveTab("library");
+    }
+
     refreshInstalled();
     refreshFavorites();
 
@@ -390,7 +423,7 @@ export function Library() {
       {/* ── My Library tab ── */}
       <Show when={activeTab() === "library"}>
         <Show
-          when={favoriteGames().length > 0 || installedGames().length > 0}
+          when={recentGames().length > 0 || favoriteGames().length > 0 || installedGames().length > 0}
           fallback={
             <div class="lib-empty">
               <div class="lib-empty-icon">🎮</div>
@@ -400,6 +433,17 @@ export function Library() {
             </div>
           }
         >
+          <Show when={recentGames().length > 0}>
+            <div class="library-section">
+              <h2 class="section-title">Recently Played <span class="section-count">{recentGames().length}</span></h2>
+              <div class="game-grid">
+                <For each={recentGames()}>
+                  {(game) => <GameCard game={game} onFavoriteChanged={handleFavoriteChanged} onDetail={setDetailGame} />}
+                </For>
+              </div>
+            </div>
+          </Show>
+
           <Show when={favoriteGames().length > 0}>
             <div class="library-section">
               <h2 class="section-title">Favorites <span class="section-count">{favoriteGames().length}</span></h2>
@@ -440,7 +484,7 @@ export function Library() {
             <For each={jumpBarLabels()}>
               {(label) => (
                 <button class="jump-bar-item" title={label} onClick={() => jumpToSection(label)}>
-                  {label}
+                  {jumpBarDisplayLabel(label)}
                 </button>
               )}
             </For>

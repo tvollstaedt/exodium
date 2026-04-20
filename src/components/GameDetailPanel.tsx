@@ -51,7 +51,7 @@ export function GameDetailPanel(props: Props) {
     if (g.title && g.torrent_source) {
       const gameId = g.id;
       setMetadataLoading(true);
-      loadGameMetadata(g.torrent_source, g.title, g.shortcode ?? null)
+      loadGameMetadata(g.torrent_source, g.title, g.shortcode ?? null, g.manual_path ?? null)
         .then((m) => { if (props.game?.id === gameId) { setMetadata(m); } })
         .finally(() => setMetadataLoading(false));
     }
@@ -167,6 +167,7 @@ export function GameDetailPanel(props: Props) {
                 src={thumbSrc()!}
                 alt=""
                 onError={() => setImgError(true)}
+                onClick={() => { setLightboxStart(0); setLightboxOpen(true); }}
               />
             </Show>
             <Show when={!thumbSrc() || imgError()}>
@@ -195,9 +196,18 @@ export function GameDetailPanel(props: Props) {
                     ▶ Play
                   </button>
                 </Show>
+                <Show when={metadata()?.manual_path}>
+                  <button class="game-detail-btn btn-manual" onClick={() => setManualOpen(true)}>
+                    ⊞ Manual
+                  </button>
+                </Show>
                 <Show when={!isInstalled() && isDownloading()}>
                   <div class="game-detail-btn btn-downloading">
-                    <AutoProgress value={currentProgress()} class="mini" />
+                    <AutoProgress
+                      value={currentProgress()}
+                      class="mini"
+                      indeterminate={dlState()?.status?.startsWith("Waiting") || dlState()?.status?.startsWith("Extracting") || undefined}
+                    />
                     <span>{dlState()?.status}</span>
                   </div>
                   <button class="game-detail-btn btn-cancel" onClick={() => cancelGameDownload(props.game!.id!)}>
@@ -308,16 +318,8 @@ export function GameDetailPanel(props: Props) {
 
             {/* Media: manual + screenshots/art — only renders if the metadata
                 content pack has assets for this game's shortcode. */}
-            <Show when={!metadataLoading() && metadata() && (metadata()!.manual_path || metadata()!.images.length > 0)}>
+            <Show when={!metadataLoading() && metadata() && metadata()!.images.length > 0}>
               <div class="game-detail-media">
-                <Show when={metadata()!.manual_path}>
-                  <div class="game-detail-section-label">Manual</div>
-                  <div class="game-detail-manual-row">
-                    <button class="game-detail-btn btn-manual" onClick={() => setManualOpen(true)}>
-                      📖 View manual
-                    </button>
-                  </div>
-                </Show>
                 {(() => {
                   const visible = () => (metadata()?.images ?? []).filter((_, i) => !brokenImages().has(i));
                   return (
@@ -354,7 +356,14 @@ export function GameDetailPanel(props: Props) {
         </div>
 
         <Lightbox
-          images={(metadata()?.images ?? []).filter((_, i) => !brokenImages().has(i))}
+          images={(() => {
+            const filtered = (metadata()?.images ?? []).filter((_, i) => !brokenImages().has(i));
+            if (filtered.length > 0) { return filtered; }
+            // Fallback: use the hero thumbnail so clicking box art works even
+            // without the metadata pack installed.
+            const hero = bestThumbnailPath(props.game?.torrent_source, props.game?.thumbnail_key);
+            return hero ? [hero] : [];
+          })()}
           startIndex={lightboxStart()}
           open={lightboxOpen()}
           onClose={() => setLightboxOpen(false)}

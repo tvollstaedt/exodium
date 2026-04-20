@@ -19,7 +19,8 @@ use commands::{
     download_game, factory_reset, get_available_collections, get_config,
     get_content_pack_progress, get_default_data_dir, get_download_progress, get_game,
     get_game_metadata, get_poster_dir, get_preview_dir,
-    get_game_variants, get_games, get_genres, get_installed_games, get_section_keys,
+    get_game_variants, get_games, get_genres, get_installed_games, get_recently_played,
+    get_section_keys,
     get_setup_status, get_thumbnail_dir, get_torrent_info, init_download_manager,
     init_resource_dir, install_content_pack, launch_game, list_content_packs,
     scan_installed_games, set_config, setup_from_local, setup_import, setup_start,
@@ -246,6 +247,7 @@ pub fn run() {
             get_preview_dir,
             get_poster_dir,
             get_game_metadata,
+            get_recently_played,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

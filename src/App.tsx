@@ -27,6 +27,7 @@ type AppPhase = "loading" | "setup" | "ready";
 function App() {
   const [phase, setPhase] = createSignal<AppPhase>("loading");
   const [showSettings, setShowSettings] = createSignal(false);
+  const [settingsTab, setSettingsTab] = createSignal<"general" | "packs">("general");
   const [showWelcomeModal, setShowWelcomeModal] = createSignal(false);
   const [dataDir, setDataDir] = createSignal("");
   const [resetError, setResetError] = createSignal("");
@@ -189,78 +190,97 @@ function App() {
           </div>
         </div>
 
+        <Show when={showSettings()}>
         <Dialog.Root open={showSettings()} onOpenChange={(e) => {
           setShowSettings(e.open);
-          if (e.open) { loadGameDefaults(); }
+          if (e.open) { loadGameDefaults(); setSettingsTab("general"); }
         }}>
           <Portal>
             <Dialog.Backdrop class="ark-dialog-backdrop" />
             <Dialog.Positioner class="ark-dialog-positioner">
               <Dialog.Content class="ark-dialog-content ark-dialog-settings">
                 <Dialog.Title class="ark-dialog-title">Settings</Dialog.Title>
-                <div class="settings-body">
-                  <section class="settings-section">
-                    <h3 class="settings-section-title">Library</h3>
-                    <div class="setting-row">
-                      <span class="setting-label">Game folder</span>
-                      <span class="setting-value">{gameFolderPath() || "Not set"}</span>
-                      <button class="btn-small" onClick={handleChangeDataDir}>Change</button>
-                    </div>
-                    <div class="setting-row">
-                      <span class="setting-label">Installed games</span>
-                      <span class="setting-hint">Re-scan disk to detect already-downloaded games</span>
-                      <button class="btn-small" onClick={handleRescan} disabled={scanning()}>
-                        {scanning() ? "Scanning…" : "Scan"}
-                      </button>
-                    </div>
-                    <Show when={scanResult()}>
-                      <div class="setting-hint" style="margin-top:4px">{scanResult()}</div>
-                    </Show>
-                  </section>
-
-                  <section class="settings-section">
-                    <h3 class="settings-section-title">Game Defaults</h3>
-                    <p class="settings-section-hint">Applied as a last-wins DOSBox config on every launch. Overrides per-game settings without modifying eXoDOS's bundled configs.</p>
-                    <label class="setting-toggle">
-                      <input
-                        type="checkbox"
-                        checked={crtAuto()}
-                        onChange={(e) => handleToggleCrtAuto(e.currentTarget.checked)}
-                      />
-                      <span class="setting-toggle-info">
-                        <span class="setting-toggle-label">Auto CRT shaders</span>
-                        <span class="setting-toggle-hint">DOSBox Staging picks a CRT shader matched to each game's video mode and your display resolution.</span>
-                      </span>
-                    </label>
-                    <label class="setting-toggle">
-                      <input
-                        type="checkbox"
-                        checked={defaultFullscreen()}
-                        onChange={(e) => handleToggleFullscreen(e.currentTarget.checked)}
-                      />
-                      <span class="setting-toggle-info">
-                        <span class="setting-toggle-label">Launch in fullscreen</span>
-                        <span class="setting-toggle-hint">Start every game fullscreen instead of windowed. Alt+Enter still toggles at runtime.</span>
-                      </span>
-                    </label>
-                  </section>
-
-                  <section class="settings-section">
-                    <ContentPackSettings />
-                  </section>
-
-                  <section class="settings-section danger">
-                    <h3 class="settings-section-title">Danger Zone</h3>
-                    <div class="setting-row">
-                      <span class="setting-label">Factory Reset</span>
-                      <span class="setting-hint">Clears all data and returns to setup</span>
-                      <button class="btn-danger" onClick={() => setShowResetDialog(true)}>Reset…</button>
-                    </div>
-                    <Show when={resetError()}>
-                      <div class="error" style="margin-top:8px">{resetError()}</div>
-                    </Show>
-                  </section>
+                <div class="settings-tabs">
+                  <button
+                    class={`settings-tab ${settingsTab() === "general" ? "active" : ""}`}
+                    onClick={() => setSettingsTab("general")}
+                  >General</button>
+                  <button
+                    class={`settings-tab ${settingsTab() === "packs" ? "active" : ""}`}
+                    onClick={() => setSettingsTab("packs")}
+                  >Content Packs</button>
                 </div>
+
+                <div class="settings-tab-body">
+                  <Show when={settingsTab() === "general"}>
+                    <div class="settings-body">
+                      <section class="settings-section">
+                        <h3 class="settings-section-title">Library</h3>
+                        <div class="setting-row">
+                          <span class="setting-label">Game folder</span>
+                          <span class="setting-value">{gameFolderPath() || "Not set"}</span>
+                          <button class="btn-small" onClick={handleChangeDataDir}>Change</button>
+                        </div>
+                        <div class="setting-row">
+                          <span class="setting-label">Installed games</span>
+                          <span class="setting-hint">Re-scan disk to detect already-downloaded games</span>
+                          <button class="btn-small" onClick={handleRescan} disabled={scanning()}>
+                            {scanning() ? "Scanning…" : "Scan"}
+                          </button>
+                        </div>
+                        <Show when={scanResult()}>
+                          <div class="setting-hint" style="margin-top:4px">{scanResult()}</div>
+                        </Show>
+                      </section>
+
+                      <section class="settings-section">
+                        <h3 class="settings-section-title">Game Defaults</h3>
+                        <p class="settings-section-hint">Applied as a last-wins DOSBox config on every launch. Overrides per-game settings without modifying eXoDOS's bundled configs.</p>
+                        <label class="setting-toggle">
+                          <input
+                            type="checkbox"
+                            checked={crtAuto()}
+                            onChange={(e) => handleToggleCrtAuto(e.currentTarget.checked)}
+                          />
+                          <span class="setting-toggle-info">
+                            <span class="setting-toggle-label">Auto CRT shaders</span>
+                            <span class="setting-toggle-hint">DOSBox Staging picks a CRT shader matched to each game's video mode and your display resolution.</span>
+                          </span>
+                        </label>
+                        <label class="setting-toggle">
+                          <input
+                            type="checkbox"
+                            checked={defaultFullscreen()}
+                            onChange={(e) => handleToggleFullscreen(e.currentTarget.checked)}
+                          />
+                          <span class="setting-toggle-info">
+                            <span class="setting-toggle-label">Launch in fullscreen</span>
+                            <span class="setting-toggle-hint">Start every game fullscreen instead of windowed. Alt+Enter still toggles at runtime.</span>
+                          </span>
+                        </label>
+                      </section>
+
+                      <section class="settings-section danger">
+                        <h3 class="settings-section-title">Danger Zone</h3>
+                        <div class="setting-row">
+                          <span class="setting-label">Factory Reset</span>
+                          <span class="setting-hint">Clears all data and returns to setup</span>
+                          <button class="btn-danger" onClick={() => setShowResetDialog(true)}>Reset…</button>
+                        </div>
+                        <Show when={resetError()}>
+                          <div class="error" style="margin-top:8px">{resetError()}</div>
+                        </Show>
+                      </section>
+                    </div>
+                  </Show>
+
+                  <Show when={settingsTab() === "packs"}>
+                    <div class="settings-body">
+                      <ContentPackSettings />
+                    </div>
+                  </Show>
+                </div>
+
                 <div class="ark-dialog-actions">
                   <Dialog.CloseTrigger class="btn-secondary">Close</Dialog.CloseTrigger>
                 </div>
@@ -268,7 +288,9 @@ function App() {
             </Dialog.Positioner>
           </Portal>
         </Dialog.Root>
+        </Show>
 
+        <Show when={showResetDialog()}>
         <Dialog.Root open={showResetDialog()} onOpenChange={(e) => { setShowResetDialog(e.open); if (!e.open) { setDeleteGameData(false); } }}>
           <Portal>
             <Dialog.Backdrop class="ark-dialog-backdrop" />
@@ -297,6 +319,7 @@ function App() {
             </Dialog.Positioner>
           </Portal>
         </Dialog.Root>
+        </Show>
 
         <Library />
 

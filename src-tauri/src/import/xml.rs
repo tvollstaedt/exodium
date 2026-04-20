@@ -53,6 +53,8 @@ struct XmlGame {
     region: Option<String>,
     #[serde(default)]
     max_players: Option<String>,
+    #[serde(default)]
+    manual_path: Option<String>,
 }
 
 fn blank_to_none(s: Option<String>) -> Option<String> {
@@ -150,6 +152,8 @@ fn xml_game_to_game(x: XmlGame, shortcode_segment: &str) -> Game {
         dosbox_variant: None, // populated later by generate_db from dosbox.txt
         favorited: false,
         thumbnail_key: None, // populated by generate_db from normalized title
+        manual_path: blank_to_none(x.manual_path),
+        last_played: None,
     }
 }
 

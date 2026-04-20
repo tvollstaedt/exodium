@@ -64,7 +64,7 @@ pub fn get_games(
 ) -> Result<GameList, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     let page = page.unwrap_or(1);
-    let per_page = per_page.unwrap_or(50).min(500);
+    let per_page = per_page.unwrap_or(50).min(10000);
     let query = query.unwrap_or_default();
     let genre = genre.unwrap_or_default();
     let sort_by = sort_by.unwrap_or_default();
@@ -112,7 +112,9 @@ pub fn get_section_keys(
         collection: &collection,
         favorites_only: favorites_only.unwrap_or(false),
     };
-    queries::get_section_keys(&conn, &f).map_err(|e| e.to_string())
+    let result = queries::get_section_keys(&conn, &f).map_err(|e| e.to_string());
+    log::debug!("get_section_keys: sort_by={:?} collection={:?} → {:?} keys", sort_by, collection, result.as_ref().map(|v| v.len()));
+    result
 }
 
 #[tauri::command]
@@ -387,16 +389,32 @@ pub async fn get_download_progress(
                 } else {
                     // ZIP not on disk despite torrent reporting 100%.
                     // Common cause: pieces covering this file were received as a side effect of
-                    // downloading a neighboring file, but the file was never selected so librqbit
-                    // never assembled/wrote it. Re-selecting the file forces assembly.
+                    // downloading a neighboring file, but librqbit never assembled the pieces
+                    // into the output file. Re-selecting forces assembly. Throttle to once
+                    // every 5 seconds to avoid spamming the session.
                     log::warn!(
                         "Download reports 100% but ZIP missing: {}. Re-requesting file assembly.",
                         zip_path.display()
                     );
-                    // Only spawn the re-trigger once — if the file is already selected (i.e., a
-                    // previous poll already spawned a re-request), skip spawning again to avoid
-                    // a new task every second while librqbit assembles the file.
-                    if !manager.is_file_selected(game_idx).await {
+                    let retry_key = id;
+                    let now = std::time::Instant::now();
+                    use std::sync::OnceLock;
+                    static LAST_RETRY: OnceLock<std::sync::Mutex<std::collections::HashMap<i64, std::time::Instant>>> = OnceLock::new();
+                    let last_retry = LAST_RETRY.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+                    let should_retry = last_retry.lock()
+                        .map(|mut map| {
+                            // Prune entries older than 60s to prevent unbounded growth.
+                            map.retain(|_, t| now.duration_since(*t).as_secs() < 60);
+                            let last = map.get(&retry_key).copied();
+                            if last.is_none() || last.is_some_and(|t| now.duration_since(t).as_secs() >= 5) {
+                                map.insert(retry_key, now);
+                                true
+                            } else {
+                                false
+                            }
+                        })
+                        .unwrap_or(false);
+                    if should_retry {
                         let mgr = manager.clone();
                         tauri::async_runtime::spawn(async move {
                             let _ = mgr.download_files(vec![game_idx]).await;
@@ -1035,30 +1053,37 @@ fn ensure_dosbox_shaders(app: &AppHandle) {
     }
 }
 
+#[tauri::command]
+pub fn get_recently_played(state: State<DbState>, limit: Option<usize>) -> Result<Vec<Game>, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    queries::fetch_recently_played(&conn, limit.unwrap_or(12)).map_err(|e| e.to_string())
+}
+
 /// Launch a downloaded game via DOSBox Staging.
 #[tauri::command]
 pub fn launch_game(app: AppHandle, db_state: State<DbState>, id: i64) -> Result<String, String> {
-    let conn = db_state.0.lock().map_err(|e| e.to_string())?;
-
-    let game = queries::fetch_game_by_id(&conn, id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Game with id {} not found", id))?;
-
-    let data_dir = queries::get_config(&conn, "data_dir")
-        .map_err(|e| e.to_string())?
-        .ok_or("Data directory not configured. Run setup first.")?;
-
-    // Read global user preferences. These are set via Settings → Game Defaults
-    // and layered as a last-wins DOSBox -conf fragment so they override per-game
-    // glshader / fullscreen without mutating eXoDOS's bundled confs.
-    let global_glshader = queries::get_config(&conn, "global_glshader")
-        .map_err(|e| e.to_string())?
-        .unwrap_or_else(|| "default".to_string());
-    let default_fullscreen = queries::get_config(&conn, "default_fullscreen")
-        .map_err(|e| e.to_string())?
-        .unwrap_or_else(|| "window".to_string());
-    let crt_auto_enabled = global_glshader == "crt-auto";
-    let fullscreen_enabled = default_fullscreen == "fullscreen";
+    // Read everything we need from the DB and drop the lock before the heavy
+    // DOSBox path resolution + process spawning below.
+    let (game, data_dir, crt_auto_enabled, fullscreen_enabled) = {
+        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let game = queries::fetch_game_by_id(&conn, id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("Game with id {} not found", id))?;
+        let data_dir = queries::get_config(&conn, "data_dir")
+            .map_err(|e| e.to_string())?
+            .ok_or("Data directory not configured. Run setup first.")?;
+        let global_glshader = queries::get_config(&conn, "global_glshader")
+            .map_err(|e| e.to_string())?
+            .unwrap_or_else(|| "default".to_string());
+        let default_fullscreen = queries::get_config(&conn, "default_fullscreen")
+            .map_err(|e| e.to_string())?
+            .unwrap_or_else(|| "window".to_string());
+        // Record the launch timestamp for "Recently Played" shelf.
+        if let Err(e) = queries::set_last_played(&conn, id) {
+            log::warn!("Failed to update last_played for {}: {}", game.title, e);
+        }
+        (game, data_dir, global_glshader == "crt-auto", default_fullscreen == "fullscreen")
+    }; // lock dropped here — before path resolution + DOSBox spawning
 
     if !game.installed {
         return Err(format!("{} is not installed. Download it first.", game.title));
@@ -1175,7 +1200,9 @@ pub fn launch_game(app: AppHandle, db_state: State<DbState>, id: i64) -> Result<
                     if msg.contains("EOCD") || msg.contains("invalid Zip") || msg.contains("Invalid archive") {
                         // ZIP is a torrent stub or corrupted file — reset installed flag so the
                         // user can re-download rather than hitting this error on every launch.
-                        let _ = queries::set_game_installed(&conn, id, false);
+                        if let Ok(conn) = db_state.0.lock() {
+                            let _ = queries::set_game_installed(&conn, id, false);
+                        }
                         return Err(format!(
                             "Game ZIP for '{}' is incomplete or corrupted (torrent placeholder). \
                              Please re-download the game.",

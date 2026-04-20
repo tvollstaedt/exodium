@@ -37,7 +37,9 @@ pub fn create_tables(conn: &Connection) -> DbResult<()> {
             download_size         INTEGER,
             has_thumbnail         INTEGER NOT NULL DEFAULT 0,
             dosbox_variant        TEXT,
-            thumbnail_key         TEXT
+            thumbnail_key         TEXT,
+            manual_path           TEXT,
+            last_played           TEXT
         );
 
         CREATE TABLE IF NOT EXISTS downloads (

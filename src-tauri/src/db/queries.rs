@@ -9,7 +9,7 @@ const GAME_COLUMNS: &str =
      description, notes, source, application_path, dosbox_conf,
      status, region, max_players, language, shortcode, torrent_source,
      in_library, installed, game_torrent_index, gamedata_torrent_index, download_size,
-     has_thumbnail, dosbox_variant, favorited, thumbnail_key";
+     has_thumbnail, dosbox_variant, favorited, thumbnail_key, manual_path, last_played";
 
 fn row_to_game(row: &Row) -> rusqlite::Result<Game> {
     Ok(Game {
@@ -46,6 +46,8 @@ fn row_to_game(row: &Row) -> rusqlite::Result<Game> {
         dosbox_variant: row.get(29)?,
         favorited: row.get::<_, i32>(30).unwrap_or(0) != 0,
         thumbnail_key: row.get(31)?,
+        manual_path: row.get(32)?,
+        last_played: row.get(33)?,
     })
 }
 
@@ -63,12 +65,14 @@ pub fn insert_games(conn: &Connection, games: &[Game]) -> DbResult<usize> {
             title, sort_title, platform, developer, publisher,
             release_date, year, genre, series, play_mode,
             rating, description, notes, source, application_path,
-            dosbox_conf, status, region, max_players, language, shortcode
+            dosbox_conf, status, region, max_players, language, shortcode,
+            manual_path
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5,
             ?6, ?7, ?8, ?9, ?10,
             ?11, ?12, ?13, ?14, ?15,
-            ?16, ?17, ?18, ?19, ?20, ?21
+            ?16, ?17, ?18, ?19, ?20, ?21,
+            ?22
         )",
     )?;
 
@@ -96,6 +100,7 @@ pub fn insert_games(conn: &Connection, games: &[Game]) -> DbResult<usize> {
             game.max_players,
             game.language,
             game.shortcode,
+            game.manual_path,
         ])?;
         count += 1;
     }
@@ -328,10 +333,10 @@ pub fn get_section_keys(conn: &Connection, f: &GameFilter) -> DbResult<Vec<Strin
              THEN UPPER(SUBSTR(COALESCE(sort_title,title),1,1)) ELSE '#' END",
             "key DESC",
         ),
-        "year_asc"  => ("COALESCE(CAST(year AS TEXT),'Unknown')", "COALESCE(year,9999) ASC"),
-        "year_desc" => ("COALESCE(CAST(year AS TEXT),'Unknown')", "COALESCE(year,0) DESC"),
-        "genre"     => ("COALESCE(genre,'Unknown')",               "COALESCE(genre,'zzz') ASC"),
-        "rating"    => ("CAST(ROUND(COALESCE(rating,-1)) AS INTEGER)", "COALESCE(rating,-1) DESC"),
+        "year_asc"  => ("COALESCE(CAST(year AS TEXT),'Unknown')", "key ASC"),
+        "year_desc" => ("COALESCE(CAST(year AS TEXT),'Unknown')", "key DESC"),
+        "genre"     => ("COALESCE(genre,'Unknown')",               "key ASC"),
+        "rating"    => ("CAST(ROUND(COALESCE(rating,-1)) AS INTEGER)", "key DESC"),
         _           => return Ok(vec![]),
     };
 
@@ -374,6 +379,28 @@ pub fn fetch_installed_games(conn: &Connection) -> DbResult<Vec<Game>> {
         .query_map([], row_to_game)?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(games)
+}
+
+/// Fetch recently played games, ordered by last_played descending.
+pub fn fetch_recently_played(conn: &Connection, limit: usize) -> DbResult<Vec<Game>> {
+    let sql = format!(
+        "SELECT {} FROM games WHERE last_played IS NOT NULL ORDER BY last_played DESC LIMIT ?1",
+        GAME_COLUMNS
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let games: Vec<Game> = stmt
+        .query_map(params![limit as i64], row_to_game)?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(games)
+}
+
+/// Set the last_played timestamp for a game to the current time.
+pub fn set_last_played(conn: &Connection, id: i64) -> DbResult<()> {
+    conn.execute(
+        "UPDATE games SET last_played = datetime('now') WHERE id = ?1",
+        params![id],
+    )?;
+    Ok(())
 }
 
 /// Fetch a single game by ID.
@@ -466,6 +493,8 @@ mod tests {
             has_thumbnail: false,
             dosbox_variant: None,
             thumbnail_key: None,
+            manual_path: None,
+            last_played: None,
         }
     }
 

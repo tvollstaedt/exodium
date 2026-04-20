@@ -546,6 +546,7 @@ pub async fn get_game_metadata(
     collection: String,
     title: String,
     #[allow(unused_variables)] shortcode: Option<String>,
+    manual_path: Option<String>,
 ) -> Result<GameMetadata, String> {
     let data_dir = {
         let conn = db_state.0.lock().map_err(|e| e.to_string())?;
@@ -555,7 +556,7 @@ pub async fn get_game_metadata(
     };
 
     tauri::async_runtime::spawn_blocking(move || {
-        scan_game_metadata(&data_dir, &collection, &title)
+        scan_game_metadata(&data_dir, &collection, &title, manual_path.as_deref())
     })
     .await
     .map_err(|e| format!("metadata scan panicked: {}", e))?
@@ -565,6 +566,7 @@ fn scan_game_metadata(
     data_dir: &str,
     collection: &str,
     title: &str,
+    manual_path: Option<&str>,
 ) -> Result<GameMetadata, String> {
     let base = PathBuf::from(data_dir).join("content").join("metadata");
 
@@ -620,11 +622,134 @@ fn scan_game_metadata(
         images.extend(paths);
     }
 
+    // Resolve manual: check if already extracted on disk, otherwise try lazy
+    // extraction from the GameData ZIP.
+    let torrent_root = PathBuf::from(data_dir).join("eXoDOS");
+    let (resolved_manual, manual_kind) = if let Some(mp) = manual_path {
+        let normalized = mp.replace('\\', "/");
+        let on_disk = torrent_root.join(&normalized);
+        if on_disk.is_file() {
+            let ext = on_disk.extension().and_then(|e| e.to_str())
+                .unwrap_or("").to_ascii_lowercase();
+            let kind = match ext.as_str() {
+                "pdf" => "pdf", "txt" | "text" => "txt",
+                "html" | "htm" => "html", "doc" => "pdf", _ => "pdf",
+            };
+            (Some(path_to_fwd_slash(&on_disk)), Some(kind.to_string()))
+        } else {
+            // Lazy extract from GameData ZIP
+            match extract_manual_from_gamedata(&torrent_root, collection, &normalized) {
+                Ok(Some(extracted)) => {
+                    let ext = extracted.extension().and_then(|e| e.to_str())
+                        .unwrap_or("").to_ascii_lowercase();
+                    let kind = match ext.as_str() {
+                        "pdf" => "pdf", "txt" | "text" => "txt",
+                        "html" | "htm" => "html", "doc" => "pdf", _ => "pdf",
+                    };
+                    (Some(path_to_fwd_slash(&extracted)), Some(kind.to_string()))
+                }
+                _ => (None, None),
+            }
+        }
+    } else {
+        (None, None)
+    };
+
     Ok(GameMetadata {
-        manual_path: None,
-        manual_kind: None,
+        manual_path: resolved_manual,
+        manual_kind,
         images,
     })
+}
+
+/// Extract a single manual file from a GameData ZIP on first access.
+/// GameData ZIPs live at `<torrent_root>/Content/GameData/<collection>/<Title (Year)>.zip`
+/// and contain `Manuals/MS-DOS/<Title (Year)>.{pdf,txt,doc}`.
+///
+/// `manual_rel` is the forward-slash-normalized ManualPath from the XML
+/// (e.g. "Manuals/MS-DOS/Capitalism (1995).pdf").
+fn extract_manual_from_gamedata(
+    torrent_root: &Path,
+    collection: &str,
+    manual_rel: &str,
+) -> Result<Option<PathBuf>, String> {
+    // Derive the GameData ZIP name from the manual filename.
+    // ManualPath: "Manuals/MS-DOS/Capitalism (1995).pdf"
+    // GameData ZIP: "Content/GameData/eXoDOS/Capitalism (1995).zip"
+    let manual_filename = Path::new(manual_rel)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .ok_or("Cannot parse manual filename")?;
+
+    // Determine the GameData subdirectory. For eXoDOS it's "eXoDOS", for LP
+    // collections they also use "eXoDOS" as the GameData folder (shared).
+    let gd_collection = if collection.starts_with("eXoDOS") {
+        "eXoDOS"
+    } else {
+        collection
+    };
+    let gd_dir = torrent_root.join("Content").join("GameData").join(gd_collection);
+
+    // Try exact filename match first, then scan for case-insensitive match.
+    let zip_name = format!("{}.zip", manual_filename);
+    let gd_zip = gd_dir.join(&zip_name);
+    let zip_path = if gd_zip.is_file() {
+        gd_zip
+    } else {
+        // Scan directory for a case-insensitive match
+        let Ok(entries) = std::fs::read_dir(&gd_dir) else {
+            return Ok(None);
+        };
+        let lower = zip_name.to_lowercase();
+        match entries.flatten().find(|e| {
+            e.file_name().to_string_lossy().to_lowercase() == lower
+        }) {
+            Some(e) => e.path(),
+            None => return Ok(None),
+        }
+    };
+
+    // Skip placeholder / missing files (game not downloaded yet).
+    if !zip_path.is_file() || zip_path.metadata().map(|m| m.len()).unwrap_or(0) == 0 {
+        return Ok(None);
+    }
+
+    let file = std::fs::File::open(&zip_path)
+        .map_err(|e| format!("Cannot open GameData zip: {}", e))?;
+    let mut archive = zip::ZipArchive::new(file)
+        .map_err(|e| format!("Invalid GameData zip: {}", e))?;
+
+    // Find the Manuals/ entry (case-insensitive prefix).
+    let manual_entry_name = (0..archive.len())
+        .find_map(|i| {
+            let entry = archive.by_index(i).ok()?;
+            let name = entry.name().to_string();
+            if name.to_lowercase().starts_with("manuals/") && !name.ends_with('/') {
+                Some(name)
+            } else {
+                None
+            }
+        });
+
+    let Some(entry_name) = manual_entry_name else {
+        return Ok(None);
+    };
+
+    let dest = torrent_root.join(&entry_name);
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Cannot create manual dir: {}", e))?;
+    }
+
+    let mut entry = archive.by_name(&entry_name)
+        .map_err(|e| format!("Cannot read manual from zip: {}", e))?;
+    let mut out = std::fs::File::create(&dest)
+        .map_err(|e| format!("Cannot write manual: {}", e))?;
+    std::io::copy(&mut entry, &mut out)
+        .map_err(|e| format!("Cannot extract manual: {}", e))?;
+
+    log::info!("Lazy-extracted manual: {}", dest.display());
+    Ok(Some(dest))
 }
 
 /// Return the default parent directory for game storage ($HOME).

@@ -571,15 +571,6 @@ body {
   flex-direction: column;
 }
 
-.game-section {
-  /* Skip rendering off-screen sections — dramatically reduces layout and paint
-     cost when scrolling through 7000+ game cards. The browser substitutes a
-     placeholder of the last-known height for hidden sections, keeping the
-     scrollbar accurate. */
-  content-visibility: auto;
-  contain-intrinsic-size: auto 600px;
-}
-
 .grid-separator {
   position: sticky;
   /* top set via inline style */
@@ -958,10 +949,10 @@ body {
 }
 
 .ark-progress-range.indeterminate {
-  /* Overrides the determinate styles — uses animation instead of width transition */
+  /* Overrides both determinate styles AND Ark's inline width */
   position: absolute;
   top: 0;
-  width: 35%;
+  width: 35% !important;
   transition: none;
   animation: indeterminate 1.5s ease-in-out infinite;
 }
@@ -1302,13 +1293,53 @@ body {
    ============================================ */
 .ark-dialog-settings {
   max-width: 560px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin: -4px -24px 0;
+  padding: 0 24px;
+}
+
+.settings-tab {
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  font-family: inherit;
+  transition: color 0.1s ease, border-color 0.1s ease;
+}
+
+.settings-tab:hover {
+  color: var(--text-primary);
+}
+
+.settings-tab.active {
+  color: var(--text-primary);
+  border-bottom-color: var(--accent);
+}
+
+.settings-tab-body {
+  flex: 1;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  padding-top: 4px;
 }
 
 .settings-body {
   display: flex;
   flex-direction: column;
-  gap: 22px;
-  margin-bottom: 20px;
+  gap: 16px;
+  margin-bottom: 16px;
 }
 
 /* Each settings group stacks its section title + rows with a smaller
@@ -1317,7 +1348,7 @@ body {
 .settings-section {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 /* Danger Zone: red-tinted heading so the risk reads at a glance. */
@@ -1366,8 +1397,8 @@ body {
 .pack-collection-group {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin-bottom: 12px;
+  gap: 4px;
+  margin-bottom: 8px;
 }
 
 .pack-collection-title {
@@ -1385,8 +1416,8 @@ body {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px 12px;
-  padding: 10px 12px;
+  gap: 6px 10px;
+  padding: 8px 10px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.04);
   border-radius: var(--border-radius);
@@ -1979,6 +2010,7 @@ body {
   aspect-ratio: 16 / 9;
   object-fit: cover;
   display: block;
+  cursor: pointer;
 }
 
 .game-detail-thumb-placeholder {
@@ -2006,10 +2038,10 @@ body {
 }
 
 .game-detail-body {
-  padding: 8px 16px 24px;
+  padding: 8px 16px 12px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .game-detail-status {
@@ -2182,9 +2214,6 @@ body {
   color: var(--text-secondary);
   line-height: 1.6;
   white-space: pre-wrap;
-  max-height: 200px;
-  overflow-y: auto;
-  scrollbar-width: thin;
 }
 
 .game-detail-notes {
@@ -2210,31 +2239,30 @@ body {
   margin-top: 4px;
 }
 
-.game-detail-manual-row {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
+.btn-manual {
+  background: rgba(251, 191, 36, 0.12);
+  color: #fbbf24;
 }
 
-.btn-manual {
-  background: var(--bg-secondary);
-  color: var(--text-primary);
+.btn-manual:hover {
+  background: rgba(251, 191, 36, 0.22);
 }
 
 .game-detail-gallery-strip {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+  display: flex;
   gap: 6px;
-  max-height: 360px;
-  overflow-y: auto;
+  overflow-x: auto;
+  overflow-y: hidden;
   scrollbar-width: thin;
+  padding-bottom: 4px;
 }
 
 .gallery-thumb {
-  width: 100%;
-  aspect-ratio: 4 / 3;
+  width: 64px;
+  height: 48px;
+  flex-shrink: 0;
   object-fit: cover;
-  border-radius: 4px;
+  border-radius: 3px;
   cursor: pointer;
   background: var(--bg-secondary);
   outline: 1px solid transparent;
@@ -2337,6 +2365,42 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.lightbox-thumbs {
+  position: absolute;
+  bottom: 48px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 4px;
+  max-width: 80vw;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: 8px;
+}
+
+.lightbox-thumb-item {
+  width: 48px;
+  height: 36px;
+  flex-shrink: 0;
+  object-fit: cover;
+  border-radius: 3px;
+  cursor: pointer;
+  opacity: 0.5;
+  outline: 2px solid transparent;
+  transition: opacity 0.1s ease, outline-color 0.1s ease;
+}
+
+.lightbox-thumb-item:hover {
+  opacity: 0.8;
+}
+
+.lightbox-thumb-item.active {
+  opacity: 1;
+  outline-color: #fff;
+}
+
 .lightbox-broken {
   color: var(--text-muted);
   font-size: 13px;
@@ -2423,9 +2487,49 @@ body {
   height: 28px;
 }
 
+.manual-viewer-zoom {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.manual-viewer-zoom-btn,
+.manual-viewer-zoom-pct {
+  background: transparent;
+  color: var(--text-primary);
+  border: none;
+  padding: 3px 8px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.manual-viewer-zoom-btn:hover,
+.manual-viewer-zoom-pct:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.manual-viewer-zoom-pct {
+  min-width: 42px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+}
+
 .manual-viewer-body {
   flex: 1;
   background: #fff;
+  display: flex;
+  overflow: hidden;
+}
+
+.manual-viewer-iframe-wrap {
+  flex: 1;
   display: flex;
 }
 

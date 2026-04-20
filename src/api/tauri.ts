@@ -37,6 +37,8 @@ export interface Game {
    *  content-pack thumbnail. Null when no title was available at DB-build
    *  time (very rare). Frontend builds `<preview_dir>/${thumbnail_key}.jpg`. */
   thumbnail_key: string | null;
+  manual_path: string | null;
+  last_played: string | null;
 }
 
 export interface GameList {
@@ -88,6 +90,10 @@ export async function getGameVariants(shortcode: string): Promise<Game[]> {
 
 export async function getInstalledGames(): Promise<Game[]> {
   return invoke("get_installed_games");
+}
+
+export async function getRecentlyPlayed(limit?: number): Promise<Game[]> {
+  return invoke("get_recently_played", { limit });
 }
 
 export async function getGame(id: number): Promise<Game | null> {
@@ -280,6 +286,7 @@ export async function getGameMetadata(
   collection: string,
   title: string,
   shortcode: string | null,
+  manualPath: string | null,
 ): Promise<GameMetadata> {
-  return invoke("get_game_metadata", { collection, title, shortcode });
+  return invoke("get_game_metadata", { collection, title, shortcode, manualPath });
 }

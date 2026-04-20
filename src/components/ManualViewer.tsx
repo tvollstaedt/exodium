@@ -11,17 +11,15 @@ interface ManualViewerProps {
   onClose: () => void;
 }
 
-/** PDFs render natively inside a Tauri WebView iframe (WebKit on mac/Linux,
- *  WebView2 on Windows — all three ship a built-in PDF viewer). For .txt we
- *  fetch the file via the asset protocol and render as <pre>. For .html we
- *  sandbox an iframe. "Open externally" hands off to the OS default via the
- *  tauri-plugin-opener. */
 export function ManualViewer(props: ManualViewerProps) {
   const [txt, setTxt] = createSignal<string | null>(null);
   const [txtErr, setTxtErr] = createSignal(false);
+  const [zoom, setZoom] = createSignal(1.0);
 
   createEffect(() => {
-    if (!props.open || props.kind !== "txt" || !props.path) { return; }
+    if (!props.open) { return; }
+    setZoom(1.0);
+    if (props.kind !== "txt" || !props.path) { return; }
     setTxt(null);
     setTxtErr(false);
     fetch(convertFileSrc(props.path))
@@ -33,9 +31,18 @@ export function ManualViewer(props: ManualViewerProps) {
   const filename = () => props.path ? props.path.split("/").pop() ?? "Manual" : "Manual";
   const iframeSrc = () => props.path ? convertFileSrc(props.path) : "";
 
+  const zoomIn = () => setZoom((z) => Math.min(3.0, z + 0.25));
+  const zoomOut = () => setZoom((z) => Math.max(0.5, z - 0.25));
+  const zoomReset = () => setZoom(1.0);
+  const zoomPct = () => `${Math.round(zoom() * 100)}%`;
+
   const handleOpenExternal = async () => {
     if (!props.path) { return; }
-    try { await openPath(props.path); } catch { /* non-fatal */ }
+    try {
+      await openPath(props.path);
+    } catch (e) {
+      console.error("openPath failed:", e, "path:", props.path);
+    }
   };
 
   return (
@@ -50,19 +57,36 @@ export function ManualViewer(props: ManualViewerProps) {
           <Dialog.Content class="manual-viewer-content">
           <div class="manual-viewer-toolbar">
             <Dialog.Title class="manual-viewer-title">{filename()}</Dialog.Title>
-            <button class="manual-viewer-btn" onClick={handleOpenExternal} title="Open in default app">
-              ↗ Open externally
+            <Show when={props.kind === "pdf"}>
+              <div class="manual-viewer-zoom">
+                <button class="manual-viewer-zoom-btn" onClick={zoomOut} title="Zoom out">−</button>
+                <button class="manual-viewer-zoom-pct" onClick={zoomReset} title="Reset zoom">{zoomPct()}</button>
+                <button class="manual-viewer-zoom-btn" onClick={zoomIn} title="Zoom in">+</button>
+              </div>
+            </Show>
+            <button class="manual-viewer-btn" onClick={handleOpenExternal} title="Open in system PDF viewer">
+              ↗ Open in PDF Viewer
             </button>
             <button class="manual-viewer-close" onClick={props.onClose} title="Close (Esc)">✕</button>
           </div>
 
           <div class="manual-viewer-body">
             <Show when={props.kind === "pdf" || props.kind === "html"}>
-              <iframe
-                class="manual-viewer-iframe"
-                src={iframeSrc()}
-                sandbox={props.kind === "html" ? "allow-same-origin" : undefined}
-              />
+              <div
+                class="manual-viewer-iframe-wrap"
+                style={{
+                  transform: `scale(${zoom()})`,
+                  "transform-origin": "top center",
+                  width: `${100 / zoom()}%`,
+                  height: `${100 / zoom()}%`,
+                }}
+              >
+                <iframe
+                  class="manual-viewer-iframe"
+                  src={iframeSrc()}
+                  sandbox={props.kind === "html" ? "allow-same-origin" : undefined}
+                />
+              </div>
             </Show>
             <Show when={props.kind === "txt"}>
               <Show when={txt() !== null} fallback={

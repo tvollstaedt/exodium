@@ -74,6 +74,32 @@ fn migrate(conn: &Connection) -> DbResult<()> {
         conn.execute_batch("ALTER TABLE games ADD COLUMN thumbnail_key TEXT")?;
     }
 
+    // LaunchBox ManualPath (e.g. "Manuals\MS-DOS\Capitalism (1995).pdf").
+    let has_manual_path: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('games') WHERE name = 'manual_path'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+        > 0;
+    if !has_manual_path {
+        conn.execute_batch("ALTER TABLE games ADD COLUMN manual_path TEXT")?;
+    }
+
+    // ISO 8601 timestamp of last launch. Updated by launch_game on each play.
+    let has_last_played: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('games') WHERE name = 'last_played'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+        > 0;
+    if !has_last_played {
+        conn.execute_batch("ALTER TABLE games ADD COLUMN last_played TEXT")?;
+    }
+
     // Force thumbnail_key recomputation whenever the hash or canonical-matcher
     // algorithms change. Bumped on every release that alters:
     //   - title_thumbnail_key() (the hash function itself), or
@@ -87,7 +113,8 @@ fn migrate(conn: &Connection) -> DbResult<()> {
     // Without this check, existing users keep their old thumbnail_key values
     // and the new canonical matcher never runs against them — bundled files
     // use current hashes, DB rows use old hashes, every card 404s.
-    const CURRENT_HASH_VERSION: &str = "4";
+    //   v5 — shortcode-based propagation added to propagate_lp_thumbnail_keys
+    const CURRENT_HASH_VERSION: &str = "5";
     let stored_version: Option<String> =
         queries::get_config(conn, "thumbnail_hash_version").ok().flatten();
     if stored_version.as_deref() != Some(CURRENT_HASH_VERSION) {
@@ -114,7 +141,129 @@ fn migrate(conn: &Connection) -> DbResult<()> {
         queries::set_config(conn, "thumbnail_hash_version", CURRENT_HASH_VERSION)?;
     }
 
+    // Backfill manual_path from bundled XML for DBs that were built before the
+    // ManualPath field was added. Runs once: checks if ANY row has a non-NULL
+    // manual_path; if zero, reads all bundled .xml.gz files and updates matching
+    // rows by title. Idempotent — subsequent calls find rows populated and skip.
+    populate_manual_paths(conn)?;
+
     Ok(())
+}
+
+/// One-time backfill: read <ManualPath> from bundled XML files and update games
+/// rows that still have NULL manual_path.
+fn populate_manual_paths(conn: &Connection) -> DbResult<()> {
+    // Version guard: bump to force re-population when the backfill logic changes.
+    const MANUAL_PATH_VERSION: &str = "3";
+    let stored = queries::get_config(conn, "manual_path_version").ok().flatten();
+    if stored.as_deref() == Some(MANUAL_PATH_VERSION) {
+        return Ok(());
+    }
+    // Wipe stale values from a previous (buggy) backfill before re-populating.
+    conn.execute_batch("UPDATE games SET manual_path = NULL")?;
+
+    // Find the metadata directory (dev or production).
+    let metadata_dir = {
+        let dev = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .map(|p| p.join("metadata"));
+        if let Some(ref d) = dev {
+            if d.exists() {
+                Some(d.clone())
+            } else {
+                crate::commands::setup::RESOURCE_DIR
+                    .get()
+                    .map(|r| r.join("metadata"))
+            }
+        } else {
+            None
+        }
+    };
+
+    let Some(metadata_dir) = metadata_dir else {
+        log::debug!("populate_manual_paths: metadata dir not found, skipping");
+        return Ok(());
+    };
+
+    // Parse ManualPath from each bundled XML and build a title → path map.
+    let xml_files = ["MS-DOS.xml.gz", "GLP.xml.gz", "PLP.xml.gz", "SLP.xml.gz"];
+    let mut manual_map: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+
+    for filename in &xml_files {
+        let path = metadata_dir.join(filename);
+        if !path.exists() {
+            continue;
+        }
+        if let Ok(file) = std::fs::File::open(&path) {
+            let decoder = flate2::read::GzDecoder::new(file);
+            let reader = std::io::BufReader::new(decoder);
+            // Scan per <Game> block: collect Title + ManualPath, emit pair at </Game>.
+            // ManualPath appears BEFORE Title in LaunchBox XML, so we can't pair sequentially.
+            let mut block_title: Option<String> = None;
+            let mut block_manual: Option<String> = None;
+            use std::io::BufRead;
+            for line in reader.lines() {
+                let Ok(line) = line else { continue };
+                let trimmed = line.trim();
+                if trimmed == "<Game>" {
+                    block_title = None;
+                    block_manual = None;
+                } else if trimmed == "</Game>" {
+                    if let (Some(title), Some(mp)) = (block_title.take(), block_manual.take()) {
+                        manual_map.entry(title).or_insert(mp);
+                    }
+                } else if let Some(t) = extract_xml_value(trimmed, "Title") {
+                    block_title = Some(t);
+                } else if let Some(mp) = extract_xml_value(trimmed, "ManualPath") {
+                    if !mp.is_empty() {
+                        block_manual = Some(mp);
+                    }
+                }
+            }
+        }
+    }
+
+    if manual_map.is_empty() {
+        return Ok(());
+    }
+
+    let tx = conn.unchecked_transaction()?;
+    {
+        let mut stmt = tx.prepare_cached(
+            "UPDATE games SET manual_path = ?1 WHERE title = ?2 AND manual_path IS NULL",
+        )?;
+        let mut updated = 0usize;
+        for (title, mp) in &manual_map {
+            updated += stmt.execute(rusqlite::params![mp, title])? as usize;
+        }
+        log::info!("populate_manual_paths: updated {} rows from {} XML entries", updated, manual_map.len());
+    }
+    tx.commit()?;
+    queries::set_config(conn, "manual_path_version", MANUAL_PATH_VERSION)?;
+    Ok(())
+}
+
+/// Extract the text content of a simple XML element like `<Title>foo</Title>`.
+/// Decodes the standard XML entities (`&amp;`, `&lt;`, `&gt;`, `&apos;`, `&quot;`)
+/// so the returned string matches what quick_xml's serde deserializer produces.
+fn extract_xml_value(line: &str, tag: &str) -> Option<String> {
+    let open = format!("<{}>", tag);
+    let close = format!("</{}>", tag);
+    let start = line.find(&open)? + open.len();
+    let end = line.find(&close)?;
+    if start <= end {
+        let raw = &line[start..end];
+        Some(
+            raw.replace("&amp;", "&")
+                .replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&apos;", "'")
+                .replace("&quot;", "\""),
+        )
+    } else {
+        None
+    }
 }
 
 /// SHA-256(alnum-only lowercase title)[:16] — must match the Python and
@@ -238,6 +387,31 @@ fn title_canonical(title: &str) -> String {
 ///
 /// Idempotent: running twice makes no further changes.
 pub fn propagate_lp_thumbnail_keys(conn: &Connection) -> DbResult<()> {
+    // Pass 1: shortcode-based — most reliable, catches cases like
+    // "Space Quest V - The Next Mutation" (DE) ↔ "Space Quest V: Roger Wilco
+    // The Next Mutation" (EN) where the titles diverge too much for canonical
+    // matching but the shortcode (SQ5) is shared.
+    let shortcode_updated: usize = conn.execute(
+        "UPDATE games SET thumbnail_key = (
+            SELECT en.thumbnail_key FROM games en
+            WHERE en.language = 'EN'
+              AND en.shortcode = games.shortcode
+              AND en.thumbnail_key IS NOT NULL
+            LIMIT 1
+        )
+        WHERE shortcode IS NOT NULL
+          AND language != 'EN'
+          AND EXISTS (
+              SELECT 1 FROM games en
+              WHERE en.language = 'EN'
+                AND en.shortcode = games.shortcode
+                AND en.thumbnail_key IS NOT NULL
+          )",
+        [],
+    )? as usize;
+
+    // Pass 2: canonical-title matching — catches LP games with divergent
+    // shortcodes but recognizably-same titles.
     // Build canonical→thumbnail_key map from EN games with a hash.
     let mut en_map: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
@@ -284,7 +458,10 @@ pub fn propagate_lp_thumbnail_keys(conn: &Connection) -> DbResult<()> {
         }
     }
     tx.commit()?;
-    log::info!("propagate_lp_thumbnail_keys: updated {} LP games to share EN cover art", updated);
+    log::info!(
+        "propagate_lp_thumbnail_keys: {} via shortcode, {} via canonical title",
+        shortcode_updated, updated
+    );
     Ok(())
 }
 

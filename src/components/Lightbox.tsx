@@ -153,8 +153,22 @@ export function Lightbox(props: LightboxProps) {
 
           <Show when={count() > 1}>
             <div class="lightbox-counter">{idx() + 1} / {count()}</div>
+            <div class="lightbox-thumbs">
+              <For each={props.images}>
+                {(path, i) => (
+                  <img
+                    src={convertFileSrc(path)}
+                    class={`lightbox-thumb-item ${i() === idx() ? "active" : ""}`}
+                    alt=""
+                    loading="lazy"
+                    onClick={(e) => { e.stopPropagation(); setIdx(i()); }}
+                  />
+                )}
+              </For>
+            </div>
           </Show>
           </Dialog.Content>
+
         </Dialog.Positioner>
       </Portal>
     </Dialog.Root>

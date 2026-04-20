@@ -56,7 +56,7 @@ interface AutoProgressProps {
 export function AutoProgress(props: AutoProgressProps) {
   const isIndet = useIndeterminate(() => props.value, () => props.indeterminate);
   return (
-    <Progress.Root value={props.value * 100} class={`ark-progress ${props.class ?? ""}`}>
+    <Progress.Root value={isIndet() ? 0 : props.value * 100} class={`ark-progress ${props.class ?? ""}`}>
       <Progress.Track class="ark-progress-track">
         <Progress.Range class={`ark-progress-range${isIndet() ? " indeterminate" : ""}`} />
       </Progress.Track>
