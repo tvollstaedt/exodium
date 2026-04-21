@@ -4,6 +4,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { AutoProgress } from "./ProgressBar";
 import { Lightbox } from "./Lightbox";
 import { ManualViewer } from "./ManualViewer";
+import { GameSettingsDialog } from "./GameSettingsDialog";
 import type { Game, GameMetadata } from "../api/tauri";
 import { launchGame, getGameVariants } from "../api/tauri";
 import { formatBytes, parseLangEntries, langBadgeClass, performUninstall } from "../util";
@@ -27,6 +28,7 @@ export function GameDetailPanel(props: Props) {
   const [lightboxOpen, setLightboxOpen] = createSignal(false);
   const [lightboxStart, setLightboxStart] = createSignal(0);
   const [manualOpen, setManualOpen] = createSignal(false);
+  const [settingsOpen, setSettingsOpen] = createSignal(false);
 
   createEffect(() => {
     const g = props.game;
@@ -201,6 +203,11 @@ export function GameDetailPanel(props: Props) {
                     ⊞ Manual
                   </button>
                 </Show>
+                <Show when={isInstalled()}>
+                  <button class="game-detail-btn btn-settings" onClick={() => setSettingsOpen(true)}>
+                    ⚙
+                  </button>
+                </Show>
                 <Show when={!isInstalled() && isDownloading()}>
                   <div class="game-detail-btn btn-downloading">
                     <AutoProgress
@@ -373,6 +380,12 @@ export function GameDetailPanel(props: Props) {
           kind={metadata()?.manual_kind ?? null}
           open={manualOpen()}
           onClose={() => setManualOpen(false)}
+        />
+        <GameSettingsDialog
+          gameId={props.game?.id ?? null}
+          gameTitle={props.game?.title ?? ""}
+          open={settingsOpen()}
+          onClose={() => setSettingsOpen(false)}
         />
       </Portal>
     </Show>

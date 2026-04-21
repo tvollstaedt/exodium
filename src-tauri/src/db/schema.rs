@@ -83,6 +83,13 @@ pub fn create_tables(conn: &Connection) -> DbResult<()> {
         CREATE INDEX IF NOT EXISTS idx_games_language ON games(language);
         CREATE INDEX IF NOT EXISTS idx_games_shortcode ON games(shortcode);
         CREATE INDEX IF NOT EXISTS idx_games_installed ON games(installed);
+        CREATE TABLE IF NOT EXISTS game_config (
+            game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+            key     TEXT NOT NULL,
+            value   TEXT NOT NULL,
+            PRIMARY KEY (game_id, key)
+        );
+
         CREATE INDEX IF NOT EXISTS idx_images_game_id ON images(game_id);
         CREATE INDEX IF NOT EXISTS idx_downloads_game_id ON downloads(game_id);
         CREATE INDEX IF NOT EXISTS idx_downloads_status ON downloads(status);

@@ -96,6 +96,27 @@ export async function getRecentlyPlayed(limit?: number): Promise<Game[]> {
   return invoke("get_recently_played", { limit });
 }
 
+export interface GameSettings {
+  glshader: string | null;
+  fullscreen: string | null;
+  cycles: string | null;
+  custom_conf: string | null;
+}
+
+export async function getGameSettings(id: number): Promise<GameSettings> {
+  return invoke("get_game_settings", { id });
+}
+
+export async function setGameSettings(
+  id: number,
+  glshader: string | null,
+  fullscreen: string | null,
+  cycles: string | null,
+  customConf: string | null,
+): Promise<void> {
+  return invoke("set_game_settings", { id, glshader, fullscreen, cycles, customConf });
+}
+
 export async function getGame(id: number): Promise<Game | null> {
   return invoke("get_game", { id });
 }

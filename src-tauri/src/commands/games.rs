@@ -1053,6 +1053,56 @@ fn ensure_dosbox_shaders(app: &AppHandle) {
     }
 }
 
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct GameSettings {
+    pub glshader: Option<String>,
+    pub fullscreen: Option<String>,
+    pub cycles: Option<String>,
+    pub custom_conf: Option<String>,
+}
+
+#[tauri::command]
+pub fn get_game_settings(state: State<DbState>, id: i64) -> Result<GameSettings, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let cfg = queries::get_all_game_config(&conn, id).map_err(|e| e.to_string())?;
+    Ok(GameSettings {
+        glshader: cfg.get("glshader").cloned(),
+        fullscreen: cfg.get("fullscreen").cloned(),
+        cycles: cfg.get("cycles").cloned(),
+        custom_conf: cfg.get("custom_conf").cloned(),
+    })
+}
+
+#[tauri::command]
+pub fn set_game_settings(
+    state: State<DbState>,
+    id: i64,
+    glshader: Option<String>,
+    fullscreen: Option<String>,
+    cycles: Option<String>,
+    custom_conf: Option<String>,
+) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    // For each key: Some(value) = set, None = delete (inherit global)
+    let pairs: &[(&str, &Option<String>)] = &[
+        ("glshader", &glshader),
+        ("fullscreen", &fullscreen),
+        ("cycles", &cycles),
+        ("custom_conf", &custom_conf),
+    ];
+    for (key, val) in pairs {
+        match val {
+            Some(v) if !v.is_empty() => {
+                queries::set_game_config(&conn, id, key, v).map_err(|e| e.to_string())?;
+            }
+            _ => {
+                queries::delete_game_config(&conn, id, key).map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn get_recently_played(state: State<DbState>, limit: Option<usize>) -> Result<Vec<Game>, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
@@ -1064,7 +1114,7 @@ pub fn get_recently_played(state: State<DbState>, limit: Option<usize>) -> Resul
 pub fn launch_game(app: AppHandle, db_state: State<DbState>, id: i64) -> Result<String, String> {
     // Read everything we need from the DB and drop the lock before the heavy
     // DOSBox path resolution + process spawning below.
-    let (game, data_dir, crt_auto_enabled, fullscreen_enabled) = {
+    let (game, data_dir, crt_auto_enabled, fullscreen_enabled, per_game_config) = {
         let conn = db_state.0.lock().map_err(|e| e.to_string())?;
         let game = queries::fetch_game_by_id(&conn, id)
             .map_err(|e| e.to_string())?
@@ -1074,15 +1124,16 @@ pub fn launch_game(app: AppHandle, db_state: State<DbState>, id: i64) -> Result<
             .ok_or("Data directory not configured. Run setup first.")?;
         let global_glshader = queries::get_config(&conn, "global_glshader")
             .map_err(|e| e.to_string())?
-            .unwrap_or_else(|| "default".to_string());
+            .unwrap_or_else(|| "crt-auto".to_string());
         let default_fullscreen = queries::get_config(&conn, "default_fullscreen")
             .map_err(|e| e.to_string())?
             .unwrap_or_else(|| "window".to_string());
+        let per_game_config = queries::get_all_game_config(&conn, id).map_err(|e| e.to_string())?;
         // Record the launch timestamp for "Recently Played" shelf.
         if let Err(e) = queries::set_last_played(&conn, id) {
             log::warn!("Failed to update last_played for {}: {}", game.title, e);
         }
-        (game, data_dir, global_glshader == "crt-auto", default_fullscreen == "fullscreen")
+        (game, data_dir, global_glshader == "crt-auto", default_fullscreen == "fullscreen", per_game_config)
     }; // lock dropped here — before path resolution + DOSBox spawning
 
     if !game.installed {
@@ -1307,6 +1358,43 @@ pub fn launch_game(app: AppHandle, db_state: State<DbState>, id: i64) -> Result<
         std::fs::write(&conf_path, &frag)
             .map_err(|e| format!("Failed to write global override conf: {e}"))?;
         cmd.arg("-conf").arg(&conf_path);
+    }
+
+    // Per-game overrides (last-wins over global). Only written if the user has
+    // configured game-specific settings via the Game Settings dialog.
+    {
+        let game_conf_path = std::path::Path::new(&data_dir)
+            .join(format!("exodium_game_{}.conf", id));
+        if per_game_config.is_empty() {
+            // Clean up stale conf file from a previous configuration.
+            let _ = std::fs::remove_file(&game_conf_path);
+        } else {
+            let mut frag = String::new();
+            if let Some(fs) = per_game_config.get("fullscreen") {
+                frag.push_str(&format!("[sdl]\nfullscreen = {}\n", fs));
+            }
+            if let Some(gs) = per_game_config.get("glshader") {
+                if gs != "default" {
+                    frag.push_str(&format!("[render]\nglshader = {}\n", gs));
+                }
+            }
+            if let Some(cy) = per_game_config.get("cycles") {
+                frag.push_str(&format!("[cpu]\ncycles = {}\n", cy));
+            }
+            if let Some(custom) = per_game_config.get("custom_conf") {
+                let trimmed = custom.trim();
+                if !trimmed.is_empty() {
+                    frag.push('\n');
+                    frag.push_str(trimmed);
+                    frag.push('\n');
+                }
+            }
+            if !frag.is_empty() {
+                std::fs::write(&game_conf_path, &frag)
+                    .map_err(|e| format!("Failed to write per-game conf: {e}"))?;
+                cmd.arg("-conf").arg(&game_conf_path);
+            }
+        }
     }
 
     // macOS dev builds: the binary extracted from the .app DMG has a bundle-anchored

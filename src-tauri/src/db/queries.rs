@@ -431,6 +431,39 @@ pub fn set_config(conn: &Connection, key: &str, value: &str) -> DbResult<()> {
     Ok(())
 }
 
+// ── Per-game config (game_config table) ─────────────────────────────────────
+
+pub fn set_game_config(conn: &Connection, game_id: i64, key: &str, value: &str) -> DbResult<()> {
+    conn.execute(
+        "INSERT INTO game_config (game_id, key, value) VALUES (?1, ?2, ?3)
+         ON CONFLICT(game_id, key) DO UPDATE SET value = excluded.value",
+        params![game_id, key, value],
+    )?;
+    Ok(())
+}
+
+pub fn delete_game_config(conn: &Connection, game_id: i64, key: &str) -> DbResult<()> {
+    conn.execute(
+        "DELETE FROM game_config WHERE game_id = ?1 AND key = ?2",
+        params![game_id, key],
+    )?;
+    Ok(())
+}
+
+pub fn get_all_game_config(
+    conn: &Connection,
+    game_id: i64,
+) -> DbResult<std::collections::HashMap<String, String>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT key, value FROM game_config WHERE game_id = ?1",
+    )?;
+    let map = stmt
+        .query_map(params![game_id], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(map)
+}
+
 /// Trait extension to make `.optional()` work on rusqlite results.
 trait OptionalRow<T> {
     fn optional(self) -> Result<Option<T>, rusqlite::Error>;

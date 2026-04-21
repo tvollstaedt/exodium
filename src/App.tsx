@@ -116,7 +116,7 @@ function App() {
         getConfig("global_glshader"),
         getConfig("default_fullscreen"),
       ]);
-      setCrtAuto(shader === "crt-auto");
+      setCrtAuto(shader == null || shader === "crt-auto");
       setDefaultFullscreen(fs === "fullscreen");
     } catch (e) {
       console.warn("[settings] failed to load game defaults:", e);
