@@ -13,6 +13,37 @@ use walkdir::WalkDir;
 
 use super::TorrentIndex;
 
+/// Convert a path to its NT extended-length form on Windows (`\\?\C:\...` or
+/// `\\?\UNC\server\share\...`). On other platforms this is a no-op.
+///
+/// The prefix tells the Win32 API to skip path normalization and the
+/// MAX_PATH (260) check, allowing paths up to 32 767 characters. librqbit
+/// passes the output folder verbatim to the file writer, so prefixing it
+/// here is enough — every file it later opens inherits the long-path mode.
+#[cfg(target_os = "windows")]
+fn to_long_path(p: &Path) -> String {
+    // \\?\ disables path normalization, so we must hand it backslash-only paths.
+    // Tauri's dialog and PathBuf::join sometimes leave forward slashes from
+    // user-provided strings; normalize before prefixing.
+    let s = p.to_string_lossy().replace('/', r"\");
+    if s.starts_with(r"\\?\") {
+        return s;
+    }
+    if !p.is_absolute() {
+        return s;
+    }
+    if let Some(rest) = s.strip_prefix(r"\\") {
+        // UNC path: \\server\share\... -> \\?\UNC\server\share\...
+        return format!(r"\\?\UNC\{}", rest);
+    }
+    format!(r"\\?\{}", s)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn to_long_path(p: &Path) -> String {
+    p.to_string_lossy().into_owned()
+}
+
 /// Remove 0-byte placeholder files created by librqbit, except those being downloaded.
 fn cleanup_placeholder_files(root: &Path, keep: &HashSet<PathBuf>) -> std::io::Result<()> {
     let mut removed = 0;
@@ -191,27 +222,11 @@ impl DownloadManager {
             let selected = self.selected_files.read().await.clone();
             // Explicitly set output_folder to torrent_root so downloads land in data_dir,
             // not in the session's default output folder (which is app_data_dir).
-            let output_folder = self.torrent_root().to_string_lossy().into_owned();
-
-            // Windows MAX_PATH preflight: individual file paths inside the torrent
-            // add ~80-120 chars on top of the output_folder. If that combined length
-            // would exceed 260, writes fail silently and the handle stays un-advanced
-            // (user sees "Starting download..." forever). Reject upfront with a clear
-            // error advising a shorter data_dir.
-            #[cfg(target_os = "windows")]
-            {
-                const MAX_PATH: usize = 260;
-                const RESERVED_FOR_NESTED_FILES: usize = 120;
-                if output_folder.len() + RESERVED_FOR_NESTED_FILES > MAX_PATH {
-                    return Err(anyhow::anyhow!(
-                        "Data directory path is too long for Windows ({} chars, max ~{}). \
-                         Nested torrent file paths would exceed MAX_PATH (260). \
-                         Move your data directory closer to the drive root (e.g. C:\\Exodium).",
-                        output_folder.len(),
-                        MAX_PATH - RESERVED_FOR_NESTED_FILES
-                    ));
-                }
-            }
+            // On Windows, prefix with \\?\ so file writes use the NT extended-length
+            // path API (32 768-char limit) instead of the legacy MAX_PATH (260).
+            // Without this, deeply nested torrent entries silently fail to open and
+            // the download appears stuck at 0%.
+            let output_folder = to_long_path(&self.torrent_root());
             let response = self
                 .session
                 .add_torrent(

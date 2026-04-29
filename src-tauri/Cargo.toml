@@ -50,7 +50,11 @@ tokio = { version = "1", features = ["fs", "sync"] }
 lava_torrent = "0.11"
 
 # Torrent downloading
-librqbit = "8"
+# Pinned to v9.0.0-beta.2 git tag — 8.x silently stalls Windows downloads at 0%
+# because it does NOT use sparse files on NTFS, so it tries to pre-allocate the
+# full multi-100-GB torrent before any pieces transfer. Upstream PR #390 fixed
+# this only on the v9 line. Stable 8.1.1 (latest on crates.io) lacks the fix.
+librqbit = { git = "https://github.com/ikatson/rqbit", tag = "v9.0.0-beta.2" }
 
 # HTTP client (content pack downloads)
 reqwest = { version = "0.12", default-features = false, features = ["stream", "rustls-tls"] }
