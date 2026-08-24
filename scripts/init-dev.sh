@@ -48,7 +48,9 @@ if [[ -d "$THUMB_DIR" ]]; then
   THUMB_COUNT=$(ls "$THUMB_DIR" | wc -l | tr -d ' ')
 fi
 
-if [[ "$FORCE" -eq 0 && "$THUMB_COUNT" -gt 100 ]]; then
+# Explicit pack flags must get past this: their download sections come later,
+# and the per-pack thumbnail passes are idempotent anyway.
+if [[ "$FORCE" -eq 0 && "$PACKS_EXPLICIT" -eq 0 && "$THUMB_COUNT" -gt 100 ]]; then
   echo "Thumbnails already present ($THUMB_COUNT files). Use --force to regenerate."
   exit 0
 fi
