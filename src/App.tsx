@@ -252,7 +252,7 @@ function App() {
     loadThumbnailDir();
     refreshInstalledPacks();
     try {
-      const count = await scanInstalledGames();
+      const count = await scanInstalledGames(true);
       showToast(`${count} game${count !== 1 ? "s" : ""} found in the new folder`, "success");
     } catch (e) {
       showToast("No games found in that folder", "error", { detail: String(e) });
@@ -267,7 +267,7 @@ function App() {
     setScanning(true);
     setScanResult("");
     try {
-      const count = await scanInstalledGames();
+      const count = await scanInstalledGames(true);
       setScanResult(`${count} game${count !== 1 ? "s" : ""} marked as installed`);
       fetchGames();
     } catch (e) {

@@ -207,6 +207,28 @@ One row per shortcode returned to the frontend (`PRIMARY_ROW_CONDITION` in `quer
 
 This lets the "My Games" view show a download progress card immediately when the user clicks download, before extraction finishes.
 
+**The library follows the user's intent, never the disk.** A torrent piece is
+8 MiB and most eXoDOS archives are far smaller, so downloading one game
+delivers whichever neighbours share its pieces - complete, valid archives, not
+fragments (`Wolfenstein 3D` brings `Wolfendoom` and `ROTT Part 2`; `util.zip`
+brings the four ZZT titles that sit in front of it). `scan_installed_games`
+used to mark every archive over 1 KB as `installed = 1, in_library = 1`, which
+turned four installed games into seventeen for one user. So: pass 2 may only
+CONFIRM rows that are already `in_library`, `adopt_from_disk` (import, the
+Rescan button, a data-dir change - never the startup scan) is the only way an
+archive creates an entry, and `clear_collateral_library_entries` drops rows
+whose every piece is covered by a file that WAS requested. Do not try to solve
+this by inspecting the archives: they are complete, so integrity tells you
+nothing - the torrent's geometry does. Sizes come from the bundled `.torrent`
+(`download_size` is ZIP + GameData and would reject every game with extras).
+Cleanup and adoption are opposites and never run in the same pass, and an
+IMPORTED install (`library_from_disk`, written by `setup_from_local`) is never
+cleaned at all - there the archives ARE the library, so "no piece of this was
+worth fetching on its own" describes every game the user owns. Sizing is
+lenient on both the import route and when no bundled torrent could be parsed:
+without a measure, rejecting every archive would flip a full installation to
+"not installed" and invite a re-download.
+
 ### 5. Save backup via atomic rename (not file-diff)
 On uninstall, the entire game directory is moved to `!save/<shortcode>/` (EN) or `<lang_dir>/!save/<shortcode>/` (LP variants - language-scoped since 0.8.4 so variants can't clobber each other's backup) via `std::fs::rename`. On reinstall, `extract_game_zip` restores it, probing the lang-scoped location first, then the legacy shared one. Simple, preserves every user modification, no `zip --dif` gymnastics.
 

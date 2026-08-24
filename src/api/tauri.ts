@@ -424,8 +424,12 @@ export async function getAvailableCollections(): Promise<CollectionInfo[]> {
   return invoke("get_available_collections");
 }
 
-export async function scanInstalledGames(): Promise<number> {
-  return invoke("scan_installed_games");
+/** `adopt` lets archives on disk ADD games to the library. Only pass it where
+ *  the user is asking what is in a folder (Rescan, data-dir change) - a
+ *  download drags its piece neighbours in with it, so the automatic scan must
+ *  confirm the library, not extend it. */
+export async function scanInstalledGames(adopt = false): Promise<number> {
+  return invoke("scan_installed_games", { adopt });
 }
 
 export async function getLogDir(): Promise<string> {

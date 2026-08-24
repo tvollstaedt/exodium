@@ -2428,6 +2428,10 @@ pub async fn setup_from_local(
         let conn = db_state.0.lock().map_err(|e| e.to_string())?;
         queries::set_config(&conn, "data_dir", &data_dir).map_err(|e| e.to_string())?;
         queries::set_config(&conn, "root_folder", &root_folder).map_err(|e| e.to_string())?;
+        // Remembered, not just passed to this one scan: every later startup
+        // scan has to know that on THIS install the archives on disk are the
+        // library, or it treats them as somebody else's download debris.
+        queries::set_config(&conn, "library_from_disk", "1").map_err(|e| e.to_string())?;
         let all_collections = COLLECTION_MAP.iter().map(|c| c.id).collect::<Vec<_>>().join(",");
         queries::set_config(&conn, "collections", &all_collections).map_err(|e| e.to_string())?;
     }
@@ -2719,22 +2723,217 @@ pub async fn setup_from_local(
     // (init_download_manager handles the bundled configs zip for fresh installs.)
 
     // Scan the existing eXoDOS tree to mark games that are already on disk as installed.
-    let installed_count = scan_installed_games_with_db(&db_state.0, &data_dir)
+    let installed_count = scan_installed_games_with_db(&db_state.0, &data_dir, true)
         .unwrap_or_else(|e| { log::warn!("scan_installed_games failed: {}", e); 0 });
     log::info!("Import from local complete: {} games, {} installed, data_dir={}", count, installed_count, data_dir);
 
     Ok(count)
 }
 
-/// Scan the eXoDOS directory tree and mark games whose directories exist on disk
-/// as `installed = 1, in_library = 1`.  Returns the number of rows updated.
+/// Torrent files that can ONLY have arrived as a side effect of downloading
+/// `requested`: every piece they occupy is also occupied by a requested file.
 ///
-/// This is called automatically at the end of `setup_from_local` and is also
-/// exposed as the `scan_installed_games` Tauri command so the user can re-run it
-/// from the Settings panel after manually adding game files.
+/// A piece is the smallest unit a torrent transfers (8 MiB for eXoDOS), and
+/// most eXoDOS archives are far smaller than that, so fetching one game
+/// physically delivers whichever neighbours share its pieces - complete and
+/// intact, not as fragments. That is why no integrity check can tell the two
+/// apart, and why this is decided from the torrent's geometry instead:
+/// a file none of whose pieces were worth fetching on their own was never
+/// asked for. Files sit in the piece space back to back, so this only ever
+/// catches immediate neighbours.
+fn collateral_file_indices(
+    index: &TorrentIndex,
+    requested: &std::collections::HashSet<usize>,
+) -> std::collections::HashSet<usize> {
+    let piece_len = index.piece_length;
+    if piece_len == 0 {
+        return Default::default();
+    }
+    let pieces_of = |f: &crate::torrent::TorrentFileEntry| -> (u64, u64) {
+        let last = f.offset + f.size.saturating_sub(1);
+        (f.offset / piece_len, last / piece_len)
+    };
+
+    let mut covered: std::collections::HashSet<u64> = Default::default();
+    for idx in requested {
+        if let Some(f) = index.files.get(*idx) {
+            let (first, last) = pieces_of(f);
+            covered.extend(first..=last);
+        }
+    }
+
+    index
+        .files
+        .iter()
+        .filter(|f| !requested.contains(&f.index) && f.size > 0)
+        .filter(|f| {
+            let (first, last) = pieces_of(f);
+            (first..=last).all(|p| covered.contains(&p))
+        })
+        .map(|f| f.index)
+        .collect()
+}
+
+/// Drop library entries for games that were never asked for: their archive is
+/// on disk only because it shared pieces with something that was.
+///
+/// Runs between the two scan passes, because it needs pass 1's verdict (an
+/// extracted directory is proof the user installed it) and has to be done
+/// before pass 2 would confirm the very rows it removes. Support archives
+/// Exodium fetches on the user's behalf count as requested - util.zip alone
+/// carries the last four eXoDOS games along with it.
+fn clear_collateral_library_entries(
+    db: &std::sync::Mutex<rusqlite::Connection>,
+    data_dir: &str,
+    indices: &std::collections::HashMap<&'static str, TorrentIndex>,
+) -> usize {
+    let torrent_root = game_root(data_dir);
+    let mut cleared = 0usize;
+
+    for (col_id, index) in indices {
+        let mut requested: std::collections::HashSet<usize> = Default::default();
+
+        // Everything pass 1 found extracted on disk, plus the shared GameData
+        // archives those installs pulled in.
+        {
+            let Ok(conn) = db.lock() else { continue };
+            let Ok(mut stmt) = conn.prepare(
+                "SELECT game_torrent_index, gamedata_torrent_index FROM games \
+                 WHERE installed = 1 AND torrent_source = ?1",
+            ) else {
+                continue;
+            };
+            let rows = stmt.query_map(rusqlite::params![col_id], |r| {
+                Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, Option<i64>>(1)?))
+            });
+            if let Ok(rows) = rows {
+                for (game, gamedata) in rows.flatten() {
+                    requested.extend(game.map(|i| i as usize));
+                    requested.extend(gamedata.map(|i| i as usize));
+                }
+            }
+        }
+
+        // Archives Exodium downloads by itself, recognised by the traces their
+        // extraction leaves. Without these, their neighbours look unexplained.
+        let support: [(&str, &str); 3] = [
+            ("util/util.zip", "eXo/mt32"),
+            ("!DOSmetadata.zip", "eXo/eXoDOS/!dos"),
+            ("util/utilWin9x.zip", "eXo/emulators/86Box98"),
+        ];
+        for (suffix, trace) in support {
+            let Some(f) = index.find_by_suffix(suffix) else { continue };
+            // Extracted already, or still arriving: bytes on disk are enough.
+            // Waiting for the trace would leave the neighbours of a util.zip
+            // that is still downloading unexplained - which is exactly when
+            // they show up. These archives are far too large to be collateral
+            // themselves.
+            let started = std::fs::metadata(torrent_root.join(&f.path))
+                .map(|m| m.len() > 0)
+                .unwrap_or(false);
+            if started || torrent_root.join(trace).exists() {
+                requested.insert(f.index);
+            }
+        }
+
+        if requested.is_empty() {
+            continue;
+        }
+
+        let collateral = collateral_file_indices(index, &requested);
+        if collateral.is_empty() {
+            continue;
+        }
+
+        // Only rows whose archive is REALLY on disk and complete. A missing or
+        // half-written file means the entry describes a download the user
+        // started and Exodium never finished - that one stays.
+        let candidates: Vec<(i64, usize)> = {
+            let Ok(conn) = db.lock() else { continue };
+            let Ok(mut stmt) = conn.prepare(
+                "SELECT id, game_torrent_index FROM games \
+                 WHERE in_library = 1 AND installed = 0 AND torrent_source = ?1 \
+                   AND game_torrent_index IS NOT NULL",
+            ) else {
+                continue;
+            };
+            let rows = stmt.query_map(rusqlite::params![col_id], |r| {
+                Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)? as usize))
+            });
+            match rows {
+                Ok(rows) => rows.flatten().filter(|(_, ti)| collateral.contains(ti)).collect(),
+                Err(_) => continue,
+            }
+        };
+
+        let stale: Vec<i64> = candidates
+            .into_iter()
+            .filter(|(_, ti)| {
+                index.files.get(*ti).is_some_and(|f| {
+                    std::fs::metadata(torrent_root.join(&f.path))
+                        .map(|m| m.len() == f.size)
+                        .unwrap_or(false)
+                })
+            })
+            .map(|(id, _)| id)
+            .collect();
+
+        if stale.is_empty() {
+            continue;
+        }
+
+        let placeholders = stale.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+        let sql = format!("UPDATE games SET in_library = 0 WHERE id IN ({})", placeholders);
+        if let Ok(conn) = db.lock() {
+            match conn.execute(&sql, rusqlite::params_from_iter(stale.iter())) {
+                Ok(n) => {
+                    log::info!(
+                        "scan_installed_games: dropped {} {} library entries whose archive \
+                         only arrived as a side effect of another download",
+                        n,
+                        col_id
+                    );
+                    cleared += n;
+                }
+                Err(e) => log::warn!("Failed to clear collateral entries: {}", e),
+            }
+        }
+    }
+
+    cleared
+}
+
+/// The bundled torrent index of every collection that keeps its own archives
+/// (the language packs overlay eXoDOS's paths and are matched by directory).
+fn scan_torrent_indices() -> std::collections::HashMap<&'static str, TorrentIndex> {
+    let mut out = std::collections::HashMap::new();
+    for col in COLLECTION_MAP.iter().filter(|c| c.lang_dir.is_none()) {
+        let Ok(path) = bundled_torrent_path(col.torrent_file) else { continue };
+        match TorrentIndex::from_file(&path) {
+            Ok(index) => {
+                out.insert(col.id, index);
+            }
+            Err(e) => log::warn!("scan: cannot parse {}: {}", col.torrent_file, e),
+        }
+    }
+    out
+}
+
+/// Scan the eXoDOS directory tree and mark games whose files exist on disk as
+/// installed.  Returns the number of rows updated.
+///
+/// `adopt_from_disk` decides whether a bare archive may CREATE a library
+/// entry. It must be false for the automatic scan at startup: a download
+/// delivers whichever neighbours share its pieces, so "an archive is here"
+/// is not the same as "the user wanted this game", and treating it as such
+/// filled libraries with games nobody asked for. It is true where the disk
+/// IS the answer the user asked for - importing an existing eXo installation,
+/// pointing Exodium at another folder, or pressing Rescan after copying games
+/// in by hand.
 fn scan_installed_games_with_db(
     db: &std::sync::Mutex<rusqlite::Connection>,
     data_dir: &str,
+    adopt_from_disk: bool,
 ) -> Result<usize, String> {
     // Each collection's extracted game data lives under its own tree
     // (<data_dir>/<inner_folder>/<game_prefix>):
@@ -2874,6 +3073,43 @@ fn scan_installed_games_with_db(
         total += rows;
     }
 
+    // Collateral archives are dropped from the library BEFORE pass 2, which
+    // would otherwise confirm the very rows this removes.
+    let indices = scan_torrent_indices();
+    // An imported eXo installation IS its library: the games arrived as
+    // archives, not as downloads, so "no piece of this was worth fetching on
+    // its own" describes every one of them. Running the cleanup there took
+    // games the user owns out of My Games on the first start after the import,
+    // and no later automatic scan could put them back.
+    let disk_is_library = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        queries::get_config(&conn, "library_from_disk")
+            .ok()
+            .flatten()
+            .as_deref()
+            == Some("1")
+    };
+    if !adopt_from_disk && !disk_is_library {
+        clear_collateral_library_entries(db, data_dir, &indices);
+    }
+
+    // Sizes to measure the files on disk against. A torrent entry is 0 bytes
+    // until it is fetched, and a neighbouring download leaves piece-sized
+    // partials, so "the file exists" says nothing about it being downloaded.
+    let expected_sizes: std::collections::HashMap<String, u64> = indices
+        .values()
+        .flat_map(|i| i.files.iter())
+        .map(|f| (f.path.clone(), f.size))
+        .collect();
+    let torrent_root = game_root(data_dir);
+    let lenient_sizes = adopt_from_disk || expected_sizes.is_empty();
+    if expected_sizes.is_empty() {
+        log::warn!(
+            "scan_installed_games: no bundled torrent could be parsed - falling back to the \
+             old size floor, so piece-sized partials may read as installs"
+        );
+    }
+
     // Pass 2: detect downloaded-but-not-extracted game ZIPs → mark as installed + in_library.
     // All eXoDOS game ZIPs live at game_base/<title with year>.zip regardless of collection.
     // This mirrors LaunchBox behavior where games stay as ZIPs until first launch.
@@ -2895,9 +3131,10 @@ fn scan_installed_games_with_db(
         // so the second run no longer considered those rows and reported a
         // smaller number - and any game that exists only as a ZIP quietly lost
         // its installed flag (observed: 112, then 67, then 63).
+        let intent_filter = if adopt_from_disk { "" } else { "AND in_library = 1 " };
         let zip_query = format!(
             "SELECT id, title, application_path FROM games \
-             WHERE installed = 0 \
+             WHERE installed = 0 {intent_filter}\
              AND torrent_source NOT IN ({})",
             lp_placeholders
         );
@@ -2935,11 +3172,34 @@ fn scan_installed_games_with_db(
                 Ok(entries) => entries
                     .filter_map(|e| e.ok())
                     .filter(|e| {
-                        e.path()
+                        let path = e.path();
+                        if !path
                             .extension()
                             .is_some_and(|ext| ext.eq_ignore_ascii_case("zip"))
-                            // Skip zero-byte stubs and tiny torrent placeholders (<1 KB)
-                            && e.metadata().map(|m| m.len() >= 1024).unwrap_or(false)
+                        {
+                            return false;
+                        }
+                        // Complete, measured against the torrent: a 1 KB floor
+                        // let piece-sized partials of a neighbouring download
+                        // pass as installs (a 376 MB game arriving as 8 MB).
+                        let len = match e.metadata() {
+                            Ok(m) => m.len(),
+                            Err(_) => return false,
+                        };
+                        // Lenient where measuring is impossible or wrong:
+                        // without a parsed torrent there is nothing to compare
+                        // against (and flipping every ZIP-only game to "not
+                        // installed" would invite a re-download), and an
+                        // imported tree may legitimately hold repacked
+                        // archives the bundled torrent never described.
+                        if lenient_sizes {
+                            return len >= 1024;
+                        }
+                        let Ok(rel) = path.strip_prefix(&torrent_root) else {
+                            return false;
+                        };
+                        let rel = rel.to_string_lossy().replace('\\', "/");
+                        expected_sizes.get(&rel).is_some_and(|expected| len == *expected)
                     })
                     .filter_map(|e| {
                         let stem = e.path().file_stem()?.to_string_lossy().into_owned();
@@ -3020,18 +3280,24 @@ fn scan_installed_games_with_db(
     Ok(total)
 }
 
-/// Re-scan the eXoDOS directory tree to detect games already downloaded to disk,
-/// marking them as `installed` and `in_library`.  Returns the count of games updated.
+/// Re-scan the eXoDOS directory tree to detect games already downloaded to disk.
+/// Returns the count of games updated.
+///
+/// `adopt` (default false) hands the disk the authority to add games to the
+/// library - see `scan_installed_games_with_db`. The startup scan omits it;
+/// the Rescan button and a data-directory change pass true, because there the
+/// user is asking what is in the folder.
 #[tauri::command]
 pub async fn scan_installed_games(
     db_state: State<'_, DbState>,
+    adopt: Option<bool>,
 ) -> Result<usize, String> {
     let data_dir = {
         let conn = db_state.0.lock().map_err(|e| e.to_string())?;
         queries::get_config(&conn, "data_dir").map_err(|e| e.to_string())?
     };
     let data_dir = data_dir.ok_or("data_dir not configured")?;
-    scan_installed_games_with_db(&db_state.0, &data_dir)
+    scan_installed_games_with_db(&db_state.0, &data_dir, adopt.unwrap_or(false))
 }
 
 /// Result of validating a candidate eXoDOS installation directory.
@@ -3414,7 +3680,9 @@ mod scan_tests {
         // One extracted game and one that only exists as a ZIP.
         let base = dir.join("eXoDOS/eXo/eXoDOS");
         std::fs::create_dir_all(base.join("SQ5")).unwrap();
-        std::fs::write(base.join("Capitalism (1995).zip"), vec![0u8; 2048]).unwrap();
+        // Sized like the torrent says, sparse - a ZIP now counts as an install
+        // only at its full length.
+        write_sparse_zip(&base.join("Capitalism (1995).zip"), "eXo/eXoDOS/Capitalism (1995).zip");
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         crate::db::init(&conn).unwrap();
@@ -3431,10 +3699,10 @@ mod scan_tests {
         let data_dir = dir.to_string_lossy().to_string();
 
         // A data dir without any collection tree must not clear the library.
-        assert!(scan_installed_games_with_db(&db, "/nonexistent/exodium").is_err());
+        assert!(scan_installed_games_with_db(&db, "/nonexistent/exodium", true).is_err());
 
-        let first = scan_installed_games_with_db(&db, &data_dir).unwrap();
-        let second = scan_installed_games_with_db(&db, &data_dir).unwrap();
+        let first = scan_installed_games_with_db(&db, &data_dir, true).unwrap();
+        let second = scan_installed_games_with_db(&db, &data_dir, true).unwrap();
         assert_eq!(first, 2, "one extracted dir + one ZIP");
         assert_eq!(second, first, "a second scan must not shrink");
 
@@ -3449,6 +3717,217 @@ mod scan_tests {
             )
             .unwrap();
         assert_eq!(installed, 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Create `path` with the length the bundled eXoDOS torrent declares for
+    /// `rel`, without writing that many bytes.
+    fn write_sparse_zip(path: &std::path::Path, rel: &str) -> u64 {
+        let indices = scan_torrent_indices();
+        let size = indices
+            .get("eXoDOS")
+            .and_then(|i| i.find_by_path(rel))
+            .unwrap_or_else(|| panic!("{rel} missing from the bundled torrent"))
+            .size;
+        let f = std::fs::File::create(path).unwrap();
+        f.set_len(size).unwrap();
+        size
+    }
+
+    fn torrent_index_of(rel: &str) -> i64 {
+        scan_torrent_indices()
+            .get("eXoDOS")
+            .and_then(|i| i.find_by_path(rel))
+            .unwrap_or_else(|| panic!("{rel} missing from the bundled torrent"))
+            .index as i64
+    }
+
+    /// The geometry that produces phantom installs: a piece is 8 MiB and most
+    /// eXoDOS archives are smaller, so fetching one file delivers whichever
+    /// neighbours share its pieces. A file with a piece of its own was asked
+    /// for and must never be mistaken for a side effect.
+    #[test]
+    fn only_files_sharing_every_piece_count_as_collateral() {
+        let piece = 1000u64;
+        let mk = |index: usize, size: u64, offset: u64| crate::torrent::TorrentFileEntry {
+            index,
+            path: format!("f{index}.zip"),
+            size,
+            offset,
+        };
+        let index = TorrentIndex {
+            name: "t".into(),
+            // 0: 0..500, 1: 500..900 (both inside piece 0), 2: 900..3000
+            // (pieces 0-2, so pieces 1 and 2 are its own).
+            files: vec![mk(0, 500, 0), mk(1, 400, 500), mk(2, 2100, 900)],
+            total_size: 3000,
+            piece_length: piece,
+        };
+
+        let collateral = collateral_file_indices(&index, &[0usize].into_iter().collect());
+        assert!(collateral.contains(&1), "a neighbour inside the same piece came along");
+        assert!(
+            !collateral.contains(&2),
+            "a file with pieces of its own was downloaded on purpose"
+        );
+
+        // Nothing requested, nothing collateral - the guard against an empty
+        // library wiping itself.
+        assert!(collateral_file_indices(&index, &Default::default()).is_empty());
+    }
+
+    /// The reported bug: downloading Wolfenstein 3D put Wolfendoom in the
+    /// library, because the scan read every archive on disk as an install.
+    #[test]
+    fn collateral_neighbours_do_not_enter_the_library() {
+        let dir = std::env::temp_dir().join(format!("exodium_collateral_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let base = dir.join("eXoDOS/eXo/eXoDOS");
+        std::fs::create_dir_all(base.join("WOLF3D")).unwrap();
+        write_sparse_zip(&base.join("Wolfendoom (2000).zip"), "eXo/eXoDOS/Wolfendoom (2000).zip");
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::init(&conn).unwrap();
+        conn.execute(
+            r"INSERT INTO games (title, platform, language, shortcode, torrent_source,
+                                 application_path, game_torrent_index, installed, in_library)
+              VALUES ('Wolfenstein 3D', 'MS-DOS', 'EN', 'WOLF3D', 'eXoDOS',
+                      'eXo\eXoDOS\!dos\WOLF3D\Wolfenstein 3D (1992).bat', ?1, 0, 1)",
+            rusqlite::params![torrent_index_of("eXo/eXoDOS/Wolfenstein 3D (1992).zip")],
+        )
+        .unwrap();
+        conn.execute(
+            r"INSERT INTO games (title, platform, language, shortcode, torrent_source,
+                                 application_path, game_torrent_index, installed, in_library)
+              VALUES ('Wolfendoom', 'MS-DOS', 'EN', 'WOLFDOOM', 'eXoDOS',
+                      'eXo\eXoDOS\!dos\WOLFDOOM\Wolfendoom (2000).bat', ?1, 0, 1)",
+            rusqlite::params![torrent_index_of("eXo/eXoDOS/Wolfendoom (2000).zip")],
+        )
+        .unwrap();
+        let db = std::sync::Mutex::new(conn);
+        let data_dir = dir.to_string_lossy().to_string();
+
+        scan_installed_games_with_db(&db, &data_dir, false).unwrap();
+        let (installed, in_library): (i64, i64) = db
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT installed, in_library FROM games WHERE shortcode = 'WOLFDOOM'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(in_library, 0, "an archive nobody asked for leaves the library");
+        assert_eq!(installed, 0, "and it is not an install either");
+
+        // Asking the disk directly is the one case where it may add games.
+        scan_installed_games_with_db(&db, &data_dir, true).unwrap();
+        let adopted: i64 = db
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT installed FROM games WHERE shortcode = 'WOLFDOOM'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(adopted, 1, "Rescan and import still adopt what is on disk");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An imported eXo installation is its own library: the games arrived as
+    /// archives, so "no piece of this was worth fetching" describes all of
+    /// them. Cleaning up there took games the user owns out of My Games on the
+    /// first start after the import.
+    #[test]
+    fn an_imported_library_is_never_treated_as_collateral() {
+        let dir = std::env::temp_dir().join(format!("exodium_imported_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let base = dir.join("eXoDOS/eXo/eXoDOS");
+        std::fs::create_dir_all(base.join("WOLF3D")).unwrap();
+        write_sparse_zip(&base.join("Wolfendoom (2000).zip"), "eXo/eXoDOS/Wolfendoom (2000).zip");
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::init(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO config (key, value) VALUES ('library_from_disk', '1')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            r"INSERT INTO games (title, platform, language, shortcode, torrent_source,
+                                 application_path, game_torrent_index, installed, in_library)
+              VALUES ('Wolfenstein 3D', 'MS-DOS', 'EN', 'WOLF3D', 'eXoDOS',
+                      'eXo\eXoDOS\!dos\WOLF3D\Wolfenstein 3D (1992).bat', ?1, 0, 1)",
+            rusqlite::params![torrent_index_of("eXo/eXoDOS/Wolfenstein 3D (1992).zip")],
+        )
+        .unwrap();
+        conn.execute(
+            r"INSERT INTO games (title, platform, language, shortcode, torrent_source,
+                                 application_path, game_torrent_index, installed, in_library)
+              VALUES ('Wolfendoom', 'MS-DOS', 'EN', 'WOLFDOOM', 'eXoDOS',
+                      'eXo\eXoDOS\!dos\WOLFDOOM\Wolfendoom (2000).bat', ?1, 0, 1)",
+            rusqlite::params![torrent_index_of("eXo/eXoDOS/Wolfendoom (2000).zip")],
+        )
+        .unwrap();
+        let db = std::sync::Mutex::new(conn);
+
+        // The automatic scan, the one that would have dropped it.
+        scan_installed_games_with_db(&db, &dir.to_string_lossy(), false).unwrap();
+        let (installed, in_library): (i64, i64) = db
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT installed, in_library FROM games WHERE shortcode = 'WOLFDOOM'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(in_library, 1, "an imported game stays in the library");
+        assert_eq!(installed, 1, "and keeps reading as installed");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A neighbouring download leaves piece-sized partials behind. Those are
+    /// not installs, and the old 1 KB floor let them through.
+    #[test]
+    fn a_partial_archive_is_not_an_install() {
+        let dir = std::env::temp_dir().join(format!("exodium_partial_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let base = dir.join("eXoDOS/eXo/eXoDOS");
+        std::fs::create_dir_all(&base).unwrap();
+        let zip = base.join("Wolf (1994).zip");
+        let full = write_sparse_zip(&zip, "eXo/eXoDOS/Wolf (1994).zip");
+        // 8 MiB of a 376 MB archive: one piece of a neighbour's download.
+        std::fs::File::create(&zip).unwrap().set_len(8 * 1024 * 1024).unwrap();
+        assert!(full > 8 * 1024 * 1024);
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::init(&conn).unwrap();
+        conn.execute(
+            r"INSERT INTO games (title, platform, language, shortcode, torrent_source,
+                                 application_path, game_torrent_index, installed, in_library)
+              VALUES ('Wolf', 'MS-DOS', 'EN', 'WOLF', 'eXoDOS',
+                      'eXo\eXoDOS\!dos\WOLF\Wolf (1994).bat', ?1, 0, 1)",
+            rusqlite::params![torrent_index_of("eXo/eXoDOS/Wolf (1994).zip")],
+        )
+        .unwrap();
+        let db = std::sync::Mutex::new(conn);
+
+        let installed_after = |adopt: bool| -> i64 {
+            scan_installed_games_with_db(&db, &dir.to_string_lossy(), adopt).unwrap();
+            db.lock()
+                .unwrap()
+                .query_row("SELECT installed FROM games WHERE shortcode = 'WOLF'", [], |r| {
+                    r.get(0)
+                })
+                .unwrap()
+        };
+        assert_eq!(installed_after(false), 0, "a partial archive is not a playable game");
+        // Asking the disk directly is deliberately lenient: an imported tree
+        // may hold repacked archives the bundled torrent never described, and
+        // refusing those would report "no games found" on a full installation.
+        assert_eq!(installed_after(true), 1, "an explicit import trusts what it finds");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
