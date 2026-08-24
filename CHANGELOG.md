@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.13.2 - 2026-08-25
+
+### Fixed
+
+- On Windows, a large share of games opened the emulator and closed it again
+  within a second or two, leaving an empty log behind - DOOM II and Relentless:
+  Twinsen's Adventure among them. Their configuration mounts the game folder in
+  a form that Windows rejected once Exodium had rewritten the path to where the
+  games actually live, so no drive was mounted and nothing could start.
+- Games whose configuration mounts a folder without quoting it could not start
+  at all when the path to the game data contained a space. The mount stopped at
+  the space and pointed at a folder that does not exist.
+- A download brings its neighbours with it: game archives that share a piece
+  with the one you asked for arrive complete and unasked. Those used to be
+  added to My Library as if you had downloaded them - one library went from
+  four games to seventeen. The library now follows what you asked for; the
+  Rescan button and importing a folder still adopt whatever is on disk, because
+  there the disk IS the answer.
+- The prompt that offers to move older collection folders into one root now
+  says what skipping it costs: Exodium only looks in the new root, so the games
+  in the old folders read as not installed, and downloading one again writes a
+  second copy while the first keeps its disk space.
+
+### Added
+
+- Per-game emulator choice on Windows: games tuned for DOSBox ECE can be run
+  under DOSBox Staging instead, from the game's settings dialog. It is off by
+  default - eXo picked ECE for a reason. The reason to switch is CRT shaders,
+  which are a Staging feature; on ECE the setting is dropped rather than
+  applied, and the dialog now says so next to the disabled control instead of
+  leaving you looking for the file it got stuck in.
+
 ## 0.13.1 - 2026-08-14
 
 ### Fixed

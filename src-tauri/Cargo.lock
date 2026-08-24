@@ -1417,7 +1417,7 @@ dependencies = [
 
 [[package]]
 name = "exodium"
-version = "0.13.1"
+version = "0.13.2"
 dependencies = [
  "anyhow",
  "axum",
