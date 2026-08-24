@@ -385,6 +385,29 @@ fallback (`find_lp_launch`, which itself prefers the EN autoexec's command)
 kick in. History: heuristics-first produced launch-and-exit bugs (Cobra
 Mission ES: bare root-level CM.EXE, no .bat - all heuristics missed it).
 
+**A substituted host path must never keep a trailing separator, and must be
+quoted when it carries a space.** Both rules exist because the rewrite turns a
+short relative token into a long absolute one, and DOSBox treats the two
+differently. It strips a trailing BACKSLASH before `stat()`ing a mount target
+("Removing trailing backslash if not root dir so stat will succeed") - Windows
+only, matching `\` alone, so our forward slash walks past it and the mount
+fails: `mount c .\eXoDOS\` is how 1,570 eXoDOS configs (DOOM II, Relentless)
+and 91 eXoWin3x ones are written, and every one of them opened the emulator
+and closed it again within seconds, exit code 0, empty log. POSIX `stat`
+accepts the trailing slash, which is why it was invisible on the dev machine
+for a year. The space rule is the same shape: eXo leaves that argument
+unquoted because `.\eXoDOS\` has none, but `D:\My Games\…` does, and DOSBox
+splits a command's arguments on whitespace. `on_mount_line` limits the added
+quotes to `mount`/`imgmount` arguments - a config PROPERTY is read verbatim,
+so quotes there would land inside the path.
+
+**An empty `dosbox-<id>.log` on Windows is not evidence of a silent
+emulator.** ECE is an SDL 1.2 app, and SDL's WinMain reopens stdout and stderr
+as `stdout.txt`/`stderr.txt` in the working directory unless the build defines
+`NO_STDIO_REDIRECT` - which would overwrite our redirect before DOSBox prints
+its first line. Unconfirmed against eXo's build, but it is the first place to
+look for a failed mount: `<root>/eXo/stdout.txt`.
+
 ### 10. The manifest, and why there is no catalogue update check
 
 `manifest.json` (tracked in git) carries the SHA1 `torrent_infohash` per

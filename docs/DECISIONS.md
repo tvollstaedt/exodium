@@ -18,3 +18,9 @@
 - Grund: Nutzer stellte global UND pro Spiel "on" und suchte die Config-Datei, in der der Wert haengt. Bei ECE wird er nicht ueberschrieben, sondern verworfen - ECE hat keine Shader-Pipeline (von 750 eXo-Confs mit `glshader` gehoeren 675 zu Staging-Varianten, 16 zu ece; ECE-Spiele bekommen `output=openglnb` plus Scaler).
 - Gotcha: `game_engine_info` liefert ZWEI Antworten - `ece_available` (gibt es die Wahl?) und `uses_ece` (was laeuft wirklich?). Der Dialog fragt die erste: mit der zweiten verschwand die Auswahl, sobald jemand Staging waehlte, und der Weg zurueck war weg.
 - Gotcha: Die Engine-Antwort haengt an Plattform, extrahiertem ECE-Build UND Override - das Frontend kann sie nicht ableiten, es fragt. Die Druckernotiz kippt mit dem Override auf "nicht verfuegbar", was korrekt ist: Drucken kann nur ECE.
+
+## 2026-08-25 - Substituierte Host-Pfade: kein Trailing Separator, Quoting nur fuer mount
+- Entscheidung: `to_working_dir` liefert nie einen Pfad mit abschliessendem `/`, und `rewrite_host_paths` setzt Anfuehrungszeichen um eine Ersetzung mit Leerzeichen - aber nur, wenn die Zeile ein `mount`/`imgmount` ist (`on_mount_line`).
+- Verworfen: unter Windows native Backslashes ausgeben. Das verwischt die Grenze Host-Pfad/Guest-DOS-Text wieder, die den kaputten Guest-`PATH` gekostet hat (1.122 Win3x-Spiele).
+- Grund: DOSBox entfernt vor dem `stat()` des Mount-Ziels nur einen abschliessenden BACKSLASH (Windows-Workaround); unser `/` rutscht durch, der Mount scheitert, das Autoexec laeuft in sein `exit`. Betrifft 1.570 eXoDOS-Confs (u.a. DOOM II) und 91 eXoWin3x-Confs, nur unter Windows - POSIX-`stat` akzeptiert den Trailing Slash, deshalb auf dem Dev-Rechner unsichtbar.
+- Gotcha: Quoting gehoert NUR an Kommandoargumente. Ein Config-Property (`fluid.soundfont=`) liest seinen Wert woertlich, dort wuerden die Anfuehrungszeichen Teil des Pfades.

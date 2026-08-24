@@ -2013,6 +2013,8 @@ fn lp_autoexec_compatible(
 pub(crate) fn rewrite_host_paths(text: &str, resolve: &dyn Fn(&str) -> String) -> String {
     let mut out = String::with_capacity(text.len() + 64);
     let mut rest = text;
+    // Byte offset of the current match in `text`, for the mount-line check.
+    let mut consumed = 0usize;
     while let Some(idx) = rest.find(".\\") {
         out.push_str(&rest[..idx]);
         let quoted = out.ends_with('"');
@@ -2020,11 +2022,57 @@ pub(crate) fn rewrite_host_paths(text: &str, resolve: &dyn Fn(&str) -> String) -
         let end = tail
             .find(|c: char| if quoted { c == '"' } else { c.is_whitespace() })
             .unwrap_or(tail.len());
-        out.push_str(&resolve(&tail[..end]));
+        let replacement = resolve(&tail[..end]);
+        // The substituted path can contain spaces the authored `.\`-relative
+        // one never did - they come from the user's data directory - and
+        // DOSBox splits a command's arguments on whitespace, so an unquoted
+        // `mount c .\eXoDOS\` under "D:\My Games\…" would mount "D:/My".
+        // Quote only what is an ARGUMENT: a config property takes its value
+        // literally, and quotes there would become part of the path.
+        if !quoted && replacement.contains(' ') && on_mount_line(text, consumed + idx) {
+            out.push('"');
+            out.push_str(&replacement);
+            out.push('"');
+        } else {
+            out.push_str(&replacement);
+        }
+        consumed += idx + 2 + end;
         rest = &tail[end..];
     }
     out.push_str(rest);
     out
+}
+
+/// Is the token at `pos` an argument of a `mount`/`imgmount` command?
+/// Those are the lines whose host path is parsed as a whitespace-split
+/// argument; everything else in a DOSBox conf reads its value verbatim.
+fn on_mount_line(text: &str, pos: usize) -> bool {
+    let line_start = text[..pos].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let head = text[line_start..pos].trim_start().trim_start_matches('@');
+    let cmd = head.split_whitespace().next().unwrap_or("");
+    cmd.eq_ignore_ascii_case("mount") || cmd.eq_ignore_ascii_case("imgmount")
+}
+
+/// Drop trailing separators from a substituted host path.
+///
+/// DOSBox strips a trailing BACKSLASH before it `stat()`s a mount target -
+/// its own workaround for a CRT that rejects one ("Removing trailing
+/// backslash if not root dir so stat will succeed"). That strip is Windows-
+/// only and matches `\` alone, so our forward slash walks straight past it:
+/// `mount c .\eXoDOS\` became `mount c G:/…/eXoDOS/`, stat failed, and the
+/// autoexec ran on into its `exit` - the emulator opened and closed again
+/// within seconds, with exit code 0 and nothing in the log. It hits the
+/// 1,570 eXoDOS configs (DOOM II among them) and 91 eXoWin3x ones that mount
+/// a directory with a trailing separator, and only on Windows: POSIX `stat`
+/// accepts one.
+fn trim_trailing_sep(path: &str) -> String {
+    let trimmed = path.trim_end_matches('/');
+    // Never shorten a root ("/" or "G:/") into something else.
+    if trimmed.is_empty() || trimmed.ends_with(':') {
+        path.to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 /// Patch a DOSBox config file: convert Windows-style relative paths to absolute Linux paths.
@@ -2066,7 +2114,7 @@ fn patch_dosbox_conf(
         }
         let resolved = format!("{}{}", abs_prefix, body.replace('\\', "/"));
         if std::path::Path::new(&resolved).exists() {
-            resolved
+            trim_trailing_sep(&resolved)
         } else {
             format!(".\\{}", body)
         }
@@ -2104,7 +2152,7 @@ fn patch_dosbox_conf(
                 if let Some(tail) = body.replace('\\', "/").strip_prefix(game_folder) {
                     let staged = format!("{}{}", staging_fwd, tail);
                     if std::path::Path::new(&staged).exists() {
-                        return staged;
+                        return trim_trailing_sep(&staged);
                     }
                 }
                 to_working_dir(body)
@@ -3915,6 +3963,76 @@ mod tests {
         // normalizes to forward slashes - normalize the expectation too.
         let abs_prefix = format!("{}/", working_dir.to_string_lossy()).replace('\\', "/");
         assert!(patched.contains(&abs_prefix), "absolute path prefix expected: {}", patched);
+    }
+
+    #[test]
+    fn mount_targets_keep_no_trailing_separator() {
+        // `mount c .\eXoDOS\` (1,570 eXoDOS configs, DOOM II among them).
+        // DOSBox strips a trailing BACKSLASH before stat()ing the target on
+        // Windows; our forward slash slips past that, stat fails, and the
+        // game exits into its own `exit` line seconds after opening.
+        let tmp = tempfile::tempdir().unwrap();
+        let working_dir = tmp.path();
+        fs::create_dir_all(working_dir.join("eXoDOS/DOOMII")).unwrap();
+
+        let conf_content = "[autoexec]\nmount c .\\eXoDOS\\\nc:\n@cd DOOMII\n@call run\nexit\n";
+        let conf_path = write_conf(working_dir, "dosbox.conf", conf_content);
+
+        let patched_path = patch_dosbox_conf(&conf_path, working_dir, None, true).unwrap();
+        let patched = fs::read_to_string(&patched_path).unwrap();
+
+        let mount_line = patched
+            .lines()
+            .find(|l| l.contains("mount c "))
+            .expect("mount line survives");
+        assert!(
+            !mount_line.trim_end().ends_with('/'),
+            "mount target must not end in a separator: {}",
+            mount_line
+        );
+        let expected = format!("{}/eXoDOS", working_dir.to_string_lossy()).replace('\\', "/");
+        assert!(
+            mount_line.contains(&expected),
+            "mount should point at the eXoDOS root: {}",
+            mount_line
+        );
+    }
+
+    #[test]
+    fn a_data_dir_with_spaces_gets_the_mount_argument_quoted() {
+        // eXo writes the mount target unquoted because `.\eXoDOS\SQ5` has no
+        // spaces. The substituted host path can - DOSBox would then mount
+        // everything up to the first one.
+        let tmp = tempfile::tempdir().unwrap();
+        let working_dir = tmp.path().join("My Games/eXo");
+        fs::create_dir_all(working_dir.join("eXoDOS/SQ5")).unwrap();
+
+        let conf_content =
+            "[midi]\nfluid.soundfont=.\\mt32\\SoundCanvas.sf2\n[autoexec]\n@mount c .\\eXoDOS\\SQ5\nc:\nSQ5.bat\nexit\n";
+        fs::create_dir_all(working_dir.join("mt32")).unwrap();
+        fs::write(working_dir.join("mt32/SoundCanvas.sf2"), b"").unwrap();
+        let conf_path = write_conf(&working_dir, "dosbox.conf", conf_content);
+
+        let patched_path = patch_dosbox_conf(&conf_path, &working_dir, None, false).unwrap();
+        let patched = fs::read_to_string(&patched_path).unwrap();
+
+        let mount_line = patched.lines().find(|l| l.contains("mount c ")).unwrap();
+        assert!(
+            mount_line.contains("\"") && mount_line.trim_end().ends_with('"'),
+            "mount argument with spaces must be quoted: {}",
+            mount_line
+        );
+        // A config property is read verbatim - quotes there would land in the
+        // path itself.
+        let sf_line = patched
+            .lines()
+            .find(|l| l.starts_with("fluid.soundfont="))
+            .unwrap();
+        assert!(
+            !sf_line.contains('"'),
+            "config values stay unquoted: {}",
+            sf_line
+        );
     }
 
     #[test]
