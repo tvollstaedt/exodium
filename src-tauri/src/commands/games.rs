@@ -1469,6 +1469,29 @@ fn resolve_game_conf(
     None
 }
 
+/// Which engine a DOS game actually launches under: `Some(path)` is eXo's own
+/// DOSBox ECE build, `None` means DOSBox Staging.
+///
+/// THE one place that answers this. `launch_game` picks the binary here, the
+/// detail panel labels the engine from it, and the printing and shader notes
+/// state their limitation from it - a second copy of the rule would drift, and
+/// a panel promising ECE while Staging runs is worse than no note at all.
+///
+/// `engine = staging` in a game's own config forces the fallback: ECE has no
+/// shader pipeline, so users who want the CRT look on Windows trade eXo's
+/// tuned engine for it. Per game and off by default, because eXo picked ECE
+/// for a reason - printing among them.
+pub(crate) fn resolve_engine(
+    dosbox_variant: Option<&str>,
+    main_torrent_root: &std::path::Path,
+    per_game_config: &std::collections::HashMap<String, String>,
+) -> Option<PathBuf> {
+    if per_game_config.get("engine").map(String::as_str) == Some("staging") {
+        return None;
+    }
+    resolve_ece_binary(dosbox_variant, main_torrent_root)
+}
+
 /// The DOSBox ECE build eXo ships for this variant, when it is actually
 /// runnable here: Windows only, and only once extracted from util.zip. None
 /// means DOSBox Staging will run the game.
@@ -1489,24 +1512,76 @@ fn resolve_ece_binary(
     .find(|p| p.exists())
 }
 
-/// Whether this game's printing features will be missing at launch. 13 eXoDOS
-/// titles enable eXo's virtual printer (for most of them printing IS the
-/// product), and DOSBox Staging has no printer support yet - so the answer is
-/// "the conf requests a printer AND the engine that would run is Staging",
-/// decided by the same helpers `launch_game` uses. On Windows this flips to
-/// false by itself once the ECE build lands on disk.
+/// The two engine facts the UI needs, which are NOT the same question.
+#[derive(Debug, serde::Serialize)]
+pub struct GameEngineInfo {
+    /// Could eXo's DOSBox ECE build run this game here at all? Drives whether
+    /// the emulator choice is offered. Ignores the user's override on purpose:
+    /// asking `uses_ece` instead made the control vanish the moment someone
+    /// picked Staging, with no way back to eXo's choice.
+    pub ece_available: bool,
+    /// What will ACTUALLY run it, override included. Drives the engine label,
+    /// the shader note and the printing note.
+    pub uses_ece: bool,
+}
+
+/// Which engine this game gets, and whether there is a choice to make.
+///
+/// ECE has no shader pipeline: `glshader` is a DOSBox Staging feature, and eXo
+/// sets it in 750 of its own configs - 675 of them on Staging variants, 16 on
+/// ECE. So a CRT setting on an ECE game is not overridden at launch, it is
+/// dropped, and the UI has to say so instead of offering a control that does
+/// nothing.
+///
+/// Answered with `launch_game`'s own engine selection rather than the variant
+/// alone: ECE exists on Windows and only once extracted from util.zip, so the
+/// same game answers false until that build is on disk.
 #[tauri::command]
-pub async fn game_printing_unavailable(
+pub async fn game_engine_info(
     db_state: State<'_, DbState>,
     id: i64,
-) -> Result<bool, String> {
-    let (dosbox_conf, dosbox_variant, source, data_dir) = {
+) -> Result<GameEngineInfo, String> {
+    let (dosbox_variant, data_dir, per_game_config) = {
         let conn = db_state.0.lock().map_err(|e| e.to_string())?;
         let game = queries::fetch_game_by_id(&conn, id)
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("Game with id {} not found", id))?;
         let data_dir = queries::get_config(&conn, "data_dir").map_err(|e| e.to_string())?;
-        (game.dosbox_conf, game.dosbox_variant, game.torrent_source, data_dir)
+        let cfg = queries::get_all_game_config(&conn, id).unwrap_or_default();
+        (game.dosbox_variant, data_dir, cfg)
+    };
+    let Some(data_dir) = data_dir else {
+        return Ok(GameEngineInfo { ece_available: false, uses_ece: false });
+    };
+    let main_root = crate::commands::setup::game_root(&data_dir);
+    Ok(GameEngineInfo {
+        ece_available: resolve_engine(dosbox_variant.as_deref(), &main_root, &Default::default())
+            .is_some(),
+        uses_ece: resolve_engine(dosbox_variant.as_deref(), &main_root, &per_game_config)
+            .is_some(),
+    })
+}
+
+/// Whether this game's printing features will be missing at launch. 13 eXoDOS
+/// titles enable eXo's virtual printer (for most of them printing IS the
+/// product), and DOSBox Staging has no printer support yet - so the answer is
+/// "the conf requests a printer AND the engine that would run is Staging",
+/// decided by `resolve_engine`, the same answer `launch_game` acts on. So it
+/// flips to false by itself once the ECE build lands on disk - and back to
+/// true if the user forces Staging for that game.
+#[tauri::command]
+pub async fn game_printing_unavailable(
+    db_state: State<'_, DbState>,
+    id: i64,
+) -> Result<bool, String> {
+    let (dosbox_conf, dosbox_variant, source, data_dir, per_game_config) = {
+        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let game = queries::fetch_game_by_id(&conn, id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("Game with id {} not found", id))?;
+        let data_dir = queries::get_config(&conn, "data_dir").map_err(|e| e.to_string())?;
+        let cfg = queries::get_all_game_config(&conn, id).unwrap_or_default();
+        (game.dosbox_conf, game.dosbox_variant, game.torrent_source, data_dir, cfg)
     };
     let (Some(conf), Some(data_dir)) = (dosbox_conf, data_dir) else {
         return Ok(false);
@@ -1523,7 +1598,7 @@ pub async fn game_printing_unavailable(
     }
     let main_root =
         crate::commands::setup::game_root(&data_dir);
-    Ok(resolve_ece_binary(dosbox_variant.as_deref(), &main_root).is_none())
+    Ok(resolve_engine(dosbox_variant.as_deref(), &main_root, &per_game_config).is_none())
 }
 
 /// Serializes support-file extraction process-wide. A plain lock FILE was
@@ -2792,6 +2867,8 @@ fn ensure_dosbox_shaders(app: &AppHandle) {
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct GameSettings {
+    /// `staging` forces DOSBox Staging for an ECE game; None = eXo's choice.
+    pub engine: Option<String>,
     pub glshader: Option<String>,
     pub fullscreen: Option<String>,
     pub cycles: Option<String>,
@@ -2803,6 +2880,7 @@ pub async fn get_game_settings(state: State<'_, DbState>, id: i64) -> Result<Gam
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     let cfg = queries::get_all_game_config(&conn, id).map_err(|e| e.to_string())?;
     Ok(GameSettings {
+        engine: cfg.get("engine").cloned(),
         glshader: cfg.get("glshader").cloned(),
         fullscreen: cfg.get("fullscreen").cloned(),
         cycles: cfg.get("cycles").cloned(),
@@ -2814,6 +2892,7 @@ pub async fn get_game_settings(state: State<'_, DbState>, id: i64) -> Result<Gam
 pub async fn set_game_settings(
     state: State<'_, DbState>,
     id: i64,
+    engine: Option<String>,
     glshader: Option<String>,
     fullscreen: Option<String>,
     cycles: Option<String>,
@@ -2822,6 +2901,7 @@ pub async fn set_game_settings(
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     // For each key: Some(value) = set, None = delete (inherit global)
     let pairs: &[(&str, &Option<String>)] = &[
+        ("engine", &engine),
         ("glshader", &glshader),
         ("fullscreen", &fullscreen),
         ("cycles", &cycles),
@@ -3085,7 +3165,11 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
     // DOSBox ECE build (extracted from util.zip's EXTDOS.zip into
     // eXo/emulators/dosbox/<variant>/). Everywhere else - and until the
     // build is on disk - DOSBox Staging is the best-effort fallback.
-    let ece_bin = resolve_ece_binary(game.dosbox_variant.as_deref(), &main_torrent_root);
+    let ece_bin = resolve_engine(
+        game.dosbox_variant.as_deref(),
+        &main_torrent_root,
+        &per_game_config,
+    );
     if let Some(ref variant) = game.dosbox_variant {
         if variant.starts_with("ece") && ece_bin.is_none() {
             if cfg!(windows) {
@@ -3182,10 +3266,7 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
     // configured game-specific settings via the Game Settings dialog.
     {
         let game_conf_path = launch_conf_dir(&app)?.join(format!("game_{}.conf", id));
-        if per_game_config.is_empty() {
-            // Clean up stale conf file from a previous configuration.
-            let _ = std::fs::remove_file(&game_conf_path);
-        } else {
+        {
             let mut frag = String::new();
             if let Some(fs) = per_game_config.get("fullscreen") {
                 frag.push_str(&format!("[sdl]\nfullscreen = {}\n", fs));
@@ -3207,7 +3288,14 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
                     frag.push('\n');
                 }
             }
-            if !frag.is_empty() {
+            if frag.is_empty() {
+                // Nothing to say for this game - drop a fragment an earlier
+                // configuration left behind. Keyed on the fragment, not on the
+                // config being empty: `engine` is stored in the same table but
+                // never written here, so a game left with only that setting
+                // would keep a stale file forever.
+                let _ = std::fs::remove_file(&game_conf_path);
+            } else {
                 std::fs::write(&game_conf_path, &frag)
                     .map_err(|e| format!("Failed to write per-game conf: {e}"))?;
                 cmd.arg("-conf").arg(&game_conf_path);

@@ -142,6 +142,8 @@ export async function getRecentlyPlayed(limit?: number): Promise<Game[]> {
 }
 
 export interface GameSettings {
+  /** "staging" forces DOSBox Staging for an ECE game; null = eXo's choice. */
+  engine: string | null;
   glshader: string | null;
   fullscreen: string | null;
   cycles: string | null;
@@ -154,12 +156,13 @@ export async function getGameSettings(id: number): Promise<GameSettings> {
 
 export async function setGameSettings(
   id: number,
+  engine: string | null,
   glshader: string | null,
   fullscreen: string | null,
   cycles: string | null,
   customConf: string | null,
 ): Promise<void> {
-  return invoke("set_game_settings", { id, glshader, fullscreen, cycles, customConf });
+  return invoke("set_game_settings", { id, engine, glshader, fullscreen, cycles, customConf });
 }
 
 export async function getGame(id: number): Promise<Game | null> {
@@ -177,6 +180,23 @@ export async function launchGame(id: number): Promise<string> {
  *  installed ECE build correctly answers false. */
 export async function gamePrintingUnavailable(id: number): Promise<boolean> {
   return invoke("game_printing_unavailable", { id });
+}
+
+export interface GameEngineInfo {
+  /** Could ECE run this game here at all? Decides whether the emulator choice
+   *  is worth offering. Deliberately blind to the user's override, or the
+   *  control would disappear the moment they pick Staging. */
+  ece_available: boolean;
+  /** What will actually run it, override included: engine label, shader note,
+   *  printing note. ECE has no shader pipeline, so a CRT setting on an ECE
+   *  game is dropped at launch rather than applied. */
+  uses_ece: boolean;
+}
+
+/** Same engine selection launch_game acts on, so it answers false on Windows
+ *  until the ECE build has been extracted, and always false elsewhere. */
+export async function gameEngineInfo(id: number): Promise<GameEngineInfo> {
+  return invoke("game_engine_info", { id });
 }
 
 /** Whether the emulator a Win9x game needs (DOSBox-X / 86Box) is resolvable

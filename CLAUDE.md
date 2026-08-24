@@ -354,6 +354,23 @@ DOSBox Staging ships as a Tauri `externalBin` in `src-tauri/binaries/`. Platform
 
 Variant distribution: ~63% classic `dosbox`, ~27% ECE4230, ~9% Staging - all handled by DOSBox Staging.
 
+**`resolve_engine` is the ONLY place that decides ECE vs Staging** - the
+launcher picks the binary from it, the detail panel labels the engine from it,
+and the printing and shader notes state their limitation from it. The answer
+depends on three things the frontend cannot see (platform, whether the ECE
+build has been extracted, and the per-game `engine` key), so every surface
+asks rather than re-deriving; a panel promising ECE while Staging runs is
+worse than no label.
+
+`engine = staging` in a game's `game_config` forces the fallback. It exists
+because **ECE has no shader pipeline**: `glshader` is Staging's, and eXo sets
+it in 750 of its own configs - 675 on Staging variants, 16 on ece ones, whose
+games get `output=openglnb` plus a scaler instead. So a CRT setting on an ECE
+game is dropped at launch, not overridden, and the settings dialog says so
+next to the disabled control. Per game and off by default: eXo picked ECE for
+a reason, printing among them, and a global switch would move 2,000+ Windows
+games onto an engine none of them were tested with.
+
 ### 10a. LP games launch via overlay mount (don't reintroduce heuristics-first)
 
 LP (language-pack) games run the EN `dosbox.conf` VERBATIM against a

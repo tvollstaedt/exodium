@@ -9,8 +9,8 @@ import { FieldIcon, IconSoundOn, IconSoundOff, IconZoom, type FieldIconName } fr
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Button } from "./Button";
 import type { Game, GameMetadata } from "../api/tauri";
-import { launchGame, gamePrintingUnavailable, win9xEngineAvailable, win9xMultiplayerInfo, dismissWin9xNetworkPrompt, enableWin9xNetwork, getWin9xSupportStatus, mediaUrl } from "../api/tauri";
-import type { Win9xMultiplayerInfo, Win9xSupportStatus } from "../api/tauri";
+import { launchGame, gameEngineInfo, gamePrintingUnavailable, win9xEngineAvailable, win9xMultiplayerInfo, dismissWin9xNetworkPrompt, enableWin9xNetwork, getWin9xSupportStatus, mediaUrl } from "../api/tauri";
+import type { GameEngineInfo, Win9xMultiplayerInfo, Win9xSupportStatus } from "../api/tauri";
 import { formatBytes, parseLangEntries, langBadgeClass, performUninstall, performReset } from "../util";
 import { showToast } from "../stores/toasts";
 import { bestThumbnailPath, thumbnailCandidates } from "../stores/thumbnails";
@@ -147,14 +147,22 @@ export function GameDetailPanel(props: Props) {
   /** Set by the dialog's confirm path, which starts its own launch - so the
    *  close handler (which fires for both answers) does not start a second. */
   let netPromptAccepted = false;
-  /** Which emulator will actually run the selected game, from its variant -
-   *  the same mapping the backend's engine dispatch uses. */
+  /** ECE or Staging for the selected game, straight from the backend's own
+   *  `resolve_engine`. Not derived from the variant here: the answer depends
+   *  on the platform, on the ECE build being extracted, and on the user's
+   *  per-game override, and a label contradicting what launches is worse than
+   *  none. */
+  const [engineInfo, setEngineInfo] = createSignal<GameEngineInfo | null>(null);
+  /** Null until the backend answers. Guessing "Staging" in the meantime made
+   *  every ECE game on Windows flash the wrong engine and the wrong note. */
+  const runsUnderEce = () => engineInfo()?.uses_ece ?? isWindows;
+  /** Which emulator will actually run the selected game. */
   const emulatorName = () => {
     const v = selected()?.dosbox_variant ?? props.game?.dosbox_variant;
     if (v === "x98") { return "DOSBox-X"; }
     if (v === "pcbox") { return "PCBox (not shipped)"; }
     if (v?.startsWith("86box")) { return "86Box"; }
-    if (v?.startsWith("ece")) { return isWindows ? "DOSBox ECE" : "DOSBox Staging"; }
+    if (v?.startsWith("ece")) { return runsUnderEce() ? "DOSBox ECE" : "DOSBox Staging"; }
     return "DOSBox Staging";
   };
   /** Blocking progress for the shared support payload; `withEmulators` says
@@ -312,11 +320,21 @@ export function GameDetailPanel(props: Props) {
           + "player works either way.",
       };
     }
-    if (!isWindows && v?.startsWith("ece")) {
+    if (v?.startsWith("ece") && engineInfo() && !runsUnderEce()) {
+      // Three ways to end up on Staging, and they are not the user's fault in
+      // equal measure: an override they chose, a build that has not been
+      // extracted yet (Windows), or a platform ECE was never built for.
+      const chosen = engineInfo()?.ece_available === true;
       return {
         key: "ece",
-        text: "This game is tuned for DOSBox ECE, which only exists on Windows. Exodium runs "
-          + "it with DOSBox Staging - the experience may vary slightly.",
+        text: chosen
+          ? "This game is tuned for DOSBox ECE, but you set it to run under DOSBox Staging - "
+            + "the experience may vary slightly."
+          : isWindows
+            ? "This game is tuned for DOSBox ECE, which Exodium has not unpacked yet. It runs "
+              + "under DOSBox Staging until then - the experience may vary slightly."
+            : "This game is tuned for DOSBox ECE, which only exists on Windows. Exodium runs "
+              + "it with DOSBox Staging - the experience may vary slightly.",
       };
     }
     if (v === "x98") {
@@ -523,10 +541,14 @@ export function GameDetailPanel(props: Props) {
     setSelectedId(g.id ?? null);
     setVideoPlaying(false);
     setPrintingUnavailable(false);
+    setEngineInfo(null);
     if (g.id != null) {
       const id = g.id;
       gamePrintingUnavailable(id)
         .then((p) => { if (props.game?.id === id) { setPrintingUnavailable(p); } })
+        .catch(() => {});
+      gameEngineInfo(id)
+        .then((e) => { if (props.game?.id === id) { setEngineInfo(e); } })
         .catch(() => {});
     }
     setWin9xEngineMissing(false);

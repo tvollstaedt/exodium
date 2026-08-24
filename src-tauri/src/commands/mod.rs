@@ -11,7 +11,7 @@ pub use content_packs::{
     list_content_packs, uninstall_content_pack, ContentPackState,
 };
 pub use games::{
-    cancel_download, collection_data_dir, download_game, game_printing_unavailable, get_config, get_download_progress, get_game,
+    cancel_download, collection_data_dir, download_game, game_printing_unavailable, game_engine_info, get_config, get_download_progress, get_game,
     get_game_settings, get_game_variants, get_games, get_genres, get_recently_played,
     get_section_keys, get_installed_games, launch_game, open_manual, reset_game_data, set_config,
     set_game_settings,

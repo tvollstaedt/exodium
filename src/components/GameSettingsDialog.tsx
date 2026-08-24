@@ -1,7 +1,7 @@
 import { createSignal, createEffect, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 import { Dialog } from "@ark-ui/solid/dialog";
-import { getGameSettings, setGameSettings } from "../api/tauri";
+import { gameEngineInfo, getGameSettings, setGameSettings } from "../api/tauri";
 import { Button } from "./Button";
 
 interface GameSettingsDialogProps {
@@ -12,12 +12,22 @@ interface GameSettingsDialogProps {
 }
 
 export function GameSettingsDialog(props: GameSettingsDialogProps) {
+  const [engine, setEngine] = createSignal<string>("");
   const [glshader, setGlshader] = createSignal<string>("");
   const [fullscreen, setFullscreen] = createSignal<string>("");
   const [cycles, setCycles] = createSignal<string>("");
   const [customConf, setCustomConf] = createSignal<string>("");
   const [saving, setSaving] = createSignal(false);
   const [saveError, setSaveError] = createSignal<string>("");
+  /** Whether ECE COULD run this game here (platform + extracted build), which
+   *  is what decides whether the choice is offered. Asking what actually runs
+   *  would hide the control as soon as someone picks Staging, leaving no way
+   *  back to eXo's choice. */
+  const [eceIsDefault, setEceIsDefault] = createSignal(false);
+  /** ...and what would run it with the choice currently in the dialog, which
+   *  is what the shader note has to reflect - switching the engine has to take
+   *  the warning away before saving, or the two controls contradict. */
+  const usesEce = () => eceIsDefault() && engine() !== "staging";
 
   createEffect(() => {
     if (!props.open || props.gameId == null) { return; }
@@ -25,13 +35,19 @@ export function GameSettingsDialog(props: GameSettingsDialogProps) {
     // Reset synchronously before the async load resolves - signals persist
     // across opens, so without this the previous game's values are visible
     // (and saveable onto the wrong game) until the fetch lands.
+    setEngine("");
     setGlshader("");
     setFullscreen("");
     setCycles("");
     setCustomConf("");
     setSaveError("");
+    setEceIsDefault(false);
+    gameEngineInfo(id).then((info) => {
+      if (props.gameId === id) { setEceIsDefault(info.ece_available); }
+    }).catch(() => {});
     getGameSettings(id).then((s) => {
       if (props.gameId !== id) { return; }
+      setEngine(s.engine ?? "");
       setGlshader(s.glshader ?? "");
       setFullscreen(s.fullscreen ?? "");
       setCycles(s.cycles ?? "");
@@ -46,6 +62,7 @@ export function GameSettingsDialog(props: GameSettingsDialogProps) {
     try {
       await setGameSettings(
         props.gameId,
+        engine() || null,
         glshader() || null,
         fullscreen() || null,
         cycles() || null,
@@ -75,11 +92,32 @@ export function GameSettingsDialog(props: GameSettingsDialogProps) {
             </Dialog.Title>
 
             <div class="game-settings-body">
+              <Show when={eceIsDefault()}>
+                <div class="game-settings-row">
+                  <label class="game-settings-label">Emulator</label>
+                  <select
+                    class="game-settings-select"
+                    value={engine()}
+                    onChange={(e) => setEngine(e.currentTarget.value)}
+                  >
+                    <option value="">eXo's choice (DOSBox ECE)</option>
+                    <option value="staging">DOSBox Staging</option>
+                  </select>
+                </div>
+                <p class="game-settings-note">
+                  eXo tuned this game for DOSBox ECE. Staging adds shaders and
+                  the newer feature set, but the game was not tested with it -
+                  and for the handful of games that print, ECE is the only
+                  engine that can.
+                </p>
+              </Show>
+
               <div class="game-settings-row">
                 <label class="game-settings-label">CRT Shader</label>
                 <select
                   class="game-settings-select"
                   value={glshader()}
+                  disabled={usesEce()}
                   onChange={(e) => setGlshader(e.currentTarget.value)}
                 >
                   <option value="">Default (global)</option>
@@ -87,6 +125,14 @@ export function GameSettingsDialog(props: GameSettingsDialogProps) {
                   <option value="sharp">Off</option>
                 </select>
               </div>
+              <Show when={usesEce()}>
+                <p class="game-settings-note">
+                  This game runs under DOSBox ECE, which has no shader support.
+                  Shaders are a DOSBox Staging feature, so neither this setting
+                  nor the global one applies. Switch the emulator above to
+                  DOSBox Staging if you want the CRT look.
+                </p>
+              </Show>
 
               <div class="game-settings-row">
                 <label class="game-settings-label">Fullscreen</label>

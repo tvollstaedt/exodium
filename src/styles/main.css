@@ -3690,6 +3690,20 @@ body {
   cursor: pointer;
 }
 
+/* Why a control above is inert. Sits under its row rather than replacing it:
+   a setting that silently disappears reads as a bug. */
+.game-settings-note {
+  margin: -6px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.game-settings-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .game-settings-cycles {
   display: flex;
   gap: 6px;

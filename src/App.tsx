@@ -633,7 +633,7 @@ function App() {
                           checked={crtAuto()}
                           onChange={handleToggleCrtAuto}
                           label="Auto CRT shaders"
-                          hint="DOSBox Staging picks a CRT shader matched to each game's video mode and your display resolution."
+                          hint="DOSBox Staging picks a CRT shader matched to each game's video mode and your display resolution. Games that run under DOSBox ECE (Windows only) have no shader support and are unaffected."
                         />
                         <Toggle
                           checked={defaultFullscreen()}
