@@ -1897,11 +1897,15 @@ body {
   margin-bottom: 8px;
 }
 
+/* Blank lines in a message survive: a dialog that has to explain a choice AND
+   its consequences reads as one wall of text otherwise. Messages without a
+   newline are unaffected. */
 .ark-dialog-desc {
   font-size: 13px;
   color: var(--text-secondary);
   line-height: 1.5;
   margin-bottom: 20px;
+  white-space: pre-line;
 }
 
 .ark-dialog-actions {

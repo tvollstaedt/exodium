@@ -862,8 +862,8 @@ function App() {
             installs are asked once, because this moves their game files. */}
         <ConfirmDialog
           open={layoutMigration()?.prompt === true}
-          title="Migrate your Windows games?"
-          message="Exodium used to put your Windows games beside the DOS folder. eXoDOS has one root folder for all collections, which is now Exodium's default as well. Moving your games is instant, nothing is lost. Move now or do it later in Settings → Library."
+          title="Move your games into one folder?"
+          message={"Exodium used to keep each collection in its own folder. It now uses eXoDOS's layout instead: one root folder for all of them. Everything you download from here on goes there, whether you move the old folders or not.\n\nMoving is instant and nothing is lost. If you skip it, Exodium only looks in the new root: the old folders stay invisible, their games read as not installed, and downloading one again writes a second copy while the old one still takes up the space. You can start the move later in Settings → Library."}
           confirmLabel={migrating() ? "Moving…" : "Move now"}
           cancelLabel="Not now"
           onConfirm={() => void runLayoutMigration()}
