@@ -465,9 +465,11 @@ body {
   animation-fill-mode: both;
 }
 
-/* will-change scoped to the directional classes only - they're applied
-   while the slide is in motion so the GPU layer is allocated for the
-   animation but not retained for the rest of the pane's lifetime. */
+/* will-change scoped to the directional classes only - Library.tsx drops
+   them on animationend, so the GPU layer is allocated for the slide and not
+   retained for the rest of the pane's lifetime. Removing the animation-name
+   after it finished is visually free: fill-mode `both` held the `to` frame,
+   which is the element's resting state anyway. */
 .tab-pane-right,
 .tab-pane-left {
   will-change: transform, opacity;

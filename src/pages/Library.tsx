@@ -93,10 +93,21 @@ export function Library() {
   // from the right (forward), "left" from the left (backward). Drives the
   // CSS animation on the freshly mounted tab pane.
   const [tabSlideDir, setTabSlideDir] = createSignal<"right" | "left">("right");
+  // The directional class carries `will-change`, so it has to come off once
+  // the slide has finished - otherwise the compositor layer is retained for
+  // the pane's whole lifetime (#24). The check on `target` matters:
+  // animationend bubbles, and a child's animation ending mid-slide would
+  // otherwise strip the pane's own animation while it is still moving.
+  const [tabSlideDone, setTabSlideDone] = createSignal(false);
+  const tabPaneClass = () => tabSlideDone() ? "tab-pane" : `tab-pane tab-pane-${tabSlideDir()}`;
+  const onTabSlideEnd = (e: AnimationEvent) => {
+    if (e.target === e.currentTarget) { setTabSlideDone(true); }
+  };
   const TAB_ORDER: Record<Tab, number> = { browse: 0, library: 1 };
   const switchTab = (tab: Tab) => {
     if (tab === activeTab()) { return; }
     setTabSlideDir(TAB_ORDER[tab] > TAB_ORDER[activeTab()] ? "right" : "left");
+    setTabSlideDone(false);
     setActiveTab(tab);
     // The scroll container is shared between tabs - without the reset a
     // back-to-top button made visible in one tab sat orphaned on the other.
@@ -715,7 +726,7 @@ export function Library() {
 
       {/* ── Browse tab ── */}
       <Show when={activeTab() === "browse"}>
-        <div class={`tab-pane tab-pane-${tabSlideDir()}`}>
+        <div class={tabPaneClass()} onAnimationEnd={onTabSlideEnd}>
         <Show when={collections().length > 1}>
           <div class="collection-bar">
             <CollectionShelf
@@ -865,7 +876,7 @@ export function Library() {
 
       {/* ── My Library tab ── */}
       <Show when={activeTab() === "library"}>
-        <div class={`tab-pane tab-pane-${tabSlideDir()}`}>
+        <div class={tabPaneClass()} onAnimationEnd={onTabSlideEnd}>
         {/* Not sticky: the shelf titles stick at the tab bar's edge (top:
             40px) and a sticky toolbar would sit on top of them. */}
         <div class="library-toolbar library-toolbar-plain">
