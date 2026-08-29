@@ -16,52 +16,65 @@ interface DownloadState {
 
 const [downloads, setDownloads] = createSignal<Record<number, DownloadState>>({});
 
-// Count of consecutive poll ticks where getDownloadProgress returned null
-// despite the download being marked in-flight. If this stays high for >5s
-// we surface a user-visible error instead of pretending we're still starting.
-// Observed on Windows: if session.add_torrent() fails (MAX_PATH, port bind,
-// etc.) the handle stays None forever and file_progress returns None silently.
-const nullPollCount: Record<number, number> = {};
+const POLL_MS = 1000;
+// Consecutive poll ticks where getDownloadProgress returned null despite the
+// download being marked in-flight. If this stays high for >5s we surface a
+// user-visible error instead of pretending we're still starting. Observed on
+// Windows: if session.add_torrent() fails (MAX_PATH, port bind, etc.) the
+// handle stays None forever and file_progress returns None silently.
 const NULL_POLL_THRESHOLD = 5; // ~5 seconds at 1s polling interval
-
-// Track active polling intervals so they can be cancelled.
-const intervals: Record<number, ReturnType<typeof setInterval>> = {};
-// Track when a game first reached 100% without finishing (stuck detection).
-const stuckSince: Record<number, number> = {};
-// True while the download_game backend command is still in flight. Progress
-// legitimately polls null during that window (torrent handle not attached
-// yet, validation pass, first-ever torrent add), so the didn't-start verdict
-// must not fire until the command has actually resolved.
-const commandPending: Record<number, boolean> = {};
-// Monotonic attempt counter per game: a cancelled attempt's still-resolving
-// download_game promise (or orphaned interval tick) must not clobber the
-// state of a NEWER attempt for the same game.
-const attempts: Record<number, number> = {};
-// Set once the game itself is installed while extras are still downloading -
-// the library refresh must fire at that moment (game is playable), not only
-// when the extras finish minutes later.
-const announcedInstalled: Record<number, boolean> = {};
-// Stall detection: timestamp + value of the last observed progress increase.
-const lastProgressAt: Record<number, number> = {};
-const lastProgressVal: Record<number, number> = {};
-// Same, for the whole torrent. A game's file can sit at exactly 0 for minutes
-// while data pours in: pieces are 8 MB and most games are far smaller than
-// that, so a re-download after uninstall has to refetch the entire block the
-// game shares with its neighbours, and per-file progress only moves when that
-// block validates. Without this the honest "no data received" warning fires on
-// a download that is working perfectly.
-const lastTorrentAt: Record<number, number> = {};
-const lastTorrentVal: Record<number, number> = {};
 // Seconds without progress before the status turns into peer-wait feedback,
 // and before it becomes an actionable stall warning.
 const STALL_HINT_SECS = 15;
 const STALL_WARN_SECS = 90;
-// Highest progress seen per game - prevents bar from jumping backwards due to
-// librqbit stats blips or component remounts resetting the CSS transition.
-const maxProgress: Record<number, number> = {};
-// Titles tracked separately so state updates inside the poll loop don't have
-// to re-pass the title every time.
-const titles: Record<number, string> = {};
+
+/** Everything one in-flight download knows about itself.
+ *
+ *  One object per download rather than a table per field: ending a run is a
+ *  single `trackers.delete`, and cancellation is a single flag the poll loop
+ *  re-reads after every await. The previous shape kept these twelve fields in
+ *  twelve module-level records, which meant every exit path had to empty all
+ *  of them by hand and a forgotten one leaked state into the next attempt. */
+interface Tracker {
+  gameId: number;
+  /** Kept on the tracker so status writes inside the loop don't have to
+   *  re-pass the title on every tick. */
+  title?: string;
+  /** Set by whoever ends this run (cancel, uninstall, a newer attempt, or a
+   *  terminal poll result). Checked after every await, which is what stops a
+   *  poll that was already in flight at cancel time from writing the store
+   *  back and resurrecting the card. */
+  cancelled: boolean;
+  /** True while the download_game backend command is still in flight.
+   *  Progress legitimately polls null during that window (torrent handle not
+   *  attached yet, validation pass, first-ever torrent add), so the
+   *  didn't-start verdict must not fire until the command has resolved. */
+  commandPending: boolean;
+  nullPolls: number;
+  /** When the game first reached 100% without finishing; 0 until then. */
+  stuckSince: number;
+  /** Highest progress seen - prevents the bar from jumping backwards due to
+   *  librqbit stats blips or component remounts resetting the transition. */
+  maxProgress: number;
+  /** Set once the game itself is installed while extras are still
+   *  downloading - the library refresh must fire at that moment (game is
+   *  playable), not only when the extras finish minutes later. */
+  announcedInstalled: boolean;
+  /** Stall detection: value + timestamp of the last observed progress
+   *  increase, for this file and for the whole torrent. A game's file can sit
+   *  at exactly 0 for minutes while data pours in: pieces are 8 MB and most
+   *  games are far smaller, so a re-download after uninstall has to refetch
+   *  the entire block the game shares with its neighbours, and per-file
+   *  progress only moves when that block validates. Without the torrent-level
+   *  pair the honest "no data received" warning fires on a download that is
+   *  working perfectly. */
+  lastProgressVal: number;
+  lastProgressAt: number;
+  lastTorrentVal: number;
+  lastTorrentAt: number;
+}
+
+const trackers = new Map<number, Tracker>();
 
 export { downloads };
 
@@ -69,308 +82,261 @@ export function getDownloadState(gameId: number): DownloadState | undefined {
   return downloads()[gameId];
 }
 
-export function startGameDownload(gameId: number, title?: string) {
-  const attempt = (attempts[gameId] ?? 0) + 1;
-  attempts[gameId] = attempt;
-  delete announcedInstalled[gameId];
-  maxProgress[gameId] = 0;
-  commandPending[gameId] = true;
-  lastProgressVal[gameId] = -1;
-  lastProgressAt[gameId] = Date.now();
-  lastTorrentVal[gameId] = -1;
-  lastTorrentAt[gameId] = Date.now();
-  if (title) { titles[gameId] = title; }
-  setDownloads((prev) => ({
-    ...prev,
-    [gameId]: { status: "Starting download...", progress: 0, downloading: true, title },
-  }));
-
-  const interval = setInterval(async () => {
-    if (attempts[gameId] !== attempt) {
-      clearInterval(interval);
-      return;
-    }
-    try {
-      const p = await getDownloadProgress(gameId);
-      // Re-check the generation: the guard at the top of the tick ran BEFORE
-      // this await, so a cancel that landed while the poll was in flight has
-      // already deleted the store entry. Every branch below writes it back,
-      // which resurrects the card - and since the next tick then bails on the
-      // same generation mismatch, nothing ever removes it again. The card sits
-      // at its last percentage with a Cancel button that does nothing. A
-      // stalled download makes this the common case, not the rare one: that is
-      // when people press Cancel, and the backend poll is slowest.
-      if (attempts[gameId] !== attempt) {
-        clearInterval(interval);
-        return;
-      }
-      if (!p) {
-        // Backend returned null - torrent handle not attached yet. While the
-        // download_game command is still running that's expected (first-ever
-        // torrent add + validation can take a while) - keep waiting. Only
-        // once the command has resolved do consecutive misses indicate the
-        // silent-stuck bug (observed on Windows: session.add_torrent()
-        // failure leaves the handle None forever).
-        if (commandPending[gameId]) {
-          nullPollCount[gameId] = 0;
-          // The backend can legitimately spend minutes here on the FIRST
-          // download of a collection (placeholder creation + hash check of
-          // 14k files, slow on Windows). Say so instead of sitting mute on
-          // "Starting download..." - testers read that as a hang.
-          const waited = (Date.now() - (lastProgressAt[gameId] ?? Date.now())) / 1000;
-          if (waited > 8) {
-            setDownloads((prev) => ({
-              ...prev,
-              [gameId]: {
-                status: "Preparing the collection (one-time setup, can take a few minutes)…",
-                progress: 0,
-                downloading: true,
-                title: titles[gameId],
-              },
-            }));
-          }
-          return;
-        }
-        nullPollCount[gameId] = (nullPollCount[gameId] ?? 0) + 1;
-        if (nullPollCount[gameId] >= NULL_POLL_THRESHOLD) {
-          clearInterval(interval);
-          delete intervals[gameId];
-          delete stuckSince[gameId];
-          delete maxProgress[gameId];
-          delete nullPollCount[gameId];
-          delete commandPending[gameId];
-          delete lastProgressAt[gameId];
-          delete lastProgressVal[gameId];
-          delete lastTorrentAt[gameId];
-          delete lastTorrentVal[gameId];
-          setDownloads((prev) => ({
-            ...prev,
-            [gameId]: {
-              status: "Download didn't start - open Settings → Diagnostics to view exodium.log.",
-              progress: 0,
-              downloading: false,
-              title: titles[gameId],
-            },
-          }));
-          delete titles[gameId];
-        }
-        return;
-      }
-      delete nullPollCount[gameId];
-      // Only allow progress to increase - prevents backwards jumps.
-      const safeProgress = Math.max(maxProgress[gameId] ?? 0, p.progress);
-      maxProgress[gameId] = safeProgress;
-
-      if (p.error) {
-        clearInterval(interval);
-        delete intervals[gameId];
-        delete stuckSince[gameId];
-        delete maxProgress[gameId];
-        delete lastProgressAt[gameId];
-        delete lastProgressVal[gameId];
-        delete lastTorrentAt[gameId];
-        delete lastTorrentVal[gameId];
-        delete announcedInstalled[gameId];
-        delete commandPending[gameId];
-        setDownloads((prev) => ({
-          ...prev,
-          [gameId]: { status: p.error!, progress: 0, downloading: false, title: titles[gameId] },
-        }));
-        showToast(
-          titles[gameId] ? `Download failed: ${titles[gameId]}` : "Download failed",
-          "error",
-          { detail: p.error! },
-        );
-        delete titles[gameId];
-      } else if (p.installed) {
-        // The game is playable now, but its extras (GameData: manuals,
-        // videos, music) may still be downloading - keep polling and show
-        // that second phase instead of letting it finish invisibly.
-        const extrasPending = p.extras_done === false;
-        if (extrasPending) {
-          const pct = ((p.extras_progress ?? 0) * 100).toFixed(0);
-          if (!announcedInstalled[gameId]) {
-            announcedInstalled[gameId] = true;
-            refreshLoadedGames();
-            notifyGameLibraryChanged(gameId);
-          }
-          setDownloads((prev) => ({
-            ...prev,
-            [gameId]: {
-              status: `Installed - downloading extras… ${pct}%`,
-              progress: 1,
-              downloading: false,
-              installed: true,
-              title: titles[gameId],
-            },
-          }));
-          return;
-        }
-        clearInterval(interval);
-        delete intervals[gameId];
-        delete stuckSince[gameId];
-        delete maxProgress[gameId];
-        delete lastProgressAt[gameId];
-        delete lastProgressVal[gameId];
-        delete lastTorrentAt[gameId];
-        delete lastTorrentVal[gameId];
-        delete announcedInstalled[gameId];
-        delete commandPending[gameId];
-        setDownloads((prev) => ({
-          ...prev,
-          [gameId]: { status: "Installed!", progress: 1, downloading: false, installed: true, title: titles[gameId] },
-        }));
-        delete titles[gameId];
-        refreshLoadedGames();
-        // Fires metadata-cache invalidation: when extras finished AFTER the
-        // game, this is what makes the manual button resolve on its own.
-        notifyGameLibraryChanged(gameId);
-        // Delay cleanup so isInstalled() stays true until fetchGames() propagates the
-        // updated installed flag from the DB into the games store.
-        setTimeout(() => {
-          setDownloads((prev) => {
-            const next = { ...prev };
-            delete next[gameId];
-            return next;
-          });
-        }, 5000);
-      } else if (p.finished) {
-        delete stuckSince[gameId];
-        setDownloads((prev) => ({
-          ...prev,
-          [gameId]: { status: "Extracting...", progress: safeProgress, downloading: true, title: titles[gameId] },
-        }));
-      } else if (safeProgress >= 0.999) {
-        // 100% but ZIP not yet assembled - detect if stuck.
-        if (!stuckSince[gameId]) { stuckSince[gameId] = Date.now(); }
-        const elapsed = (Date.now() - stuckSince[gameId]) / 1000;
-        const status = elapsed > 30
-          ? "Waiting for last pieces… try cancelling and re-downloading if this persists"
-          : "100%";
-        setDownloads((prev) => ({
-          ...prev,
-          [gameId]: { status, progress: safeProgress, downloading: true, title: titles[gameId] },
-        }));
-      } else if (p.torrent_state === "initializing") {
-        // librqbit is hash-checking the entire torrent's existing on-disk
-        // content before any peer pieces are requested. On Windows with
-        // thousands of placeholder files this can take 5–10 minutes the
-        // first time. Per-file progress stays at 0 the whole time, so we
-        // surface the torrent-level validation progress to the user.
-        delete stuckSince[gameId];
-        const tp = typeof p.torrent_progress === "number" ? p.torrent_progress : 0;
-        const pct = (tp * 100).toFixed(0);
-        setDownloads((prev) => ({
-          ...prev,
-          [gameId]: {
-            status: `Validating torrent ${pct}% (first run can take several minutes)`,
-            progress: tp,
-            downloading: true,
-            title: titles[gameId],
-          },
-        }));
-      } else {
-        delete stuckSince[gameId];
-        // Stall feedback: a torrent with no peers (or a dropped connection)
-        // otherwise sits at "0%" forever with no signal that anything is
-        // wrong. Track the last progress increase and escalate the status.
-        const now = Date.now();
-        if (safeProgress > (lastProgressVal[gameId] ?? -1)) {
-          lastProgressVal[gameId] = safeProgress;
-          lastProgressAt[gameId] = now;
-        }
-        const tp = typeof p.torrent_progress === "number" ? p.torrent_progress : 0;
-        if (tp > (lastTorrentVal[gameId] ?? -1)) {
-          lastTorrentVal[gameId] = tp;
-          lastTorrentAt[gameId] = now;
-        }
-        const stalledSecs = (now - (lastProgressAt[gameId] ?? now)) / 1000;
-        // Data is arriving for the torrent even if none of it has landed in
-        // this game's file yet - so this is a wait, not a fault.
-        //
-        // Two signals, because torrent progress also moves in whole pieces: at
-        // 50 KB/s an 8 MB piece takes over two minutes, so on a slow line the
-        // per-piece signal goes quiet exactly like a real stall. The session
-        // byte rate is continuous and settles it.
-        const pieceAdvanced = (now - (lastTorrentAt[gameId] ?? now)) / 1000 < STALL_HINT_SECS;
-        const bytesFlowing = (transferStats()?.download_bps ?? 0) >= 1024;
-        const receiving = pieceAdvanced || bytesFlowing;
-        const pct = `${(safeProgress * 100).toFixed(0)}%`;
-        let status = pct;
-        if (stalledSecs >= STALL_HINT_SECS && receiving) {
-          status = `${pct} - fetching a shared data block…`;
-        } else if (stalledSecs >= STALL_WARN_SECS) {
-          status = `Stalled at ${pct} - no data received. Check your connection, or cancel and retry.`;
-        } else if (stalledSecs >= STALL_HINT_SECS) {
-          status = safeProgress === 0 ? "Looking for peers…" : `${pct} - waiting for peers…`;
-        }
-        setDownloads((prev) => ({
-          ...prev,
-          [gameId]: {
-            status,
-            progress: safeProgress,
-            downloading: true,
-            title: titles[gameId],
-          },
-        }));
-      }
-    } catch (e) {
-      console.error(`[downloads] poll error for game ${gameId}:`, e);
-    }
-  }, 1000);
-
-  intervals[gameId] = interval;
-
-  // Fire download command
-  downloadGame(gameId).then(() => {
-    if (attempts[gameId] !== attempt) { return; }
-    commandPending[gameId] = false;
-  }).catch((e) => {
-    if (attempts[gameId] !== attempt) { return; }
-    clearInterval(interval);
-    delete intervals[gameId];
-    delete stuckSince[gameId];
-    delete maxProgress[gameId];
-    delete nullPollCount[gameId];
-    delete commandPending[gameId];
-    delete lastProgressAt[gameId];
-    delete lastProgressVal[gameId];
-    delete announcedInstalled[gameId];
-    setDownloads((prev) => ({
-      ...prev,
-      [gameId]: { status: `Error: ${e}`, progress: 0, downloading: false, title: titles[gameId] },
-    }));
-    showToast(
-      titles[gameId] ? `Couldn't start download: ${titles[gameId]}` : "Couldn't start download",
-      "error",
-      { detail: String(e) },
-    );
-    delete titles[gameId];
-  });
+/** Ends a run and drops it from the registry. Idempotent, and safe to call on
+ *  a tracker a newer attempt has already replaced - the identity check stops
+ *  an outgoing run from unregistering its successor. */
+function endTracker(t: Tracker) {
+  t.cancelled = true;
+  if (trackers.get(t.gameId) === t) {
+    trackers.delete(t.gameId);
+  }
 }
 
-/** Stop any polling/UI state for a game regardless of phase - used by
- *  uninstall, which may run during the extras phase where downloading is
- *  false but a poll interval is still alive (it would otherwise resurrect a
- *  phantom stuck/failed card for the freshly uninstalled game). */
-export function stopGameDownloadTracking(gameId: number) {
-  attempts[gameId] = (attempts[gameId] ?? 0) + 1;
-  clearInterval(intervals[gameId]);
-  delete intervals[gameId];
-  delete stuckSince[gameId];
-  delete maxProgress[gameId];
-  delete nullPollCount[gameId];
-  delete commandPending[gameId];
-  delete lastProgressAt[gameId];
-  delete lastProgressVal[gameId];
-  delete announcedInstalled[gameId];
-  delete titles[gameId];
+function setState(t: Tracker, state: Omit<DownloadState, "title">) {
+  setDownloads((prev) => ({ ...prev, [t.gameId]: { ...state, title: t.title } }));
+}
+
+function clearState(gameId: number) {
   setDownloads((prev) => {
     if (!prev[gameId]) { return prev; }
     const next = { ...prev };
     delete next[gameId];
     return next;
   });
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** One poll. Returning ends the run only if it called endTracker. */
+async function tick(t: Tracker) {
+  const p = await getDownloadProgress(t.gameId);
+  // The loop's guard ran BEFORE this await, so re-check: a cancel that landed
+  // while the poll was in flight has already deleted the store entry, and
+  // every branch below would write it back.
+  if (t.cancelled) { return; }
+
+  if (!p) {
+    // Backend returned null - torrent handle not attached yet. While the
+    // download_game command is still running that's expected (first-ever
+    // torrent add + validation can take a while) - keep waiting. Only once
+    // the command has resolved do consecutive misses indicate the
+    // silent-stuck bug.
+    if (t.commandPending) {
+      t.nullPolls = 0;
+      // The backend can legitimately spend minutes here on the FIRST download
+      // of a collection (placeholder creation + hash check of 14k files, slow
+      // on Windows). Say so instead of sitting mute on "Starting download..." -
+      // testers read that as a hang.
+      if ((Date.now() - t.lastProgressAt) / 1000 > 8) {
+        setState(t, {
+          status: "Preparing the collection (one-time setup, can take a few minutes)…",
+          progress: 0,
+          downloading: true,
+        });
+      }
+      return;
+    }
+    t.nullPolls += 1;
+    if (t.nullPolls >= NULL_POLL_THRESHOLD) {
+      endTracker(t);
+      setState(t, {
+        status: "Download didn't start - open Settings → Diagnostics to view exodium.log.",
+        progress: 0,
+        downloading: false,
+      });
+    }
+    return;
+  }
+
+  t.nullPolls = 0;
+  // Only allow progress to increase - prevents backwards jumps.
+  const safeProgress = Math.max(t.maxProgress, p.progress);
+  t.maxProgress = safeProgress;
+
+  if (p.error) {
+    endTracker(t);
+    setState(t, { status: p.error, progress: 0, downloading: false });
+    showToast(
+      t.title ? `Download failed: ${t.title}` : "Download failed",
+      "error",
+      { detail: p.error },
+    );
+    return;
+  }
+
+  if (p.installed) {
+    // The game is playable now, but its extras (GameData: manuals, videos,
+    // music) may still be downloading - keep polling and show that second
+    // phase instead of letting it finish invisibly.
+    if (p.extras_done === false) {
+      const pct = ((p.extras_progress ?? 0) * 100).toFixed(0);
+      if (!t.announcedInstalled) {
+        t.announcedInstalled = true;
+        refreshLoadedGames();
+        notifyGameLibraryChanged(t.gameId);
+      }
+      setState(t, {
+        status: `Installed - downloading extras… ${pct}%`,
+        progress: 1,
+        downloading: false,
+        installed: true,
+      });
+      return;
+    }
+    endTracker(t);
+    setState(t, { status: "Installed!", progress: 1, downloading: false, installed: true });
+    refreshLoadedGames();
+    // Fires metadata-cache invalidation: when extras finished AFTER the game,
+    // this is what makes the manual button resolve on its own.
+    notifyGameLibraryChanged(t.gameId);
+    // Delay cleanup so isInstalled() stays true until fetchGames() propagates
+    // the updated installed flag from the DB into the games store. Skipped if
+    // a new download for the same game started in the meantime - that one owns
+    // the entry now.
+    setTimeout(() => {
+      if (trackers.has(t.gameId)) { return; }
+      clearState(t.gameId);
+    }, 5000);
+    return;
+  }
+
+  if (p.finished) {
+    t.stuckSince = 0;
+    setState(t, { status: "Extracting...", progress: safeProgress, downloading: true });
+    return;
+  }
+
+  if (safeProgress >= 0.999) {
+    // 100% but ZIP not yet assembled - detect if stuck.
+    if (!t.stuckSince) { t.stuckSince = Date.now(); }
+    const elapsed = (Date.now() - t.stuckSince) / 1000;
+    setState(t, {
+      status: elapsed > 30
+        ? "Waiting for last pieces… try cancelling and re-downloading if this persists"
+        : "100%",
+      progress: safeProgress,
+      downloading: true,
+    });
+    return;
+  }
+
+  t.stuckSince = 0;
+
+  if (p.torrent_state === "initializing") {
+    // librqbit is hash-checking the entire torrent's existing on-disk content
+    // before any peer pieces are requested. On Windows with thousands of
+    // placeholder files this can take 5–10 minutes the first time. Per-file
+    // progress stays at 0 the whole time, so we surface the torrent-level
+    // validation progress to the user.
+    const tp = typeof p.torrent_progress === "number" ? p.torrent_progress : 0;
+    setState(t, {
+      status: `Validating torrent ${(tp * 100).toFixed(0)}% (first run can take several minutes)`,
+      progress: tp,
+      downloading: true,
+    });
+    return;
+  }
+
+  // Stall feedback: a torrent with no peers (or a dropped connection)
+  // otherwise sits at "0%" forever with no signal that anything is wrong.
+  // Track the last progress increase and escalate the status.
+  const now = Date.now();
+  if (safeProgress > t.lastProgressVal) {
+    t.lastProgressVal = safeProgress;
+    t.lastProgressAt = now;
+  }
+  const tp = typeof p.torrent_progress === "number" ? p.torrent_progress : 0;
+  if (tp > t.lastTorrentVal) {
+    t.lastTorrentVal = tp;
+    t.lastTorrentAt = now;
+  }
+  const stalledSecs = (now - t.lastProgressAt) / 1000;
+  // Data is arriving for the torrent even if none of it has landed in this
+  // game's file yet - so this is a wait, not a fault.
+  //
+  // Two signals, because torrent progress also moves in whole pieces: at
+  // 50 KB/s an 8 MB piece takes over two minutes, so on a slow line the
+  // per-piece signal goes quiet exactly like a real stall. The session byte
+  // rate is continuous and settles it.
+  const pieceAdvanced = (now - t.lastTorrentAt) / 1000 < STALL_HINT_SECS;
+  const bytesFlowing = (transferStats()?.download_bps ?? 0) >= 1024;
+  const receiving = pieceAdvanced || bytesFlowing;
+  const pct = `${(safeProgress * 100).toFixed(0)}%`;
+  let status = pct;
+  if (stalledSecs >= STALL_HINT_SECS && receiving) {
+    status = `${pct} - fetching a shared data block…`;
+  } else if (stalledSecs >= STALL_WARN_SECS) {
+    status = `Stalled at ${pct} - no data received. Check your connection, or cancel and retry.`;
+  } else if (stalledSecs >= STALL_HINT_SECS) {
+    status = safeProgress === 0 ? "Looking for peers…" : `${pct} - waiting for peers…`;
+  }
+  setState(t, { status, progress: safeProgress, downloading: true });
+}
+
+/** Self-scheduling poll loop. It owns its own lifetime, so there is no timer
+ *  handle to orphan and no generation counter to re-read - the run stops when
+ *  its own tracker is cancelled. */
+async function poll(t: Tracker) {
+  while (!t.cancelled) {
+    await sleep(POLL_MS);
+    if (t.cancelled) { return; }
+    try {
+      await tick(t);
+    } catch (e) {
+      console.error(`[downloads] poll error for game ${t.gameId}:`, e);
+    }
+  }
+}
+
+export function startGameDownload(gameId: number, title?: string) {
+  // A still-running attempt for the same game must not write the store on
+  // behalf of this one.
+  const previous = trackers.get(gameId);
+  if (previous) { endTracker(previous); }
+
+  const now = Date.now();
+  const t: Tracker = {
+    gameId,
+    title: title ?? previous?.title ?? downloads()[gameId]?.title,
+    cancelled: false,
+    commandPending: true,
+    nullPolls: 0,
+    stuckSince: 0,
+    maxProgress: 0,
+    announcedInstalled: false,
+    lastProgressVal: -1,
+    lastProgressAt: now,
+    lastTorrentVal: -1,
+    lastTorrentAt: now,
+  };
+  trackers.set(gameId, t);
+  setState(t, { status: "Starting download...", progress: 0, downloading: true });
+
+  void poll(t);
+
+  downloadGame(gameId).then(() => {
+    if (t.cancelled) { return; }
+    t.commandPending = false;
+  }).catch((e) => {
+    if (t.cancelled) { return; }
+    endTracker(t);
+    setState(t, { status: `Error: ${e}`, progress: 0, downloading: false });
+    showToast(
+      t.title ? `Couldn't start download: ${t.title}` : "Couldn't start download",
+      "error",
+      { detail: String(e) },
+    );
+  });
+}
+
+/** Stop any polling/UI state for a game regardless of phase - used by
+ *  uninstall, which may run during the extras phase where downloading is
+ *  false but a poll loop is still alive (it would otherwise resurrect a
+ *  phantom stuck/failed card for the freshly uninstalled game). */
+export function stopGameDownloadTracking(gameId: number) {
+  const t = trackers.get(gameId);
+  if (t) { endTracker(t); }
+  clearState(gameId);
 }
 
 /** Stop tracking every in-flight download and report how many there were.
@@ -391,7 +357,7 @@ export function stopAllDownloadTracking(): number {
  *  session restore) - poll it so the phase stays visible and the completion
  *  refresh fires. No-op when a tracker already exists or extras are done. */
 export async function watchExtrasIfPending(gameId: number, title?: string) {
-  if (intervals[gameId] || getDownloadState(gameId)) { return; }
+  if (trackers.has(gameId) || getDownloadState(gameId)) { return; }
   try {
     const p = await getDownloadProgress(gameId);
     if (!p || !p.installed || p.extras_done !== false) { return; }
@@ -400,36 +366,17 @@ export async function watchExtrasIfPending(gameId: number, title?: string) {
 }
 
 export async function cancelGameDownload(gameId: number) {
-  attempts[gameId] = (attempts[gameId] ?? 0) + 1; // invalidate in-flight handlers
-  delete announcedInstalled[gameId];
-  clearInterval(intervals[gameId]);
-  delete intervals[gameId];
-  delete stuckSince[gameId];
-  delete maxProgress[gameId];
-  delete nullPollCount[gameId];
-  delete commandPending[gameId];
-  delete lastProgressAt[gameId];
-  delete lastProgressVal[gameId];
-  delete titles[gameId];
-  setDownloads((prev) => {
-    const next = { ...prev };
-    delete next[gameId];
-    return next;
-  });
-  const generation = attempts[gameId];
+  const t = trackers.get(gameId);
+  if (t) { endTracker(t); }
+  clearState(gameId);
   try {
     await cancelDownload(gameId);
     // Second sweep: cancel_download can take seconds (deselect + session
     // bookkeeping), and anything that wrote the store in the meantime would
     // otherwise leave a card behind. Skipped when a new download for the same
     // game started while this was running - that one owns the entry now.
-    if (attempts[gameId] === generation) {
-      setDownloads((prev) => {
-        if (!prev[gameId]) { return prev; }
-        const next = { ...prev };
-        delete next[gameId];
-        return next;
-      });
+    if (!trackers.has(gameId)) {
+      clearState(gameId);
     }
     refreshLoadedGames();
   } catch {}

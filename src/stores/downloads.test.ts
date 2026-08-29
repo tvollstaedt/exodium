@@ -252,4 +252,65 @@ describe("downloads state machine", () => {
     expect(state?.downloading).toBe(false);
     expect(state?.status).toMatch(/Error/i);
   });
+  // A restart for the same game replaces the tracker. The outgoing run may
+  // still be awaiting its poll at that moment, and its result describes the
+  // OLD attempt - writing it would drop a live download into an error card.
+  it("ignores a poll from a superseded attempt after a restart", async () => {
+    let releasePoll: ((v: unknown) => void) | null = null;
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "download_game") { return Promise.resolve("ok"); }
+      if (cmd === "get_download_progress") {
+        if (!releasePoll) {
+          return new Promise((resolve) => {
+            releasePoll = () => resolve(makeProgress({ error: "stale failure" }));
+          });
+        }
+        return Promise.resolve(makeProgress({ progress: 0.42 }));
+      }
+      return Promise.resolve(null);
+    });
+
+    const { startGameDownload, getDownloadState } = await import("./downloads");
+    startGameDownload(140, "Dig Dug");
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(releasePoll, "a poll should be in flight").not.toBeNull();
+
+    startGameDownload(140, "Dig Dug");
+    await vi.advanceTimersByTimeAsync(1100);
+    releasePoll!(null);
+    await vi.advanceTimersByTimeAsync(1100);
+
+    const state = getDownloadState(140);
+    expect(state?.status).not.toContain("stale failure");
+    expect(state?.downloading).toBe(true);
+  });
+
+  // The post-install entry is cleared on a 5s delay so isInstalled() stays
+  // true until the DB flag propagates. A download started inside that window
+  // owns the entry, and the old timer must not take it away.
+  it("keeps a fresh download that starts inside the post-install cleanup delay", async () => {
+    let installed = true;
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "download_game") { return Promise.resolve("ok"); }
+      if (cmd === "get_download_progress") {
+        return Promise.resolve(installed
+          ? makeProgress({ installed: true, finished: true, progress: 1 })
+          : makeProgress({ progress: 0.42 }));
+      }
+      if (cmd === "get_games") { return Promise.resolve({ games: [], total: 0 }); }
+      return Promise.resolve(null);
+    });
+
+    const { startGameDownload, getDownloadState } = await import("./downloads");
+    startGameDownload(141, "Dig Dug");
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(getDownloadState(141)?.status).toBe("Installed!");
+
+    installed = false;
+    startGameDownload(141, "Dig Dug");
+    await vi.advanceTimersByTimeAsync(6100);
+
+    expect(getDownloadState(141)).toBeDefined();
+    expect(getDownloadState(141)?.downloading).toBe(true);
+  });
 });
