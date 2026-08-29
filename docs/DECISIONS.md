@@ -24,3 +24,9 @@
 - Verworfen: unter Windows native Backslashes ausgeben. Das verwischt die Grenze Host-Pfad/Guest-DOS-Text wieder, die den kaputten Guest-`PATH` gekostet hat (1.122 Win3x-Spiele).
 - Grund: DOSBox entfernt vor dem `stat()` des Mount-Ziels nur einen abschliessenden BACKSLASH (Windows-Workaround); unser `/` rutscht durch, der Mount scheitert, das Autoexec laeuft in sein `exit`. Betrifft 1.570 eXoDOS-Confs (u.a. DOOM II) und 91 eXoWin3x-Confs, nur unter Windows - POSIX-`stat` akzeptiert den Trailing Slash, deshalb auf dem Dev-Rechner unsichtbar.
 - Gotcha: Quoting gehoert NUR an Kommandoargumente. Ein Config-Property (`fluid.soundfont=`) liest seinen Wert woertlich, dort wuerden die Anfuehrungszeichen Teil des Pfades.
+
+## 2026-08-30 - Ein Tracker-Objekt pro Download statt zwoelf paralleler Tabellen (#22)
+- Entscheidung: `stores/downloads.ts` haelt den Zustand eines Downloads in einer `Map<number, Tracker>`; die Poll-Schleife plant sich selbst (`while (!t.cancelled) { await sleep; await tick }`) statt per `setInterval`. Beenden heisst `endTracker`, und das prueft die Identitaet (`trackers.get(id) === t`), damit ein auslaufender Lauf nicht den Versuch abmeldet, der ihn ersetzt hat.
+- Verworfen: `@tanstack/solid-query` - absorbiert nur den Scheduler. Zwei-Signal-Stall-Erkennung, Extras-Phase nach dem Install, Torrent-Validierungsfortschritt und Restart-Resume blieben Domaenenlogik, die zwoelf Tabellen also stehen, plus neue Abhaengigkeit.
+- Grund: 66 `delete …[gameId]` ueber sechs Exit-Pfade; ein vergessenes leckt Zustand in den naechsten Versuch. Genau so entstand 9c32855e (Cancel auf einen stockenden Download liess die Karte auf ihrem letzten Prozentwert stehen).
+- Gotcha: Der Generationszaehler ist weg, aber die Regel nicht - jeder `await` in `tick` muss danach `t.cancelled` lesen. Und der 5s-Timer nach dem Install prueft jetzt `trackers.has(id)`, sonst loescht er den Eintrag eines Downloads, der in diesem Fenster neu gestartet wurde.
