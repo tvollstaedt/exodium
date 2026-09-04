@@ -18,6 +18,12 @@ export async function loadViewMode() {
   }
 }
 
+/** The music chip flips the mode for the session without changing the user's
+ *  saved preference. */
+export function setViewModeTransient(mode: ViewMode) {
+  setViewModeSignal(mode);
+}
+
 /** Optimistic: the toggle must feel instant, and a failed write only costs
  *  persistence across restarts, not the current session. */
 export function applyViewMode(mode: ViewMode) {

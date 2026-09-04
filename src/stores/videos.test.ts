@@ -8,6 +8,9 @@ const PROBING = { phase: "probing", progress: 0, total_bytes: 0, path: null, err
 const FETCHING = { phase: "fetching", progress: 0.2, total_bytes: 2_000_000, path: null, error: null };
 const READY = { phase: "ready", progress: 1, total_bytes: 100, path: "/v.mp4", error: null };
 const NONE = { phase: "none", progress: 0, total_bytes: 0, path: null, error: null };
+/** The offline answer: same phase as "the archive has none", but carrying
+ *  OFFLINE_TOKEN in `error` because no archive was ever opened (media.rs). */
+const OFFLINE = { phase: "none", progress: 0, total_bytes: 0, path: null, error: "offline" };
 
 /** Route each command to a handler so tests can script the backend. */
 function backend(handlers: Record<string, (args: any) => any>) {
@@ -173,6 +176,41 @@ describe("video store", () => {
     await vi.advanceTimersByTimeAsync(800);
     expect(store.getVideoState(9)?.phase).toBe("none");
     expect(store.activeVideoCount()).toBe(0);
+  });
+
+  /** Offline the backend has no torrent session, so its "none" is the missing
+   *  manager talking, not the archive. Cached, it would blacklist the game for
+   *  the rest of the session - `requestVideo` refuses to ask about a game it
+   *  already has an answer for - and the preview would still be missing after
+   *  the app went back online. */
+  it("does not remember an offline 'no video' answer", async () => {
+    let answer: any = OFFLINE;
+    backend({ start_game_video: () => answer });
+    const store = await import("./videos");
+
+    await store.requestVideo(11);
+    await vi.advanceTimersByTimeAsync(10);
+    // Nothing is left behind: the panel shows no preview, and no retry button.
+    expect(store.getVideoState(11)).toBeUndefined();
+
+    answer = READY;
+    await store.requestVideo(11);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(calls("start_game_video").length).toBe(2);
+    expect(store.getVideoState(11)?.phase).toBe("ready");
+  });
+
+  /** ...while a "none" the archive itself answered stays remembered. */
+  it("remembers a probe that found no video", async () => {
+    backend({ start_game_video: () => NONE });
+    const store = await import("./videos");
+
+    await store.requestVideo(12);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(store.getVideoState(12)?.phase).toBe("none");
+
+    await store.requestVideo(12);
+    expect(calls("start_game_video").length).toBe(1);
   });
 
   it("records the path once a fetch finishes", async () => {

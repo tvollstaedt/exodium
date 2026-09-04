@@ -1073,6 +1073,30 @@ body {
   color: var(--text-primary);
 }
 
+/* Same box as the toolbar's selects (padding, font, border) so the row of
+   controls keeps one height - only the radius differs. */
+.filter-chip {
+  background: var(--bg-secondary);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  color: var(--text-muted);
+  padding: 6px 12px;
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.filter-chip:hover:not(.active) {
+  color: var(--text-primary);
+}
+
+.filter-chip.active {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+
 .game-list {
   display: flex;
   flex-direction: column;
@@ -1083,7 +1107,7 @@ body {
 .game-row {
   display: grid;
   grid-template-columns:
-    28px minmax(200px, 2.4fr) 44px minmax(110px, 1.3fr)
+    28px 24px minmax(200px, 2.4fr) 44px minmax(110px, 1.3fr)
     minmax(110px, 1.3fr) minmax(110px, 1.3fr) 58px 68px 104px;
   gap: 10px;
   align-items: center;
@@ -1185,6 +1209,63 @@ body {
   opacity: 1;
 }
 
+.game-row .row-play {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: visible;
+}
+
+.row-play-btn {
+  position: relative;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1;
+  padding: 2px;
+  cursor: pointer;
+}
+
+.row-play-btn:hover:not(:disabled) {
+  color: var(--text-primary);
+}
+
+.row-play-btn.is-current {
+  color: var(--accent-hover);
+}
+
+.row-play-btn.is-busy {
+  animation: row-play-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes row-play-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* Already on disk: plays instantly, no torrent read. */
+.row-play-btn.is-cached::after {
+  content: "";
+  position: absolute;
+  right: -1px;
+  bottom: 0;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.row-play-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.game-row.is-playing {
+  background: var(--accent-glow);
+  box-shadow: inset 2px 0 0 0 var(--accent);
+}
+
 .game-row .row-status {
   display: flex;
   align-items: center;
@@ -1211,7 +1292,7 @@ body {
   .game-list-header,
   .game-row {
     grid-template-columns:
-      28px minmax(200px, 2.4fr) 44px minmax(110px, 1.3fr)
+      28px 24px minmax(200px, 2.4fr) 44px minmax(110px, 1.3fr)
       minmax(110px, 1.3fr) 58px 68px 104px;
   }
 
@@ -1225,7 +1306,7 @@ body {
   .game-list-header,
   .game-row {
     grid-template-columns:
-      28px minmax(160px, 2.4fr) 44px minmax(100px, 1.3fr) 58px 68px 104px;
+      28px 24px minmax(160px, 2.4fr) 44px minmax(100px, 1.3fr) 58px 68px 104px;
   }
 
   .game-list-header .row-dev,
@@ -4782,4 +4863,218 @@ body {
 html.soft-render * {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
+}
+
+/* ============================================
+   Now Playing bar (theme music player)
+   ============================================
+   A bottom row of the flex column, like .top-bar at the top. Its height
+   lives in --player-h so the fixed detail panel and its backdrop can leave
+   the bar reachable while a game is open. */
+:root {
+  --player-h: 0px;
+}
+
+body.has-player {
+  --player-h: 56px;
+}
+
+.now-playing-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: var(--player-h);
+  padding: 0 12px;
+  flex-shrink: 0;
+  background: var(--bg-secondary);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  z-index: 1;
+}
+
+.player-cover {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--bg-card);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.player-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.player-cover-placeholder {
+  color: var(--text-muted);
+  font-size: 18px;
+}
+
+/* Title block and seek bar share the flexible middle; the basis keeps the
+   title from collapsing to its ellipsis while the seek bar has room. */
+.player-meta {
+  min-width: 0;
+  flex: 1 1 140px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.player-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.player-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.player-seek {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 200px;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.player-time {
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.player-seek-range {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--accent);
+}
+
+/* Narrow windows keep the title and the controls; the seek bar is the part
+   that has nowhere left to go. */
+@media (max-width: 700px) {
+  .player-seek {
+    display: none;
+  }
+}
+
+.player-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.player-btn {
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.player-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* The bar is up while the first track is still being fetched: the transport
+   keeps its place so nothing shifts once the bytes land. */
+.player-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.player-btn-main {
+  width: 34px;
+  height: 34px;
+  background: var(--accent);
+  color: #fff;
+}
+
+.player-btn-main:hover:not(:disabled) {
+  background: var(--accent-hover);
+  color: #fff;
+}
+
+.player-continuous.is-on {
+  color: var(--accent);
+}
+
+.player-volume {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* The icon is an inline SVG: without this it sits on the text baseline. */
+.player-volume > span {
+  display: flex;
+}
+
+.player-volume input[type="range"] {
+  width: 90px;
+  accent-color: var(--accent);
+}
+
+.player-close {
+  font-size: 18px;
+  color: var(--text-muted);
+}
+
+/* The panel covers the viewport height; with a player open it stops above
+   the bar, and so does the backdrop - or it swallows the bar's clicks. */
+.game-detail-backdrop,
+.game-detail-panel {
+  bottom: var(--player-h);
+}
+
+/* Theme row in the detail panel: sits with the Information block. */
+.game-detail-music {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.game-detail-music-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  min-height: 28px;
+}
+
+.game-detail-music-row .btn-spinner {
+  flex-shrink: 0;
+}
+
+.game-detail-music-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

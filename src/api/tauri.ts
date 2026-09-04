@@ -43,6 +43,9 @@ export interface Game {
   thumbnail_key: string | null;
   manual_path: string | null;
   last_played: string | null;
+  /** Catalogue hint that the GameData archive holds a theme track, with its
+   *  file name. A hint only - the archive decides; null means "not expected". */
+  music_file: string | null;
 }
 
 export interface GameList {
@@ -58,9 +61,10 @@ export async function getGames(
   sortBy?: string,
   collection?: string,
   favoritesOnly?: boolean,
-  playlistId?: number | null
+  playlistId?: number | null,
+  withMusic?: boolean
 ): Promise<GameList> {
-  return invoke("get_games", { page, perPage, query, genre, sortBy, collection, favoritesOnly, playlistId });
+  return invoke("get_games", { page, perPage, query, genre, sortBy, collection, favoritesOnly, playlistId, withMusic });
 }
 
 export async function toggleFavorite(id: number): Promise<boolean> {
@@ -82,8 +86,9 @@ export async function getSectionKeys(
   collection?: string,
   favoritesOnly?: boolean,
   playlistId?: number | null,
+  withMusic?: boolean,
 ): Promise<string[]> {
-  return invoke("get_section_keys", { sortBy, query, genre, collection, favoritesOnly, playlistId });
+  return invoke("get_section_keys", { sortBy, query, genre, collection, favoritesOnly, playlistId, withMusic });
 }
 
 // ── Playlists ────────────────────────────────────────────────────────────────
@@ -554,6 +559,59 @@ export async function getVideoStatus(id: number): Promise<VideoStatus | null> {
 
 export async function cancelGameVideo(id: number): Promise<void> {
   return invoke("cancel_game_video", { id });
+}
+
+/** Theme tracks come out of the same archive as the video and report the
+ *  same shape: phase / progress / path. */
+export type MediaStatus = VideoStatus;
+
+export async function startGameMusic(id: number): Promise<MediaStatus> {
+  return invoke("start_game_music", { id });
+}
+
+export async function getMusicStatus(id: number): Promise<MediaStatus | null> {
+  return invoke("get_music_status", { id });
+}
+
+export async function cancelGameMusic(id: number): Promise<void> {
+  return invoke("cancel_game_music", { id });
+}
+
+export interface MusicSupport {
+  mp3: boolean;
+  ogg: boolean;
+}
+
+/** Which theme formats the webview can play; per format, so a missing vorbis
+ *  decoder only skips the .ogg tracks. Always true outside Linux. */
+export async function musicPlaybackSupported(): Promise<MusicSupport> {
+  return invoke("music_playback_supported");
+}
+
+export interface MusicCandidate {
+  id: number;
+  title: string;
+  torrent_source: string | null;
+  thumbnail_key: string | null;
+  music_file: string;
+}
+
+/** Random games expected to carry a playable theme, for the shuffle queue. */
+export async function musicShuffleCandidates(count: number): Promise<MusicCandidate[]> {
+  return invoke("music_shuffle_candidates", { count });
+}
+
+export interface MusicCacheIndex {
+  /** Game ids whose theme track is already in the music cache. */
+  cached: number[];
+  /** Game ids a finished probe found no theme for (`.nomusic` marker). */
+  none: number[];
+}
+
+/** What the cache already knows, so the list can render its play affordances
+ *  without a probe per row. */
+export async function musicCacheIndex(): Promise<MusicCacheIndex> {
+  return invoke("music_cache_index");
 }
 
 /** Playable URL for a media file. Linux answers with a localhost HTTP URL

@@ -40,7 +40,8 @@ pub fn create_tables(conn: &Connection) -> DbResult<()> {
             thumbnail_key         TEXT,
             manual_path           TEXT,
             last_played           TEXT,
-            rating_votes          INTEGER
+            rating_votes          INTEGER,
+            music_file            TEXT
         );
 
         CREATE TABLE IF NOT EXISTS downloads (

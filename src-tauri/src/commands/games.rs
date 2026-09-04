@@ -111,6 +111,7 @@ pub async fn get_games(
     collection: Option<String>,
     favorites_only: Option<bool>,
     playlist_id: Option<i64>,
+    with_music: Option<bool>,
 ) -> Result<GameList, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     let page = page.unwrap_or(1);
@@ -127,6 +128,7 @@ pub async fn get_games(
         collection: &collection,
         favorites_only: favorites_only.unwrap_or(false),
         playlist_id,
+        with_music: with_music.unwrap_or(false),
     };
 
     let total = queries::count_games_filtered(&conn, &f).map_err(|e| e.to_string())?;
@@ -143,6 +145,7 @@ pub async fn get_genres(state: State<'_, DbState>, collection: Option<String>) -
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn get_section_keys(
     state: State<'_, DbState>,
     sort_by: Option<String>,
@@ -151,6 +154,7 @@ pub async fn get_section_keys(
     collection: Option<String>,
     favorites_only: Option<bool>,
     playlist_id: Option<i64>,
+    with_music: Option<bool>,
 ) -> Result<Vec<String>, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     let sort_by = sort_by.unwrap_or_default();
@@ -164,6 +168,7 @@ pub async fn get_section_keys(
         collection: &collection,
         favorites_only: favorites_only.unwrap_or(false),
         playlist_id,
+        with_music: with_music.unwrap_or(false),
     };
     let result = queries::get_section_keys(&conn, &f).map_err(|e| e.to_string());
     log::debug!("get_section_keys: sort_by={:?} collection={:?} → {:?} keys", sort_by, collection, result.as_ref().map(|v| v.len()));
@@ -3351,7 +3356,7 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
         }
     }
 
-    spawn_emulator_and_track(cmd, &dosbox_bin, &game, id)
+    spawn_emulator_and_track(&app, cmd, &dosbox_bin, &game, id)
 }
 
 /// Variables the AppImage runtime and linuxdeploy's GTK/GStreamer hooks export
@@ -3452,11 +3457,19 @@ fn sanitize_appimage_env(cmd: &mut Command) {
 #[cfg(not(target_os = "linux"))]
 fn sanitize_appimage_env(_cmd: &mut Command) {}
 
+/// Emitted when the emulator process ends, so the frontend can undo what a
+/// launch changed (the music player pauses for a running game).
+#[derive(Clone, Serialize)]
+struct GameExited {
+    id: i64,
+}
+
 /// Platform-correct stdio setup, spawn and child-reaping for an emulator
 /// process. Shared by the Staging/ECE path above and the Win9x engines
 /// (DOSBox-X / 86Box) - the macOS EBADF workarounds and the per-game log
 /// capture must not fork per engine.
 pub(crate) fn spawn_emulator_and_track(
+    app: &AppHandle,
     mut cmd: Command,
     emulator_bin: &Path,
     game: &Game,
@@ -3564,12 +3577,15 @@ pub(crate) fn spawn_emulator_and_track(
     // per-file and used to silently lose saves through the copy fallback.
     let run_key = running_game_key(game);
     running_games().lock().map(|mut s| s.insert(run_key.clone())).ok();
+    let app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         match child.wait() {
             Ok(status) => log::info!("Emulator exited ({}) for {}", status, run_key),
             Err(e) => log::warn!("Emulator wait failed for {}: {}", run_key, e),
         }
         running_games().lock().map(|mut s| s.remove(&run_key)).ok();
+        use tauri::Emitter;
+        let _ = app.emit("game-exited", GameExited { id });
     });
 
     Ok(format!("Launched: {}", game.title))

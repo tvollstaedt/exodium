@@ -250,6 +250,42 @@ pub fn find_video(entries: &[ZipEntry]) -> Option<&ZipEntry> {
         .max_by_key(|e| e.uncompressed_size)
 }
 
+/// Audio formats the webview decodes. The catalogue also names tracker
+/// modules (.mod/.xm/.s3m/.amf/.psm) and .m3u lists for a handful of games;
+/// neither plays in an `<audio>` element, so they are simply not offered.
+pub const MUSIC_EXTENSIONS: &[&str] = &[".mp3", ".ogg"];
+
+/// A track outside `Music/` is a bonus extra; past this size it is a full
+/// soundtrack rip, not a theme.
+const MAX_FALLBACK_MUSIC_BYTES: u64 = 32 * 1024 * 1024;
+
+pub fn is_music(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    MUSIC_EXTENSIONS.iter().any(|ext| lower.ends_with(ext))
+}
+
+/// Find the game's theme track.
+///
+/// eXoDOS files ONE track per game under `Music/MS-DOS/<Title>.mp3` (or .ogg),
+/// beside the preview video. Same shape as `find_video`: the curated folder
+/// wins, anything else is a bounded fallback.
+pub fn find_music(entries: &[ZipEntry]) -> Option<&ZipEntry> {
+    let preferred = entries
+        .iter()
+        .filter(|e| {
+            let lower = e.name.to_ascii_lowercase();
+            lower.starts_with("music/") && is_music(&lower)
+        })
+        .max_by_key(|e| e.uncompressed_size);
+    if preferred.is_some() {
+        return preferred;
+    }
+    entries
+        .iter()
+        .filter(|e| is_music(&e.name) && e.uncompressed_size <= MAX_FALLBACK_MUSIC_BYTES)
+        .max_by_key(|e| e.uncompressed_size)
+}
+
 /// Top-level folders of an archive, for diagnosing a "no video here" verdict -
 /// otherwise a wrong matcher and an archive that genuinely has none look the
 /// same in the log.
@@ -386,6 +422,54 @@ mod tests {
         assert!(find_video(&entries).is_none());
     }
 
+    #[test]
+    fn find_music_prefers_the_music_folder() {
+        let entries = vec![
+            ZipEntry { name: "eXo/eXoDOS/!dos/x/Extras/rip.mp3".into(), compressed_size: 9_000_000, uncompressed_size: 9_000_000, method: 8, local_header_offset: 0 },
+            ZipEntry { name: "Music/MS-DOS/Game (1995).mp3".into(), compressed_size: 3_000_000, uncompressed_size: 3_000_000, method: 0, local_header_offset: 100 },
+        ];
+        assert_eq!(find_music(&entries).unwrap().name, "Music/MS-DOS/Game (1995).mp3");
+    }
+
+    /// The catalogue names tracker modules for a few games; the webview cannot
+    /// play them, so they must read as "no theme", not as a broken track.
+    #[test]
+    fn tracker_formats_are_not_offered() {
+        for ext in ["mod", "xm", "s3m", "amf", "psm", "m3u"] {
+            let entries = vec![ZipEntry {
+                name: format!("Music/MS-DOS/Game (1995).{}", ext),
+                compressed_size: 100_000,
+                uncompressed_size: 100_000,
+                method: 8,
+                local_header_offset: 0,
+            }];
+            assert!(find_music(&entries).is_none(), "{} was offered", ext);
+        }
+    }
+
+    #[test]
+    fn find_music_none_when_absent() {
+        let entries = vec![ZipEntry {
+            name: "Videos/MS-DOS/Game (1995).mp4".into(),
+            compressed_size: 100,
+            uncompressed_size: 100,
+            method: 8,
+            local_header_offset: 0,
+        }];
+        assert!(find_music(&entries).is_none());
+    }
+
+    #[tokio::test]
+    async fn extracts_a_music_entry() {
+        let zip = make_zip(b"video", true);
+        let mut cursor = std::io::Cursor::new(zip.clone());
+        let entries = read_central_directory(&mut cursor, zip.len() as u64).await.unwrap();
+        let music = find_music(&entries).expect("music entry");
+        assert!(music.name.starts_with("Music/"));
+        let bytes = read_entry(&mut cursor, music).await.unwrap();
+        assert_eq!(bytes, vec![b'S'; 10_000]);
+    }
+
     #[tokio::test]
     async fn no_video_entry_is_not_an_error() {
         let mut buf = std::io::Cursor::new(Vec::new());
@@ -441,6 +525,53 @@ mod tests {
         let mut cursor = std::io::Cursor::new(junk.clone());
         let err = read_central_directory(&mut cursor, junk.len() as u64).await.unwrap_err();
         assert!(err.to_string().contains("end-of-central-directory"));
+    }
+
+    /// Same opt-in check for the theme tracks: every archive that lists one
+    /// must yield it, and the bytes must be what the extension promises.
+    ///   EXODIUM_GAMEDATA_DIR=/path/to/GameData/eXoDOS cargo test real_gamedata_music -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn real_gamedata_music() {
+        let Ok(dir) = std::env::var("EXODIUM_GAMEDATA_DIR") else {
+            eprintln!("set EXODIUM_GAMEDATA_DIR to run this");
+            return;
+        };
+        let (mut listed, mut read, mut no_music, mut partial) = (0, 0, 0, 0);
+        for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("zip") {
+                continue;
+            }
+            let len = entry.metadata().unwrap().len();
+            let mut file = tokio::fs::File::open(&path).await.unwrap();
+            let entries = match read_central_directory(&mut file, len).await {
+                Ok(e) if !e.is_empty() => e,
+                _ => continue,
+            };
+            listed += 1;
+            let Some(music) = find_music(&entries) else { no_music += 1; continue };
+            match read_entry(&mut file, music).await {
+                Ok(bytes) => {
+                    assert_eq!(bytes.len() as u64, music.uncompressed_size, "{}", path.display());
+                    let lower = music.name.to_ascii_lowercase();
+                    if lower.ends_with(".ogg") {
+                        assert_eq!(&bytes[..4], b"OggS", "not an ogg: {}", music.name);
+                    } else {
+                        // ID3v2 tag or a bare MPEG frame sync.
+                        assert!(&bytes[..3] == b"ID3" || (bytes[0] == 0xFF && bytes[1] & 0xE0 == 0xE0), "not an mp3: {}", music.name);
+                    }
+                    read += 1;
+                    eprintln!("{} <- {} ({:.1} MB)", path.file_name().unwrap().to_string_lossy(), music.name, bytes.len() as f64 / 1048576.0);
+                }
+                Err(e) => {
+                    assert!(e.to_string().contains("partially downloaded"), "unexpected failure on {}: {}", path.display(), e);
+                    partial += 1;
+                }
+            }
+        }
+        eprintln!("\n{} archives listed, {} themes extracted, {} without theme, {} partially downloaded\n", listed, read, no_music, partial);
+        assert!(read > 0, "no theme could be read from {}", dir);
     }
 
     /// Opt-in check against real eXoDOS GameData archives:

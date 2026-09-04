@@ -1,7 +1,8 @@
-//! Game preview videos.
+//! Game preview videos and theme tracks.
 //!
 //! eXoDOS ships one MP4 per game inside that game's `GameData/<Title>.zip`,
-//! next to the manual. Those archives run from 2 MB to 1.1 GB, so playing a
+//! next to the manual, and for about half the games one theme track under
+//! `Music/MS-DOS/`. Those archives run from 2 MB to 1.1 GB, so playing a
 //! 2.5 MB preview must not mean fetching the archive: `torrent::zip_range`
 //! reads the archive's directory from its tail, then only the video's own
 //! bytes, over a torrent stream that fetches pieces on demand. Measured on the
@@ -51,6 +52,13 @@ pub struct VideoStatus {
     pub error: Option<String>,
 }
 
+/// The `error` token that marks a phase "none" which is NOT an inventory
+/// answer: no torrent session exists (offline mode), so the archive was never
+/// asked at all. "none" is otherwise permanent and the frontend caches it, so
+/// this has to stay distinguishable - and it is a stable token the frontend
+/// keys on (`phase == "none" && error != null`), not a message to show.
+pub const OFFLINE_TOKEN: &str = "offline";
+
 impl VideoStatus {
     fn phase(phase: &str) -> Self {
         Self {
@@ -61,6 +69,14 @@ impl VideoStatus {
             error: None,
         }
     }
+
+    /// Offline is a legitimate state, not an error worth a red toast - hence
+    /// phase "none" - but it must not be cached as "this archive has none".
+    fn offline() -> Self {
+        let mut status = Self::phase("none");
+        status.error = Some(OFFLINE_TOKEN.to_string());
+        status
+    }
 }
 
 struct VideoJob {
@@ -68,10 +84,12 @@ struct VideoJob {
     cancel: Arc<AtomicBool>,
 }
 
+type JobMap = Arc<RwLock<HashMap<i64, VideoJob>>>;
+
 /// Tauri-managed state for in-flight video fetches. The field is private
 /// because `VideoJob` is - a `pub` field of a private type is an error under
 /// `-D warnings`, and nothing outside this module ever needed the access.
-pub struct VideoState(Arc<RwLock<HashMap<i64, VideoJob>>>);
+pub struct VideoState(JobMap);
 
 impl VideoState {
     pub fn new() -> Self {
@@ -85,29 +103,128 @@ impl Default for VideoState {
     }
 }
 
-// ── Paths ────────────────────────────────────────────────────────────────────
+/// In-flight theme-track fetches: the same job model as videos, in its own
+/// map so a game's video and its music can be in flight at the same time.
+pub struct MusicState(JobMap);
 
-fn video_cache_dir(data_dir: &str) -> PathBuf {
-    // No leading dot - the asset-protocol scope glob skips hidden components,
-    // which is why the first version served nothing (see setup::gallery_cache_dir).
-    PathBuf::from(data_dir).join("content").join("videocache")
+impl MusicState {
+    pub fn new() -> Self {
+        Self(Arc::new(RwLock::new(HashMap::new())))
+    }
 }
 
-fn cache_path(data_dir: &str, collection: &str, file_index: usize) -> PathBuf {
-    video_cache_dir(data_dir).join(format!("{}_{}.mp4", collection, file_index))
+impl Default for MusicState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
-/// Marks an archive as having no video.
-///
-/// Whether a game has one is only knowable from the archive's own index, which
-/// sits at the end of a file in the torrent - so the answer costs a piece
-/// download (8 MB), every time, for a game that turns out to have nothing. The
-/// catalogue cannot help: its `MissingVideo` flag said "true" for 16 of the 24
-/// sampled games that do have one. So the answer is written down and the
-/// question asked once per archive, ever.
-fn no_video_marker(data_dir: &str, collection: &str, file_index: usize) -> PathBuf {
-    video_cache_dir(data_dir).join(format!("{}_{}.novideo", collection, file_index))
+/// What is being pulled out of a GameData archive. The preview video and the
+/// theme track sit in the same zip and travel the same road - index from the
+/// archive's tail, one entry by offset, a file in the cache, a marker when
+/// there is nothing - so the kind is a parameter of one pipeline rather than
+/// a second copy of it. Only the finder, the cache folder and the file naming
+/// differ.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MediaKind {
+    Video,
+    Music,
 }
+
+impl MediaKind {
+    fn label(self) -> &'static str {
+        match self {
+            MediaKind::Video => "video",
+            MediaKind::Music => "music",
+        }
+    }
+
+    fn cache_dir(self, data_dir: &str) -> PathBuf {
+        // No leading dot - the asset-protocol scope glob skips hidden components,
+        // which is why the first version served nothing (see setup::gallery_cache_dir).
+        let name = match self {
+            MediaKind::Video => "videocache",
+            MediaKind::Music => "musiccache",
+        };
+        PathBuf::from(data_dir).join("content").join(name)
+    }
+
+    /// Marks an archive as having no entry of this kind.
+    ///
+    /// Whether a game has one is only knowable from the archive's own index,
+    /// which sits at the end of a file in the torrent - so the answer costs a
+    /// piece download (8 MB), every time, for a game that turns out to have
+    /// nothing. The catalogue cannot help: its `MissingVideo` flag said "true"
+    /// for 16 of the 24 sampled games that do have one, and `MissingMusic` is
+    /// LaunchBox's default rather than an inventory. So the answer is written
+    /// down and the question asked once per archive, ever.
+    fn marker(self, data_dir: &str, collection: &str, file_index: usize) -> PathBuf {
+        let ext = match self {
+            MediaKind::Video => "novideo",
+            MediaKind::Music => "nomusic",
+        };
+        self.cache_dir(data_dir).join(format!("{}_{}.{}", collection, file_index, ext))
+    }
+
+    /// Where a fetched entry is written. Videos are always `.mp4`; a track
+    /// keeps its own extension, because tower-http's ServeFile derives the
+    /// Content-Type from it and GStreamer picks its demuxer by that.
+    fn cache_file(self, data_dir: &str, collection: &str, file_index: usize, entry_name: &str) -> PathBuf {
+        let ext = match self {
+            MediaKind::Video => "mp4".to_string(),
+            MediaKind::Music => Path::new(entry_name)
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.to_ascii_lowercase())
+                .unwrap_or_else(|| "mp3".to_string()),
+        };
+        self.cache_dir(data_dir).join(format!("{}_{}.{}", collection, file_index, ext))
+    }
+
+    /// Whether a cache file is a fetched entry, as opposed to a marker or a
+    /// half-written `.part`.
+    fn is_payload(self, path: &Path) -> bool {
+        let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
+            return false;
+        };
+        match self {
+            MediaKind::Video => ext == "mp4",
+            MediaKind::Music => zip_range::is_music(&format!(".{}", ext)),
+        }
+    }
+
+    /// The entry fetched on an earlier visit, if any.
+    fn cached(self, data_dir: &str, collection: &str, file_index: usize) -> Option<PathBuf> {
+        match self {
+            MediaKind::Video => {
+                let path = self.cache_file(data_dir, collection, file_index, "");
+                path.is_file().then_some(path)
+            }
+            MediaKind::Music => {
+                // The extension is the track's own, so the lookup is by stem.
+                let stem = format!("{}_{}", collection, file_index);
+                std::fs::read_dir(self.cache_dir(data_dir))
+                    .ok()?
+                    .flatten()
+                    .map(|e| e.path())
+                    .find(|p| {
+                        p.file_stem().and_then(|s| s.to_str()) == Some(stem.as_str())
+                            && self.is_payload(p)
+                            && p.is_file()
+                    })
+            }
+        }
+    }
+
+    fn find(self, entries: &[zip_range::ZipEntry]) -> Option<&zip_range::ZipEntry> {
+        match self {
+            MediaKind::Video => zip_range::find_video(entries),
+            MediaKind::Music => zip_range::find_music(entries),
+        }
+    }
+}
+
+// ── Cache ────────────────────────────────────────────────────────────────────
 
 async fn write_cache(path: &Path, bytes: &[u8]) -> Result<(), String> {
     if let Some(parent) = path.parent() {
@@ -122,31 +239,42 @@ async fn write_cache(path: &Path, bytes: &[u8]) -> Result<(), String> {
 }
 
 /// Videos are 2-27 MB each, so browsing a few hundred games would otherwise
-/// fill a disk quietly. Only the videos are pruned: the `.novideo` markers are
-/// empty files that cost nothing and save a piece download each.
+/// fill a disk quietly. Only the payload is pruned: the markers are empty
+/// files that cost nothing and save a piece download each.
 const VIDEO_CACHE_MAX_BYTES: u64 = 1024 * 1024 * 1024;
+/// Themes are 1-8 MB, so the same cap keeps a few hundred tracks - enough for
+/// the shuffle to become mostly free over time.
+const MUSIC_CACHE_MAX_BYTES: u64 = 1024 * 1024 * 1024;
 
 pub fn prune_video_cache(data_dir: &str) {
-    let dir = video_cache_dir(data_dir);
+    prune_media_cache(MediaKind::Video, data_dir, VIDEO_CACHE_MAX_BYTES);
+}
+
+pub fn prune_music_cache(data_dir: &str) {
+    prune_media_cache(MediaKind::Music, data_dir, MUSIC_CACHE_MAX_BYTES);
+}
+
+fn prune_media_cache(kind: MediaKind, data_dir: &str, max_bytes: u64) {
+    let dir = kind.cache_dir(data_dir);
     let Ok(entries) = std::fs::read_dir(&dir) else { return };
-    let mut videos: Vec<(PathBuf, u64, std::time::SystemTime)> = Vec::new();
+    let mut files: Vec<(PathBuf, u64, std::time::SystemTime)> = Vec::new();
     let mut total = 0u64;
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("mp4") {
+        if !kind.is_payload(&path) {
             continue;
         }
         let Ok(meta) = entry.metadata() else { continue };
         total += meta.len();
-        videos.push((path, meta.len(), meta.modified().unwrap_or(std::time::UNIX_EPOCH)));
+        files.push((path, meta.len(), meta.modified().unwrap_or(std::time::UNIX_EPOCH)));
     }
-    if total <= VIDEO_CACHE_MAX_BYTES {
+    if total <= max_bytes {
         return;
     }
-    videos.sort_by_key(|(_, _, modified)| *modified);
-    let target = VIDEO_CACHE_MAX_BYTES / 5 * 4;
+    files.sort_by_key(|(_, _, modified)| *modified);
+    let target = max_bytes / 5 * 4;
     let mut freed = 0u64;
-    for (path, len, _) in videos {
+    for (path, len, _) in files {
         if total - freed <= target {
             break;
         }
@@ -154,7 +282,45 @@ pub fn prune_video_cache(data_dir: &str) {
             freed += len;
         }
     }
-    log::info!("Video cache pruned: {:.1} MB freed", freed as f64 / 1_048_576.0);
+    log::info!("{} cache pruned: {:.1} MB freed", kind.label(), freed as f64 / 1_048_576.0);
+}
+
+// ── Resolution ───────────────────────────────────────────────────────────────
+
+/// The GameData archive that holds a game's extras: (torrent file index,
+/// collection id).
+///
+/// Extras live in the English archive only: EVERY localized row has a NULL
+/// gamedata index (DE 484/484, ES 413/413, PL 56/56), so a German selection
+/// would otherwise report "nothing here" for a game that has a video and a
+/// theme. The sibling lookup stays within the pack family: shortcodes are
+/// unique per family, not globally, so an unqualified match would hand a
+/// Win3x game the DOS game's archive when the codes collide.
+pub(crate) fn resolve_gamedata(conn: &rusqlite::Connection, game: &crate::models::Game) -> (Option<i64>, String) {
+    if let Some(idx) = game.gamedata_torrent_index {
+        return (
+            Some(idx),
+            game.torrent_source.clone().unwrap_or_else(|| "eXoDOS".to_string()),
+        );
+    }
+    let base = crate::commands::setup::collection_base_id(
+        game.torrent_source.as_deref().unwrap_or("eXoDOS"),
+    );
+    let sibling = game.shortcode.as_deref().and_then(|sc| {
+        conn.query_row(
+            "SELECT g.gamedata_torrent_index, g.torrent_source FROM games g \
+             WHERE g.shortcode = ?1 AND g.gamedata_torrent_index IS NOT NULL \
+               AND COALESCE(g.torrent_source, 'eXoDOS') = ?2 \
+             ORDER BY CASE WHEN g.language = 'EN' THEN 0 ELSE 1 END LIMIT 1",
+            rusqlite::params![sc, base],
+            |r| Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, Option<String>>(1)?)),
+        )
+        .ok()
+    });
+    match sibling {
+        Some((idx, src)) => (idx, src.unwrap_or_else(|| "eXoDOS".to_string())),
+        None => (None, "eXoDOS".to_string()),
+    }
 }
 
 // ── Commands ─────────────────────────────────────────────────────────────────
@@ -163,10 +329,30 @@ pub fn prune_video_cache(data_dir: &str) {
 /// immediately; poll `get_video_status`.
 #[tauri::command]
 pub async fn start_game_video(
-    app: tauri::AppHandle,
     db_state: State<'_, DbState>,
     torrent_state: State<'_, TorrentState>,
     video_state: State<'_, VideoState>,
+    id: i64,
+) -> Result<VideoStatus, String> {
+    start_media(MediaKind::Video, &db_state, &torrent_state, &video_state.0, id).await
+}
+
+/// Same for the theme track; poll `get_music_status`.
+#[tauri::command]
+pub async fn start_game_music(
+    db_state: State<'_, DbState>,
+    torrent_state: State<'_, TorrentState>,
+    music_state: State<'_, MusicState>,
+    id: i64,
+) -> Result<VideoStatus, String> {
+    start_media(MediaKind::Music, &db_state, &torrent_state, &music_state.0, id).await
+}
+
+async fn start_media(
+    kind: MediaKind,
+    db_state: &DbState,
+    torrent_state: &TorrentState,
+    jobs: &JobMap,
     id: i64,
 ) -> Result<VideoStatus, String> {
     let (gamedata_idx, source, data_dir) = {
@@ -177,39 +363,7 @@ pub async fn start_game_video(
         let data_dir = queries::get_config(&conn, "data_dir")
             .map_err(|e| e.to_string())?
             .ok_or("Data directory not configured")?;
-
-        // Extras live in the English archive only: EVERY localized row has a
-        // NULL gamedata index (DE 484/484, ES 413/413, PL 56/56), so a German
-        // selection would otherwise report "no video" for a game that has one.
-        let (idx, source) = match game.gamedata_torrent_index {
-            Some(idx) => (
-                Some(idx),
-                game.torrent_source.unwrap_or_else(|| "eXoDOS".to_string()),
-            ),
-            None => {
-                // Only within the same pack family: shortcodes are unique per
-                // family, not globally, so an unqualified match would hand a
-                // Win3x game the DOS game's archive when the codes collide.
-                let base = crate::commands::setup::collection_base_id(
-                    game.torrent_source.as_deref().unwrap_or("eXoDOS"),
-                );
-                let sibling = game.shortcode.as_deref().and_then(|sc| {
-                    conn.query_row(
-                        "SELECT g.gamedata_torrent_index, g.torrent_source FROM games g \
-                         WHERE g.shortcode = ?1 AND g.gamedata_torrent_index IS NOT NULL \
-                           AND COALESCE(g.torrent_source, 'eXoDOS') = ?2 \
-                         ORDER BY CASE WHEN g.language = 'EN' THEN 0 ELSE 1 END LIMIT 1",
-                        rusqlite::params![sc, base],
-                        |r| Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, Option<String>>(1)?)),
-                    )
-                    .ok()
-                });
-                match sibling {
-                    Some((idx, src)) => (idx, src.unwrap_or_else(|| "eXoDOS".to_string())),
-                    None => (None, "eXoDOS".to_string()),
-                }
-            }
-        };
+        let (idx, source) = resolve_gamedata(&conn, &game);
         (idx, source, data_dir)
     };
 
@@ -219,13 +373,12 @@ pub async fn start_game_video(
     let gamedata_idx = gamedata_idx as usize;
 
     // Asked before, answer was no - do not pay for the same piece twice.
-    if no_video_marker(&data_dir, &source, gamedata_idx).is_file() {
+    if kind.marker(&data_dir, &source, gamedata_idx).is_file() {
         return Ok(VideoStatus::phase("none"));
     }
 
     // Already extracted - the common case after the first visit.
-    let cached = cache_path(&data_dir, &source, gamedata_idx);
-    if cached.is_file() {
+    if let Some(cached) = kind.cached(&data_dir, &source, gamedata_idx) {
         let mut status = VideoStatus::phase("ready");
         status.progress = 1.0;
         status.path = Some(crate::commands::setup::path_to_fwd_slash(&cached));
@@ -234,7 +387,7 @@ pub async fn start_game_video(
 
     // Join an in-flight job rather than starting a second one.
     {
-        let jobs = video_state.0.read().await;
+        let jobs = jobs.read().await;
         if let Some(job) = jobs.get(&id) {
             if job.status.phase == "probing" || job.status.phase == "fetching" {
                 return Ok(job.status.clone());
@@ -247,8 +400,10 @@ pub async fn start_game_video(
         guard.get(&source).cloned()
     };
     let Some(manager) = manager else {
-        // Offline is a legitimate state, not an error worth a red toast.
-        return Ok(VideoStatus::phase("none"));
+        // No manager means no session, i.e. offline. Same phase as "the archive
+        // has no music/video", but carrying OFFLINE_TOKEN so the frontend does
+        // not cache a temporary state as the archive's permanent answer.
+        return Ok(VideoStatus::offline());
     };
 
     let file = manager
@@ -260,7 +415,7 @@ pub async fn start_game_video(
 
     let cancel = Arc::new(AtomicBool::new(false));
     {
-        let mut jobs = video_state.0.write().await;
+        let mut jobs = jobs.write().await;
         jobs.insert(
             id,
             VideoJob {
@@ -270,25 +425,21 @@ pub async fn start_game_video(
         );
     }
 
-    let jobs_arc = Arc::clone(&video_state.0);
-    let marker = no_video_marker(&data_dir, &source, gamedata_idx);
-    let local_archive = crate::commands::setup::game_root(&data_dir).join(&file.path);
-    let archive_len = file.size;
-    let archive_path = file.path.clone();
+    let jobs_arc = Arc::clone(jobs);
+    let marker = kind.marker(&data_dir, &source, gamedata_idx);
+    let target = FetchTarget {
+        kind,
+        id,
+        gamedata_idx,
+        local_archive: crate::commands::setup::game_root(&data_dir).join(&file.path),
+        archive_len: file.size,
+        archive_path: file.path.clone(),
+        data_dir,
+        source,
+    };
 
     tauri::async_runtime::spawn(async move {
-        let result = fetch_video(
-            &jobs_arc,
-            id,
-            &manager,
-            gamedata_idx,
-            &local_archive,
-            archive_len,
-            &archive_path,
-            &cached,
-            &cancel,
-        )
-        .await;
+        let result = fetch_entry(&target, &jobs_arc, &manager, &cancel).await;
 
         let mut jobs = jobs_arc.write().await;
         let Some(job) = jobs.get_mut(&id) else { return };
@@ -311,38 +462,53 @@ pub async fn start_game_video(
                 jobs.remove(&id);
             }
             Err(e) => {
-                log::warn!("Video fetch for game {} failed: {}", id, e);
+                log::warn!("{} fetch for game {} failed: {}", kind.label(), id, e);
                 job.status.phase = "error".into();
                 job.status.error = Some(e);
             }
         }
     });
 
-    let _ = app; // AppHandle reserved for future event emission
     Ok(VideoStatus::phase("probing"))
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn fetch_video(
-    jobs: &Arc<RwLock<HashMap<i64, VideoJob>>>,
+/// Everything a fetch needs to know about its archive and where the result goes.
+struct FetchTarget {
+    kind: MediaKind,
     id: i64,
-    manager: &Arc<crate::torrent::manager::DownloadManager>,
     gamedata_idx: usize,
-    local_archive: &Path,
+    local_archive: PathBuf,
     archive_len: u64,
-    archive_path: &str,
-    cached: &Path,
+    archive_path: String,
+    data_dir: String,
+    source: String,
+}
+
+impl FetchTarget {
+    async fn store(&self, entry_name: &str, bytes: &[u8]) -> Result<String, String> {
+        let cached = self.kind.cache_file(&self.data_dir, &self.source, self.gamedata_idx, entry_name);
+        write_cache(&cached, bytes).await?;
+        Ok(crate::commands::setup::path_to_fwd_slash(&cached))
+    }
+}
+
+async fn fetch_entry(
+    target: &FetchTarget,
+    jobs: &JobMap,
+    manager: &Arc<crate::torrent::manager::DownloadManager>,
     cancel: &Arc<AtomicBool>,
 ) -> Result<Option<String>, String> {
+    let kind = target.kind;
+    let id = target.id;
     // 1) A local archive costs nothing: installed games keep their GameData,
-    //    and even a partial download can already cover the video.
-    if local_archive.is_file() {
-        if let Ok(mut handle) = tokio::fs::File::open(local_archive).await {
-            match extract(&mut handle, archive_len, jobs, id, cancel).await {
-                Ok(Some(bytes)) => {
-                    write_cache(cached, &bytes).await?;
-                    log::info!("Video for game {} read from the local archive", id);
-                    return Ok(Some(crate::commands::setup::path_to_fwd_slash(cached)));
+    //    and even a partial download can already cover the entry.
+    if target.local_archive.is_file() {
+        if let Ok(mut handle) = tokio::fs::File::open(&target.local_archive).await {
+            match extract(kind, &mut handle, target.archive_len, jobs, id, cancel).await {
+                Ok(Some((bytes, name))) => {
+                    let path = target.store(&name, &bytes).await?;
+                    log::info!("{} for game {} read from the local archive", kind.label(), id);
+                    return Ok(Some(path));
                 }
                 Ok(None) => return Ok(None),
                 Err(e) if e == "cancelled" => return Err(e),
@@ -352,28 +518,30 @@ async fn fetch_video(
     }
 
     // 2) Stream: seeks become piece requests, so the transfer is bounded by the
-    //    video's size rather than the archive's.
+    //    entry's size rather than the archive's.
     log::info!(
-        "Streaming video for game {} from {} ({:.1} MB archive)",
+        "Streaming {} for game {} from {} ({:.1} MB archive)",
+        kind.label(),
         id,
-        archive_path,
-        archive_len as f64 / 1_048_576.0
+        target.archive_path,
+        target.archive_len as f64 / 1_048_576.0
     );
     let mut stream = manager
-        .stream_file(gamedata_idx)
+        .stream_file(target.gamedata_idx)
         .await
         .map_err(|e| format!("Could not open the archive stream: {}", e))?;
-    let Some(bytes) = extract(&mut stream, archive_len, jobs, id, cancel).await? else {
-        log::info!("Archive for game {} contains no video", id);
+    let Some((bytes, name)) = extract(kind, &mut stream, target.archive_len, jobs, id, cancel).await? else {
+        log::info!("Archive for game {} contains no {}", id, kind.label());
         return Ok(None);
     };
-    write_cache(cached, &bytes).await?;
+    let path = target.store(&name, &bytes).await?;
     log::info!(
-        "Video for game {} extracted: {:.1} MB",
+        "{} for game {} extracted: {:.1} MB",
+        kind.label(),
         id,
         bytes.len() as f64 / 1_048_576.0
     );
-    Ok(Some(crate::commands::setup::path_to_fwd_slash(cached)))
+    Ok(Some(path))
 }
 
 /// A stream waits for pieces indefinitely, and pieces nobody seeds never
@@ -385,15 +553,17 @@ async fn fetch_video(
 const DIRECTORY_TIMEOUT: Duration = Duration::from_secs(45);
 const ENTRY_TIMEOUT: Duration = Duration::from_secs(300);
 
-/// Read the archive directory, then the video entry, publishing progress as it
-/// goes so the panel can show something other than a spinner.
+/// Read the archive directory, then the wanted entry, publishing progress as
+/// it goes so the panel can show something other than a spinner. Returns the
+/// bytes and the entry's name (the extension names the cache file).
 async fn extract<R>(
+    kind: MediaKind,
     reader: &mut R,
     archive_len: u64,
-    jobs: &Arc<RwLock<HashMap<i64, VideoJob>>>,
+    jobs: &JobMap,
     id: i64,
     cancel: &Arc<AtomicBool>,
-) -> Result<Option<Vec<u8>>, String>
+) -> Result<Option<(Vec<u8>, String)>, String>
 where
     R: tokio::io::AsyncRead + tokio::io::AsyncSeek + Unpin,
 {
@@ -410,9 +580,10 @@ where
     if cancel.load(Ordering::Relaxed) {
         return Err("cancelled".into());
     }
-    let Some(video) = zip_range::find_video(&entries) else {
+    let Some(entry) = kind.find(&entries) else {
         log::info!(
-            "No video in the archive for game {} ({} entries, folders: {})",
+            "No {} in the archive for game {} ({} entries, folders: {})",
+            kind.label(),
             id,
             entries.len(),
             zip_range::top_level_folders(&entries).join(", ")
@@ -420,13 +591,13 @@ where
         return Ok(None);
     };
 
-    let total = video.compressed_size;
+    let total = entry.compressed_size;
     {
-        // A video exists - from here the UI has something true to show.
+        // The entry exists - from here the UI has something true to show.
         let mut guard = jobs.write().await;
         if let Some(job) = guard.get_mut(&id) {
             job.status.phase = "fetching".into();
-            job.status.total_bytes = video.uncompressed_size;
+            job.status.total_bytes = entry.uncompressed_size;
         }
     }
 
@@ -434,7 +605,7 @@ where
     // try_write path - a missed tick is fine, the next chunk catches up.
     let cancel_flag = Arc::clone(cancel);
     let jobs_for_cb = Arc::clone(jobs);
-    let bytes = tokio::time::timeout(ENTRY_TIMEOUT, zip_range::read_entry_with(reader, video, move |read, _| {
+    let bytes = tokio::time::timeout(ENTRY_TIMEOUT, zip_range::read_entry_with(reader, entry, move |read, _| {
         if cancel_flag.load(Ordering::Relaxed) {
             return false;
         }
@@ -446,11 +617,11 @@ where
         true
     }))
     .await
-    .map_err(|_| "timed out fetching the video".to_string())?
+    .map_err(|_| format!("timed out fetching the {}", kind.label()))?
     .map_err(|e| {
         if e.to_string().contains("cancelled") { "cancelled".to_string() } else { e.to_string() }
     })?;
-    Ok(Some(bytes))
+    Ok(Some((bytes, entry.name.clone())))
 }
 
 /// Whether mounting a `<video>` element is SAFE on this system.
@@ -553,23 +724,249 @@ fn gst_has_any(elements: &[&str], plugin_files: &[&str]) -> bool {
         .any(|dir| plugin_files.iter().any(|f| Path::new(dir).join(f).exists()))
 }
 
+async fn status_of(jobs: &JobMap, id: i64) -> Option<VideoStatus> {
+    jobs.read().await.get(&id).map(|j| j.status.clone())
+}
+
+async fn cancel_in(jobs: &JobMap, id: i64) {
+    let jobs = jobs.read().await;
+    if let Some(job) = jobs.get(&id) {
+        job.cancel.store(true, Ordering::Relaxed);
+    }
+}
+
 #[tauri::command]
 pub async fn get_video_status(
     video_state: State<'_, VideoState>,
     id: i64,
 ) -> Result<Option<VideoStatus>, String> {
-    Ok(video_state.0.read().await.get(&id).map(|j| j.status.clone()))
+    Ok(status_of(&video_state.0, id).await)
 }
 
 /// Stop an in-flight fetch - the panel calls this when the user moves on, so
 /// browsing through games doesn't leave a queue of torrent reads behind.
 #[tauri::command]
 pub async fn cancel_game_video(video_state: State<'_, VideoState>, id: i64) -> Result<(), String> {
-    let jobs = video_state.0.read().await;
-    if let Some(job) = jobs.get(&id) {
-        job.cancel.store(true, Ordering::Relaxed);
-    }
+    cancel_in(&video_state.0, id).await;
     Ok(())
+}
+
+#[tauri::command]
+pub async fn get_music_status(
+    music_state: State<'_, MusicState>,
+    id: i64,
+) -> Result<Option<VideoStatus>, String> {
+    Ok(status_of(&music_state.0, id).await)
+}
+
+#[tauri::command]
+pub async fn cancel_game_music(music_state: State<'_, MusicState>, id: i64) -> Result<(), String> {
+    cancel_in(&music_state.0, id).await;
+    Ok(())
+}
+
+// ── Music: shuffle candidates and playback support ───────────────────────────
+
+#[derive(Clone, Debug, Serialize)]
+pub struct MusicCandidate {
+    pub id: i64,
+    pub title: String,
+    pub torrent_source: Option<String>,
+    pub thumbnail_key: Option<String>,
+    pub music_file: String,
+}
+
+/// Random games whose archive is expected to hold a playable theme, for the
+/// shuffle queue. The hint column is the catalogue's word; an archive that
+/// answered "nothing here" before is skipped via its marker so a stale hint
+/// costs one piece, ever. `gamedata_torrent_index IS NOT NULL` is what makes
+/// this "the whole eXoDOS family": localized rows carry no archive of their
+/// own and would only duplicate their English game.
+#[tauri::command]
+pub async fn music_shuffle_candidates(
+    db_state: State<'_, DbState>,
+    count: u32,
+) -> Result<Vec<MusicCandidate>, String> {
+    let count = count.clamp(1, 100) as usize;
+    let (rows, data_dir) = {
+        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let data_dir = queries::get_config(&conn, "data_dir")
+            .map_err(|e| e.to_string())?
+            .unwrap_or_default();
+        let sql = format!(
+            "SELECT id, title, torrent_source, thumbnail_key, music_file, gamedata_torrent_index \
+             FROM games \
+             WHERE {} \
+             ORDER BY RANDOM() LIMIT ?1",
+            queries::playable_music_sql("games")
+        );
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([count * 2], |r| {
+                Ok((
+                    MusicCandidate {
+                        id: r.get(0)?,
+                        title: r.get(1)?,
+                        torrent_source: r.get(2)?,
+                        thumbnail_key: r.get(3)?,
+                        music_file: r.get(4)?,
+                    },
+                    r.get::<_, i64>(5)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        (rows, data_dir)
+    };
+    let picked = rows
+        .into_iter()
+        .filter(|(c, idx)| {
+            let source = c.torrent_source.as_deref().unwrap_or("eXoDOS");
+            !MediaKind::Music.marker(&data_dir, source, *idx as usize).is_file()
+        })
+        .map(|(c, _)| c)
+        .take(count)
+        .collect();
+    Ok(picked)
+}
+
+#[derive(Debug, Default, Serialize)]
+pub struct MusicCacheIndex {
+    /// Games whose track is already in the cache - playable with no fetch.
+    pub cached: Vec<i64>,
+    /// Games whose archive was read and held no playable track.
+    pub none: Vec<i64>,
+}
+
+/// A cache file's `(collection, gamedata file index)` - what its name encodes.
+type CacheKey = (String, i64);
+
+/// Split a music cache directory into the keys it answers for: the tracks it
+/// holds, and the archives it recorded as empty.
+///
+/// The stem is `<collection>_<index>` and collection ids carry underscores of
+/// their own (`eXoDOS_GLP`), so only the LAST one separates the two.
+fn scan_music_cache(dir: &Path) -> (Vec<CacheKey>, Vec<CacheKey>) {
+    let (mut cached, mut none) = (Vec::new(), Vec::new());
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        // No cache yet is the normal first-run state, not an error.
+        return (cached, none);
+    };
+    for path in entries.flatten().map(|e| e.path()) {
+        let Some((collection, index)) = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .and_then(|stem| stem.rsplit_once('_'))
+            .and_then(|(c, i)| i.parse::<i64>().ok().map(|i| (c.to_string(), i)))
+        else {
+            continue;
+        };
+        if path.extension().and_then(|e| e.to_str()) == Some("nomusic") {
+            none.push((collection, index));
+        } else if MediaKind::Music.is_payload(&path) {
+            cached.push((collection, index));
+        }
+        // Anything else (a half-written `.part`) answers nothing.
+    }
+    (cached, none)
+}
+
+/// Which games the music cache can already answer for, so the shuffle queue and
+/// the panel can skip a fetch. Keyed by `(collection, gamedata index)` because
+/// that is what the cache files are named after - game ids are not in them.
+#[tauri::command]
+pub async fn music_cache_index(db_state: State<'_, DbState>) -> Result<MusicCacheIndex, String> {
+    // The directory walk happens with the mutex RELEASED - it is the slow part
+    // (one stat per cached track) and every other DB command would queue behind
+    // it. So: lock once for the two queries, drop, then scan.
+    let (data_dir, ids) = {
+        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let data_dir = queries::get_config(&conn, "data_dir")
+            .map_err(|e| e.to_string())?
+            .unwrap_or_default();
+
+        let mut ids: HashMap<CacheKey, i64> = HashMap::new();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, torrent_source, gamedata_torrent_index FROM games \
+                 WHERE gamedata_torrent_index IS NOT NULL AND music_file IS NOT NULL",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| {
+                let source: Option<String> = r.get(1)?;
+                Ok((
+                    (source.unwrap_or_else(|| "eXoDOS".to_string()), r.get::<_, i64>(2)?),
+                    r.get::<_, i64>(0)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?;
+        for row in rows {
+            let (key, id) = row.map_err(|e| e.to_string())?;
+            ids.insert(key, id);
+        }
+        drop(stmt);
+        (data_dir, ids)
+    };
+
+    let (cached, none) = scan_music_cache(&MediaKind::Music.cache_dir(&data_dir));
+    if cached.is_empty() && none.is_empty() {
+        return Ok(MusicCacheIndex::default());
+    }
+
+    let resolve = |keys: Vec<CacheKey>| -> Vec<i64> {
+        keys.into_iter().filter_map(|k| ids.get(&k).copied()).collect()
+    };
+    Ok(MusicCacheIndex { cached: resolve(cached), none: resolve(none) })
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct MusicSupport {
+    pub mp3: bool,
+    pub ogg: bool,
+}
+
+/// Which theme formats the webview can play. Same reasoning as
+/// `video_playback_supported`: on Linux the answer is GStreamer's, and inside
+/// an AppImage only the bundled plugins count. Per format rather than one
+/// flag, so a missing vorbis decoder only skips the .ogg candidates instead
+/// of standing the feature down.
+#[tauri::command]
+pub async fn music_playback_supported() -> MusicSupport {
+    #[cfg(target_os = "linux")]
+    {
+        static SUPPORTED: std::sync::OnceLock<MusicSupport> = std::sync::OnceLock::new();
+        *SUPPORTED.get_or_init(|| {
+            let support = if let Some(lib) = appimage_bundled_gst_lib() {
+                let plugins = lib.join("gstreamer-1.0");
+                let has = |f: &str| plugins.join(f).exists();
+                let audio = has("libgstautodetect.so");
+                // A decoder without the parser in front of it is a silent
+                // pipeline: raw MP3 needs mpegaudioparse (plugins-good).
+                let mp3 = (has("libgstmpg123.so") || has("libgstlibav.so")) && has("libgstaudioparsers.so");
+                let ogg = has("libgstogg.so") && has("libgstvorbis.so");
+                MusicSupport { mp3: audio && mp3, ogg: audio && ogg }
+            } else {
+                let audio = gst_has_any(&["autoaudiosink"], &["libgstautodetect.so"]);
+                let mp3 = gst_has_any(&["mpg123audiodec", "avdec_mp3"], &["libgstmpg123.so", "libgstlibav.so"])
+                    && gst_has_any(&["mpegaudioparse"], &["libgstaudioparsers.so"]);
+                let ogg = gst_has_any(&["oggdemux"], &["libgstogg.so"])
+                    && gst_has_any(&["vorbisdec"], &["libgstvorbis.so"]);
+                MusicSupport { mp3: audio && mp3, ogg: audio && ogg }
+            };
+            if !support.mp3 || !support.ogg {
+                log::warn!(
+                    "Theme playback limited: mp3 supported: {}, ogg supported: {}",
+                    support.mp3,
+                    support.ogg
+                );
+            }
+            support
+        })
+    }
+    #[cfg(not(target_os = "linux"))]
+    MusicSupport { mp3: true, ogg: true }
 }
 
 #[cfg(test)]
@@ -600,6 +997,18 @@ mod tests {
         }
     }
 
+    /// The offline answer shares its phase with "the archive has none", which
+    /// the frontend caches forever - so it has to stay tellable apart by its
+    /// token, or an offline visit poisons the game for the rest of the install.
+    #[test]
+    fn offline_is_a_none_that_carries_a_token() {
+        let offline = VideoStatus::offline();
+        let empty = VideoStatus::phase("none");
+        assert_eq!(offline.phase, empty.phase);
+        assert_eq!(offline.error.as_deref(), Some("offline"));
+        assert_eq!(empty.error, None);
+    }
+
     /// Markers are the reason a game with no video is asked about once rather
     /// than on every visit - pruning must never take them.
     #[test]
@@ -622,6 +1031,110 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[test]
+    fn pruning_keeps_the_no_music_markers() {
+        let dir = std::env::temp_dir().join(format!("exodium_musprune_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let cache = dir.join("content").join("musiccache");
+        std::fs::create_dir_all(&cache).unwrap();
+
+        std::fs::write(cache.join("eXoDOS_1.nomusic"), b"").unwrap();
+        std::fs::write(cache.join("eXoDOS_2.mp3"), vec![0u8; 4096]).unwrap();
+        std::fs::write(cache.join("eXoDOS_3.ogg"), vec![0u8; 4096]).unwrap();
+        std::fs::write(cache.join("eXoDOS_4.part"), vec![0u8; 4096]).unwrap();
+
+        // A cap of zero forces a prune; only the tracks may go.
+        prune_media_cache(MediaKind::Music, dir.to_str().unwrap(), 0);
+
+        assert!(cache.join("eXoDOS_1.nomusic").exists());
+        assert!(cache.join("eXoDOS_4.part").exists());
+        assert!(!cache.join("eXoDOS_2.mp3").exists());
+        assert!(!cache.join("eXoDOS_3.ogg").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The track keeps its own extension, so the cache lookup is by stem -
+    /// and must not mistake a marker or a half-written file for a track.
+    #[test]
+    fn cached_music_matches_any_playable_extension() {
+        let dir = std::env::temp_dir().join(format!("exodium_muscache_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let cache = dir.join("content").join("musiccache");
+        std::fs::create_dir_all(&cache).unwrap();
+        let data_dir = dir.to_str().unwrap();
+
+        assert!(MediaKind::Music.cached(data_dir, "eXoDOS", 7).is_none());
+        std::fs::write(cache.join("eXoDOS_7.nomusic"), b"").unwrap();
+        std::fs::write(cache.join("eXoDOS_7.part"), b"x").unwrap();
+        assert!(MediaKind::Music.cached(data_dir, "eXoDOS", 7).is_none());
+
+        std::fs::write(cache.join("eXoDOS_7.ogg"), b"OggS").unwrap();
+        let found = MediaKind::Music.cached(data_dir, "eXoDOS", 7).expect("the track");
+        assert_eq!(found.file_name().unwrap().to_str().unwrap(), "eXoDOS_7.ogg");
+        // A different index is a different game.
+        assert!(MediaKind::Music.cached(data_dir, "eXoDOS", 77).is_none());
+
+        assert_eq!(
+            MediaKind::Music.cache_file(data_dir, "eXoDOS", 8, "Music/MS-DOS/X (1990).MP3").file_name().unwrap(),
+            "eXoDOS_8.mp3"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The stem splits at the LAST underscore, or `eXoDOS_GLP_3` would read as
+    /// collection "eXoDOS" and a bad index.
+    #[test]
+    fn music_cache_stems_split_at_the_last_underscore() {
+        let dir = std::env::temp_dir().join(format!("exodium_muscidx_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for name in ["eXoDOS_8.mp3", "eXoDOS_9.nomusic", "eXoDOS_GLP_3.ogg", "eXoDOS_4.part"] {
+            std::fs::write(dir.join(name), b"x").unwrap();
+        }
+
+        let (mut cached, none) = scan_music_cache(&dir);
+        cached.sort();
+        assert_eq!(cached, vec![("eXoDOS".to_string(), 8), ("eXoDOS_GLP".to_string(), 3)]);
+        assert_eq!(none, vec![("eXoDOS".to_string(), 9)]);
+
+        // A directory that was never created is the first-run state.
+        assert_eq!(scan_music_cache(&dir.join("nope")), (Vec::new(), Vec::new()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn memory_db() -> rusqlite::Connection {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::init(&conn).unwrap();
+        conn
+    }
+
+    fn insert(conn: &rusqlite::Connection, title: &str, lang: &str, code: &str, source: &str, gd: Option<i64>) -> i64 {
+        conn.execute(
+            "INSERT INTO games (title, language, shortcode, torrent_source, gamedata_torrent_index) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![title, lang, code, source, gd],
+        )
+        .unwrap();
+        conn.last_insert_rowid()
+    }
+
+    /// A localized row has no archive of its own and borrows its English
+    /// game's - but only inside its own pack family, never a same-coded game
+    /// from another pack.
+    #[test]
+    fn resolve_gamedata_borrows_the_english_archive_within_the_family() {
+        let conn = memory_db();
+        insert(&conn, "Earthquest", "EN", "EarthQue", "eXoDOS", Some(41));
+        let de = insert(&conn, "Earthquest DE", "DE", "EarthQue", "eXoDOS_GLP", None);
+        insert(&conn, "Earth Quest VR", "EN", "EarthQue", "eXoWin3x", Some(9));
+        let win3x_only = insert(&conn, "Lonely", "EN", "Lonely", "eXoWin3x", None);
+
+        let game = queries::fetch_game_by_id(&conn, de).unwrap().unwrap();
+        assert_eq!(resolve_gamedata(&conn, &game), (Some(41), "eXoDOS".to_string()));
+
+        let game = queries::fetch_game_by_id(&conn, win3x_only).unwrap().unwrap();
+        assert_eq!(resolve_gamedata(&conn, &game), (None, "eXoDOS".to_string()));
+    }
+
     #[tokio::test(start_paused = true)]
     async fn a_stalled_stream_gives_up_instead_of_holding_the_slot() {
         let jobs: Arc<RwLock<HashMap<i64, VideoJob>>> = Arc::new(RwLock::new(HashMap::new()));
@@ -634,7 +1147,7 @@ mod tests {
         );
         let cancel = Arc::new(AtomicBool::new(false));
 
-        let err = extract(&mut StalledReader, 10_000_000, &jobs, 1, &cancel)
+        let err = extract(MediaKind::Video, &mut StalledReader, 10_000_000, &jobs, 1, &cancel)
             .await
             .expect_err("a stream that never delivers must fail");
 
@@ -645,7 +1158,7 @@ mod tests {
     async fn cancelling_is_reported_as_such_not_as_a_failure() {
         let jobs: Arc<RwLock<HashMap<i64, VideoJob>>> = Arc::new(RwLock::new(HashMap::new()));
         let cancel = Arc::new(AtomicBool::new(true));
-        let err = extract(&mut StalledReader, 10_000_000, &jobs, 2, &cancel)
+        let err = extract(MediaKind::Video, &mut StalledReader, 10_000_000, &jobs, 2, &cancel)
             .await
             .expect_err("cancelled");
         // Cancellation is a user action, so it must never surface as an error

@@ -31,8 +31,9 @@ pub type DbResult<T> = Result<T, DbError>;
 /// language codes, 9 = LP rows linked to their EN game by canonical title
 /// (they inherit its dosbox.conf and could not launch without it),
 /// 10 = Spanish/Polish rows carry eXo's own directory code and config path,
-/// which also merges them into their English game's card.
-pub const CATALOG_VERSION: i64 = 10;
+/// which also merges them into their English game's card, 11 = music_file
+/// hint (theme track name from LaunchBox MusicPath/MissingMusic).
+pub const CATALOG_VERSION: i64 = 11;
 
 /// Open (or create) the Exodium database at the given path.
 pub fn open(path: &Path) -> DbResult<Connection> {
@@ -336,6 +337,11 @@ fn migrate(conn: &Connection) -> DbResult<()> {
     let game_cols = table_columns(conn, "games")?;
     if !game_cols.iter().any(|c| c == "rating_votes") {
         conn.execute_batch("ALTER TABLE games ADD COLUMN rating_votes INTEGER")?;
+    }
+    // Theme-track hint from LaunchBox (MusicPath / MissingMusic); filled by
+    // the bundled catalog, which refresh_catalog copies column-wise.
+    if !game_cols.iter().any(|c| c == "music_file") {
+        conn.execute_batch("ALTER TABLE games ADD COLUMN music_file TEXT")?;
     }
 
     // Playlist support (curated eXo playlists + user playlists). The tables

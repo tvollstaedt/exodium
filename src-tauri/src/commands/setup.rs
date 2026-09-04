@@ -842,6 +842,7 @@ pub async fn init_download_manager(
     crate::commands::games::prune_launch_confs(&app);
     prune_gallery_cache(&gallery_cache_dir(&data_dir), GALLERY_CACHE_MAX_BYTES);
     crate::commands::media::prune_video_cache(&data_dir);
+    crate::commands::media::prune_music_cache(&data_dir);
 
     // Offline mode: no session, no torrents, no swarm traffic - the app is a
     // launcher for whatever is already on disk. Bundled emulator configs are

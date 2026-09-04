@@ -1491,7 +1491,7 @@ fn launch_dosbox_x(
         game.title,
         bin.display()
     );
-    super::games::spawn_emulator_and_track(cmd, &bin, &game, id)
+    super::games::spawn_emulator_and_track(app, cmd, &bin, &game, id)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1566,7 +1566,7 @@ fn launch_86box(
         bin.display(),
         variant
     );
-    super::games::spawn_emulator_and_track(cmd, &bin, &game, id)
+    super::games::spawn_emulator_and_track(app, cmd, &bin, &game, id)
 }
 
 #[cfg(test)]

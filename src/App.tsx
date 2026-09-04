@@ -42,6 +42,13 @@ import { loadThumbnailDir } from "./stores/thumbnails";
 import { refreshInstalledPacks, initContentPackEvents } from "./stores/contentPacks";
 import { showToast } from "./stores/toasts";
 import { startTransferPolling } from "./stores/transfer";
+import { NowPlayingBar } from "./components/NowPlayingBar";
+import {
+  initMusic, musicAutoplay, setMusicAutoplay, ensureMusicAutoplayLoaded,
+  musicContinuous, setMusicContinuous, ensureMusicContinuousLoaded,
+  currentTrack, wantedTrack, playerHidden, hidePlayer, showPlayer, startShuffle, musicUnsupported,
+} from "./stores/music";
+import { IconMusicNote } from "./components/icons";
 import "./styles/main.css";
 import { Button } from "./components/Button";
 
@@ -136,6 +143,7 @@ function App() {
     // Before anything else: the backend can start pack installs on its own
     // (Win9x emulator auto-queue), and only this listener makes them visible.
     initContentPackEvents().catch(() => {});
+    initMusic().catch(() => {});
     try {
       const status = await getSetupStatus();
       if (status.ready) {
@@ -345,6 +353,8 @@ function App() {
   // when we flip the controlled `open` prop, so init logic there never ran.
   const openSettings = () => {
     loadGameDefaults();
+    ensureMusicAutoplayLoaded();
+    ensureMusicContinuousLoaded();
     loadNetworkMode();
     loadWin9xNetwork();
     // Reports the folders even after a "not now", so the row below can offer
@@ -497,6 +507,25 @@ function App() {
     }
   };
 
+  /** One button for three states: with a track loaded it toggles the bar,
+   *  with none it starts the shuffle - which is the only way music ever
+   *  begins without a game on screen. */
+  // A pick still being fetched counts as a player: the bar is already up
+  // showing it, so the button toggles that bar instead of stacking a second
+  // shuffle behind the first.
+  const musicLoaded = () => currentTrack() != null || wantedTrack() != null;
+
+  const musicButtonLabel = () => {
+    if (!musicLoaded()) { return "Play music (shuffle)"; }
+    return playerHidden() ? "Show player" : "Hide player";
+  };
+
+  const onMusicButton = () => {
+    if (!musicLoaded()) { void startShuffle(); return; }
+    if (playerHidden()) { showPlayer(); return; }
+    hidePlayer();
+  };
+
   return (
     <>
       <WindowFrame />
@@ -541,6 +570,16 @@ function App() {
                 videos, no sharing), so it says so permanently rather than only
                 inside Settings. */}
             <ActivityBadge onOpenSettings={openSettings} />
+            <Show when={!musicUnsupported()}>
+              <Tooltip.Root openDelay={400}>
+                <Tooltip.Trigger asChild={(props) =>
+                  <button {...props()} class="icon-btn" aria-label={musicButtonLabel()} onClick={onMusicButton}>
+                    <IconMusicNote />
+                  </button>
+                } />
+                <Portal><Tooltip.Positioner><Tooltip.Content class="ark-tooltip">{musicButtonLabel()}</Tooltip.Content></Tooltip.Positioner></Portal>
+              </Tooltip.Root>
+            </Show>
             <Tooltip.Root openDelay={400}>
               <Tooltip.Trigger asChild={(props) =>
                 <button {...props()} class="icon-btn icon-btn-heart" onClick={() => openUrl("https://ko-fi.com/tvollstaedt")}>
@@ -640,6 +679,23 @@ function App() {
                           onChange={handleToggleFullscreen}
                           label="Launch in fullscreen"
                           hint="Start every game fullscreen instead of windowed. Alt+Enter still toggles at runtime."
+                        />
+                      </section>
+
+                      <section class="settings-section">
+                        <h3 class="settings-section-title">Music</h3>
+                        <p class="settings-section-hint">Many games ship a theme track with their extras. It streams out of the archive like the preview video, and a running game or a preview with sound pauses it.</p>
+                        <Toggle
+                          checked={musicAutoplay()}
+                          onChange={(v) => { void setMusicAutoplay(v); }}
+                          label="Play theme music"
+                          hint="Starts a game's theme when you open its details. The collection-wide shuffle only ever starts from the player bar."
+                        />
+                        <Toggle
+                          checked={musicContinuous()}
+                          onChange={(v) => { void setMusicContinuous(v); }}
+                          label="Continue with the next theme"
+                          hint="When a theme ends, play the next one (list or shuffle). The skip button still works either way."
                         />
                       </section>
 
@@ -831,6 +887,10 @@ function App() {
         </Show>
 
         <Library />
+
+        {/* Last flex child on purpose: it becomes the bottom row of the shell
+            without any fixed positioning, and the panel steps aside for it. */}
+        <NowPlayingBar />
 
         <WelcomeModal
           open={showWelcomeModal()}

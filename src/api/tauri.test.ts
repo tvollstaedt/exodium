@@ -4,6 +4,8 @@ import {
   getGames,
   getGame,
   getGenres,
+  getSectionKeys,
+  musicCacheIndex,
   getGameVariants,
   getInstalledGames,
   toggleFavorite,
@@ -32,7 +34,7 @@ beforeEach(() => {
 describe("API invoke mapping", () => {
   it("getGames passes camelCase args", async () => {
     mockInvoke.mockResolvedValue({ games: [], total: 0 });
-    await getGames(2, 50, "doom", "Action", "year_desc", "eXoDOS", false);
+    await getGames(2, 50, "doom", "Action", "year_desc", "eXoDOS", false, null, false);
     expect(mockInvoke).toHaveBeenCalledWith("get_games", {
       page: 2,
       perPage: 50,
@@ -41,6 +43,8 @@ describe("API invoke mapping", () => {
       sortBy: "year_desc",
       collection: "eXoDOS",
       favoritesOnly: false,
+      playlistId: null,
+      withMusic: false,
     });
   });
 
@@ -48,6 +52,22 @@ describe("API invoke mapping", () => {
     mockInvoke.mockResolvedValue({ games: [], total: 0 });
     await getGames(1, 50, "", "", "title", "", false, 7);
     expect(mockInvoke).toHaveBeenCalledWith("get_games", expect.objectContaining({ playlistId: 7 }));
+  });
+
+  it("getGames and getSectionKeys pass withMusic", async () => {
+    mockInvoke.mockResolvedValue({ games: [], total: 0 });
+    await getGames(1, 50, "", "", "title", "", false, null, true);
+    expect(mockInvoke).toHaveBeenCalledWith("get_games", expect.objectContaining({ withMusic: true }));
+    mockInvoke.mockResolvedValue([]);
+    await getSectionKeys("title", "", "", "", false, null, true);
+    expect(mockInvoke).toHaveBeenCalledWith("get_section_keys", expect.objectContaining({ withMusic: true }));
+  });
+
+  it("musicCacheIndex sends no args", async () => {
+    mockInvoke.mockResolvedValue({ cached: [1], none: [2] });
+    const index = await musicCacheIndex();
+    expect(mockInvoke).toHaveBeenCalledWith("music_cache_index");
+    expect(index).toEqual({ cached: [1], none: [2] });
   });
 
   it("playlist commands pass camelCase args", async () => {

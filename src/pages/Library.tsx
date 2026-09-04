@@ -9,6 +9,7 @@ import {
   sortBy, setSortBy,
   collectionFilter, setCollectionFilter,
   playlistFilter, setPlaylistFilter,
+  withMusic, setWithMusic,
   getFavoriteGames,
   lastGameLibraryChange,
 } from "../stores/games";
@@ -20,13 +21,14 @@ import { PackHintBanner } from "../components/PackHintBanner";
 import { getGame, getGenres, getInstalledGames, getRecentlyPlayed, getConfig, getAvailableCollections, getSectionKeys, getGames, type CollectionInfo, type Game, type Playlist } from "../api/tauri";
 import { GameCard } from "../components/GameCard";
 import { GameRow } from "../components/GameRow";
-import { viewMode, applyViewMode, loadViewMode } from "../stores/view";
+import { viewMode, applyViewMode, loadViewMode, setViewModeTransient, type ViewMode } from "../stores/view";
 import { GameDetailPanel } from "../components/GameDetailPanel";
 import { PlaylistNameDialog } from "../components/PlaylistNameDialog";
 import { CollectionShelf } from "../components/CollectionShelf";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Select } from "../components/Select";
 import { showToast } from "../stores/toasts";
+import { openGameRequest, setOpenGameRequest, musicUnsupported, refreshMusicIndex } from "../stores/music";
 import { matchesLibraryQuery } from "../util";
 
 type Tab = "library" | "browse";
@@ -120,6 +122,14 @@ export function Library() {
   const [favoriteGames, setFavoriteGames] = createSignal<Game[]>([]);
   const [collections, setCollections] = createSignal<{id: string, label: string, count: number, sub?: string}[]>([]);
   const [detailGame, setDetailGame] = createSignal<Game | null>(null);
+
+  // The player bar's cover asks for the game behind the track it plays.
+  createEffect(() => {
+    const id = openGameRequest();
+    if (id == null) { return; }
+    setOpenGameRequest(null);
+    getGame(id).then((fresh) => { if (fresh) { setDetailGame(fresh); } }).catch(() => {});
+  });
 
   // Keep detailGame in sync with the games store so installed/in_library flags stay current
   createEffect(() => {
@@ -232,7 +242,7 @@ export function Library() {
 
   const refreshSectionKeys = async () => {
     try {
-      const keys = await getSectionKeys(sortBy(), searchQuery(), genreFilter(), collectionFilter(), false, playlistFilter());
+      const keys = await getSectionKeys(sortBy(), searchQuery(), genreFilter(), collectionFilter(), false, playlistFilter(), withMusic());
       setSectionLabels(keys);
     } catch (e) {
       console.warn("[sectionKeys] failed:", e);
@@ -383,6 +393,25 @@ export function Library() {
 
   const applyPlaylistFilter = (value: string) => {
     setPlaylistFilter(value ? Number(value) : null);
+    fetchGames();
+    refreshSectionKeys();
+  };
+
+  // The jukebox lives on the rows, so turning the filter on switches to the
+  // list - transiently, because that is the chip's doing and not a change of
+  // the user's saved preference. Turning it off only undoes the switch if the
+  // chip made it: a list the user picked (or picked since) stays.
+  let prevViewMode: ViewMode = "grid";
+  const toggleWithMusic = () => {
+    if (withMusic()) {
+      setWithMusic(false);
+      if (viewMode() === "list" && prevViewMode === "grid") { setViewModeTransient("grid"); }
+    } else {
+      prevViewMode = viewMode();
+      if (viewMode() === "grid") { setViewModeTransient("list"); }
+      setWithMusic(true);
+      void refreshMusicIndex();
+    }
     fetchGames();
     refreshSectionKeys();
   };
@@ -755,6 +784,13 @@ export function Library() {
               placeholder="Playlists"
             />
           </Show>
+          <Show when={!musicUnsupported()}>
+            <button
+              class={`filter-chip ${withMusic() ? "active" : ""}`}
+              onClick={toggleWithMusic}
+              title="Only games with a theme track"
+            >♪ With theme</button>
+          </Show>
           <Show when={viewMode() === "grid"}>
             <Select
               options={sortOptions}
@@ -848,6 +884,7 @@ export function Library() {
           <div class="game-list">
             <div class="game-list-header" style={{ top: separatorTop() }}>
               <span class="row-fav" />
+              <span class="row-play" />
               <For each={listColumns}>
                 {(col) => (
                   <button

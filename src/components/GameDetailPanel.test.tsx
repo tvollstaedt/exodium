@@ -6,6 +6,20 @@ import { GameDetailPanel } from "./GameDetailPanel";
 
 const mockInvoke = vi.mocked(invoke);
 
+/** Only the four pause/resume entry points are stubbed - the rest of the store
+ *  is the real thing, so the panel keeps rendering the player it always did.
+ *  `vi.hoisted` because the mock factory runs before this file's own consts. */
+const music = vi.hoisted(() => ({
+  pauseFor: vi.fn(),
+  resumeFrom: vi.fn(),
+  pauseForGame: vi.fn(),
+  resumeFromGame: vi.fn(),
+}));
+vi.mock("../stores/music", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../stores/music")>()),
+  ...music,
+}));
+
 /** Minimal row shaped like the merged card the grid hands to the panel. */
 function makeGame(over: Partial<Game> = {}): Game {
   return {
@@ -43,6 +57,7 @@ function makeGame(over: Partial<Game> = {}): Game {
     thumbnail_key: "abc123",
     manual_path: "Manuals\\MS-DOS\\Magic Carpet Plus (1995).pdf",
     last_played: null,
+    music_file: null,
     available_languages: null,
     ...over,
   } as Game;
@@ -104,6 +119,125 @@ describe("GameDetailPanel", () => {
     // Previews carry sound. Re-adding `muted` to buy back autoplay would take
     // it away silently - the muted retry in the effect is the fallback path.
     expect((video as HTMLVideoElement | null)?.muted).toBe(false);
+    dispose(); host.remove();
+  });
+
+  /** The preview claims the speakers on play, so it has to give them back the
+   *  moment it stops using them. It used to hold the reason until the video
+   *  ended or the panel closed, and the lightbox pauses the hero on open - so
+   *  looking at a screenshot left the theme silent with nothing playing. */
+  it("hands the speakers back when the preview is paused", async () => {
+    vi.useFakeTimers();
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_game_metadata") { return EMPTY_META; }
+      if (cmd === "get_game_variants") { return []; }
+      if (cmd === "start_game_video") { return VIDEO_READY; }
+      if (cmd === "get_video_status") { return VIDEO_READY; }
+      return null;
+    });
+    music.pauseFor.mockClear();
+    music.resumeFrom.mockClear();
+
+    const { host, dispose } = mount(makeGame({ id: 43, shortcode: "VID43" }));
+    await vi.advanceTimersByTimeAsync(3200);
+
+    const video = host.ownerDocument.querySelector("video.game-detail-hero-video");
+    expect(video, "the hero video element should be mounted").not.toBeNull();
+
+    video!.dispatchEvent(new Event("play"));
+    expect(music.pauseFor).toHaveBeenCalledWith("video");
+
+    music.resumeFrom.mockClear();
+    video!.dispatchEvent(new Event("pause"));
+    expect(music.resumeFrom).toHaveBeenCalledWith("video");
+
+    dispose(); host.remove();
+  });
+
+  /** Opening the lightbox pauses the hero so the trailer does not run twice,
+   *  and the lightbox's own <video> takes the speakers over. But `pause()` only
+   *  QUEUES the event: it arrives after the hold effect has claimed the reason
+   *  and used to withdraw it again, so the theme played over the trailer. */
+  it("keeps the speakers while the lightbox plays the same preview", async () => {
+    vi.useFakeTimers();
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_game_metadata") { return EMPTY_META; }
+      if (cmd === "get_game_variants") { return []; }
+      if (cmd === "start_game_video") { return VIDEO_READY; }
+      if (cmd === "get_video_status") { return VIDEO_READY; }
+      return null;
+    });
+
+    const { host, dispose } = mount(makeGame({ id: 44, shortcode: "VID44" }));
+    await vi.advanceTimersByTimeAsync(3200);
+    const video = host.ownerDocument.querySelector("video.game-detail-hero-video");
+    expect(video, "the hero video element should be mounted").not.toBeNull();
+
+    music.pauseFor.mockClear();
+    music.resumeFrom.mockClear();
+
+    // Clicking the hero opens the lightbox on entry 0 - the video itself.
+    (video as HTMLVideoElement).click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(music.pauseFor).toHaveBeenCalledWith("video");
+
+    // ...and only now does the hero's own pause event land.
+    video!.dispatchEvent(new Event("pause"));
+    expect(music.resumeFrom).not.toHaveBeenCalled();
+
+    const backdrop = document.querySelector(".lightbox-backdrop") as HTMLElement | null;
+    expect(backdrop, "the lightbox should be open").not.toBeNull();
+    backdrop!.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(music.resumeFrom).toHaveBeenCalledTimes(1);
+    expect(music.resumeFrom).toHaveBeenCalledWith("video");
+
+    dispose(); host.remove();
+  });
+
+  /** A refused second launch does not end the first one. The claim on the
+   *  speakers belongs to the launch that succeeded, so giving it back here
+   *  started the theme over a running emulator. */
+  it("keeps the game's claim when a launch is refused as already running", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_game_metadata") { return EMPTY_META; }
+      if (cmd === "get_game_variants") { return []; }
+      if (cmd === "launch_game") { throw new Error("'Magic Carpet Plus' is already running."); }
+      return null;
+    });
+    music.pauseForGame.mockClear();
+    music.resumeFromGame.mockClear();
+
+    const { host, dispose } = mount(makeGame({ installed: true }));
+    await Promise.resolve();
+    const play = host.ownerDocument.querySelector("button.btn-play") as HTMLButtonElement | null;
+    expect(play, "an installed game should offer Play").toBeTruthy();
+
+    play!.click();
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(music.pauseForGame).toHaveBeenCalledWith(1);
+    expect(music.resumeFromGame).not.toHaveBeenCalled();
+    dispose(); host.remove();
+  });
+
+  it("gives the claim back when a launch fails for any other reason", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_game_metadata") { return EMPTY_META; }
+      if (cmd === "get_game_variants") { return []; }
+      if (cmd === "launch_game") { throw new Error("DOSBox binary not found"); }
+      return null;
+    });
+    music.pauseForGame.mockClear();
+    music.resumeFromGame.mockClear();
+
+    const { host, dispose } = mount(makeGame({ installed: true }));
+    await Promise.resolve();
+    const play = host.ownerDocument.querySelector("button.btn-play") as HTMLButtonElement | null;
+    play!.click();
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(music.resumeFromGame).toHaveBeenCalledWith(1);
     dispose(); host.remove();
   });
 
@@ -256,5 +390,45 @@ describe("GameDetailPanel", () => {
     expect(text).toContain("Bullfrog Productions, Ltd.");
     dispose();
     host.remove();
+  });
+});
+
+describe("GameDetailPanel theme row", () => {
+  beforeEach(() => {
+    mockInvoke.mockReset();
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    document.body.innerHTML = "";
+    vi.useRealTimers();
+  });
+
+  function withMusic(status: any) {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_game_metadata") { return EMPTY_META; }
+      if (cmd === "get_game_variants") { return []; }
+      if (cmd === "start_game_music") { return status; }
+      if (cmd === "music_playback_supported") { return { mp3: true, ogg: true }; }
+      return null;
+    });
+  }
+
+  it("says nothing about a game without a theme", async () => {
+    withMusic({ phase: "none", progress: 0, total_bytes: 0, path: null, error: null });
+    const { dispose } = mount(makeGame({ id: 41 }));
+    await vi.advanceTimersByTimeAsync(600);
+    expect(document.body.querySelector(".game-detail-music")).toBeNull();
+    expect(document.body.textContent).not.toMatch(/no theme|no music/i);
+    dispose();
+  });
+
+  it("shows the row while the theme is still coming in", async () => {
+    withMusic({ phase: "fetching", progress: 0.4, total_bytes: 3_000_000, path: null, error: null });
+    const { dispose } = mount(makeGame({ id: 42 }));
+    await vi.advanceTimersByTimeAsync(600);
+    const row = document.body.querySelector(".game-detail-music");
+    expect(row, "a fetch in flight is worth a line").not.toBeNull();
+    expect(row!.textContent).toContain("Loading theme 40%");
+    dispose();
   });
 });

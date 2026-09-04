@@ -57,10 +57,35 @@ struct XmlGame {
     max_players: Option<String>,
     #[serde(default)]
     manual_path: Option<String>,
+    #[serde(default)]
+    music_path: Option<String>,
+    #[serde(default)]
+    missing_music: Option<String>,
 }
 
 fn blank_to_none(s: Option<String>) -> Option<String> {
     s.filter(|v| !v.is_empty())
+}
+
+/// Name of the theme track LaunchBox expects in the game's GameData archive.
+///
+/// `MusicPath` is only written when the track is not the default
+/// `Music\MS-DOS\<Title>.mp3` (175 of 7,667 eXoDOS rows, mostly .ogg and
+/// tracker modules); for the rest `MissingMusic=false` is the only signal.
+/// That flag is LaunchBox's DEFAULT, not an inventory: the eXoWin3x catalogue
+/// says "false" for 1,120 games and ships no music at all, so a caller must
+/// treat the result as a hint and let the archive have the last word.
+fn derive_music_file(title: &str, music_path: Option<&str>, missing_music: Option<&str>) -> Option<String> {
+    if let Some(path) = music_path.filter(|p| !p.trim().is_empty()) {
+        let name = path.rsplit(['\\', '/']).next().unwrap_or(path).trim();
+        if !name.is_empty() {
+            return Some(name.to_string());
+        }
+    }
+    if missing_music.is_some_and(|m| m.trim().eq_ignore_ascii_case("false")) && !title.is_empty() {
+        return Some(format!("{}.mp3", title));
+    }
+    None
 }
 
 /// Extract shortcode from application_path using a collection-specific path segment.
@@ -150,6 +175,7 @@ fn xml_game_to_game(x: XmlGame, shortcode_segment: &str) -> Game {
     let language = extract_language(&x.series);
     let shortcode = extract_shortcode(&x.application_path, shortcode_segment)
         .or_else(|| extract_shortcode(&x.root_folder, shortcode_segment));
+    let music_file = derive_music_file(&x.title, x.music_path.as_deref(), x.missing_music.as_deref());
     Game {
         id: None,
         title: x.title,
@@ -199,6 +225,7 @@ fn xml_game_to_game(x: XmlGame, shortcode_segment: &str) -> Game {
         dosbox_variant: None, // populated later by generate_db from dosbox.txt
         favorited: false,
         thumbnail_key: None, // populated by generate_db from normalized title
+        music_file,
         manual_path: blank_to_none(x.manual_path),
         last_played: None,
     }
@@ -241,6 +268,30 @@ pub fn parse_games_xml<R: BufRead>(reader: R, shortcode_segment: &str) -> Import
 mod tests {
     use super::*;
     use std::io::BufReader;
+
+    // ── derive_music_file ────────────────────────────────────────────────────
+
+    #[test]
+    fn music_file_derivation() {
+        // An explicit MusicPath wins, basename only, extension kept verbatim.
+        assert_eq!(
+            derive_music_file("Furcol", Some(r"Music\MS-DOS\Furcol (1997).XM"), Some("false")),
+            Some("Furcol (1997).XM".to_string())
+        );
+        // Without a MusicPath the flag alone names the default mp3.
+        assert_eq!(
+            derive_music_file("+K (1996)", None, Some("false")),
+            Some("+K (1996).mp3".to_string())
+        );
+        // Missing music, or no flag at all: nothing to probe for.
+        assert_eq!(derive_music_file("Bingo", None, Some("true")), None);
+        assert_eq!(derive_music_file("Bingo", None, None), None);
+        // A blank MusicPath falls through to the flag.
+        assert_eq!(
+            derive_music_file("Game", Some(""), Some("false")),
+            Some("Game.mp3".to_string())
+        );
+    }
 
     // ── extract_shortcode ────────────────────────────────────────────────────
 

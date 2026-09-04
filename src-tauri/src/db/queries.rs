@@ -10,7 +10,7 @@ const GAME_COLUMNS: &str =
      status, region, max_players, language, shortcode, torrent_source,
      in_library, installed, game_torrent_index, gamedata_torrent_index, download_size,
      has_thumbnail, dosbox_variant, favorited, thumbnail_key, manual_path, last_played,
-     rating_votes";
+     rating_votes, music_file";
 
 fn row_to_game(row: &Row) -> rusqlite::Result<Game> {
     Ok(Game {
@@ -51,6 +51,7 @@ fn row_to_game(row: &Row) -> rusqlite::Result<Game> {
         manual_path: row.get(32)?,
         last_played: row.get(33)?,
         rating_votes: row.get(34)?,
+        music_file: row.get(35)?,
     })
 }
 
@@ -69,13 +70,13 @@ pub fn insert_games(conn: &Connection, games: &[Game]) -> DbResult<usize> {
             release_date, year, genre, series, play_mode,
             rating, description, notes, source, application_path,
             dosbox_conf, status, region, max_players, language, shortcode,
-            manual_path, rating_votes
+            manual_path, rating_votes, music_file
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5,
             ?6, ?7, ?8, ?9, ?10,
             ?11, ?12, ?13, ?14, ?15,
             ?16, ?17, ?18, ?19, ?20, ?21,
-            ?22, ?23
+            ?22, ?23, ?24
         )",
     )?;
 
@@ -105,6 +106,7 @@ pub fn insert_games(conn: &Connection, games: &[Game]) -> DbResult<usize> {
             game.shortcode,
             game.manual_path,
             game.rating_votes,
+            game.music_file,
         ])?;
         count += 1;
     }
@@ -175,6 +177,7 @@ pub struct GameFilter<'a> {
     pub collection: &'a str,
     pub favorites_only: bool,
     pub playlist_id: Option<i64>,
+    pub with_music: bool,
 }
 
 /// SQL expression yielding a row's pack family: its collection's base id, so
@@ -195,6 +198,16 @@ pub fn family_expr(alias: &str) -> String {
         "COALESCE(CASE {a}.torrent_source{arms} END, {a}.torrent_source, 'eXoDOS')",
         a = alias,
         arms = arms
+    )
+}
+
+/// SQL predicate: this row's catalogue hint names a track the webview can play.
+/// Shared with music_shuffle_candidates so the two never drift.
+pub(crate) fn playable_music_sql(alias: &str) -> String {
+    format!(
+        "{a}.music_file IS NOT NULL AND {a}.gamedata_torrent_index IS NOT NULL \
+         AND (lower({a}.music_file) LIKE '%.mp3' OR lower({a}.music_file) LIKE '%.ogg')",
+        a = alias
     )
 }
 
@@ -256,6 +269,23 @@ fn build_where_clause(f: &GameFilter) -> (String, Vec<Box<dyn rusqlite::types::T
     }
 
     let mut conditions = vec![primary_row_condition()];
+
+    if f.with_music {
+        // Its OWN EXISTS, not part of variant_conds: the hint sits on the EN
+        // row (localized rows all carry a NULL gamedata_torrent_index) while
+        // the collection filter matches the LP row, so requiring ONE variant
+        // to satisfy both would empty the GLP/PLP/SLP shelves. "Some variant
+        // of this card has a playable hint" is also the honest question -
+        // playback resolves to the EN sibling's archive anyway
+        // (media::resolve_gamedata).
+        conditions.push(format!(
+            "EXISTS (SELECT 1 FROM games w \
+             WHERE (w.id = g.id OR (g.shortcode IS NOT NULL AND {})) \
+             AND {})",
+            same_group("w", "g"),
+            playable_music_sql("w")
+        ));
+    }
 
     if let Some(pid) = f.playlist_id {
         // Top-level condition, NOT part of the per-variant EXISTS: curated
@@ -338,7 +368,7 @@ fn order_clause(sort_by: &str) -> String {
 
 /// Count total games with filters.
 pub fn count_games(conn: &Connection, query: &str) -> DbResult<usize> {
-    let f = GameFilter { query, genre: "", sort_by: "", collection: "", favorites_only: false, playlist_id: None };
+    let f = GameFilter { query, genre: "", sort_by: "", collection: "", favorites_only: false, playlist_id: None, with_music: false };
     count_games_filtered(conn, &f)
 }
 
@@ -896,6 +926,7 @@ mod tests {
             thumbnail_key: None,
             manual_path: None,
             last_played: None,
+            music_file: None,
         }
     }
 
@@ -931,7 +962,7 @@ mod tests {
         let solo = make_game("Bloxit");
         insert_games(&conn, &[en, de, es, solo]).unwrap();
 
-        let f = GameFilter { query: "", genre: "", sort_by: "", collection: "", favorites_only: false, playlist_id: None };
+        let f = GameFilter { query: "", genre: "", sort_by: "", collection: "", favorites_only: false, playlist_id: None, with_music: false };
         let games = fetch_games_filtered(&conn, 1, 50, &f).unwrap();
 
         let merged = games.iter().find(|g| g.shortcode.as_deref() == Some("11thHour")).unwrap();
@@ -959,7 +990,7 @@ mod tests {
         let beta = make_game("Beta");
         insert_games(&conn, &[beta, the_aardvark]).unwrap();
 
-        let f = GameFilter { query: "", genre: "", sort_by: "title", collection: "", favorites_only: false, playlist_id: None };
+        let f = GameFilter { query: "", genre: "", sort_by: "title", collection: "", favorites_only: false, playlist_id: None, with_music: false };
         let games = fetch_games_filtered(&conn, 1, 50, &f).unwrap();
         let titles: Vec<&str> = games.iter().map(|g| g.title.as_str()).collect();
         // sort_title "Aardvark, The" files it under A, before Beta - title
@@ -984,7 +1015,7 @@ mod tests {
         lower_bucket.rating_votes = Some(500);
         insert_games(&conn, &[one_vote_five, classic, lower_bucket]).unwrap();
 
-        let f = GameFilter { query: "", genre: "", sort_by: "rating", collection: "", favorites_only: false, playlist_id: None };
+        let f = GameFilter { query: "", genre: "", sort_by: "rating", collection: "", favorites_only: false, playlist_id: None, with_music: false };
         let games = fetch_games_filtered(&conn, 1, 50, &f).unwrap();
         let titles: Vec<&str> = games.iter().map(|g| g.title.as_str()).collect();
         assert_eq!(titles, vec!["DOOM", "Obscurity", "Solid"]);
@@ -1008,7 +1039,7 @@ mod tests {
             "UPDATE games SET torrent_source = 'eXoDOS' WHERE title = 'Earthquest'", [],
         ).unwrap();
 
-        let f = GameFilter { query: "", genre: "", sort_by: "", collection: "", favorites_only: false, playlist_id: None };
+        let f = GameFilter { query: "", genre: "", sort_by: "", collection: "", favorites_only: false, playlist_id: None, with_music: false };
         let games = fetch_games_filtered(&conn, 1, 50, &f).unwrap();
         assert_eq!(games.len(), 2, "got {:?}", games.iter().map(|g| &g.title).collect::<Vec<_>>());
         // Neither may claim the other as a language variant.
@@ -1044,7 +1075,7 @@ mod tests {
         conn.execute("UPDATE games SET download_size = 2000 WHERE title = 'Gamma'", []).unwrap();
 
         let fetch = |sort_by: &str| {
-            let f = GameFilter { query: "", genre: "", sort_by, collection: "", favorites_only: false, playlist_id: None };
+            let f = GameFilter { query: "", genre: "", sort_by, collection: "", favorites_only: false, playlist_id: None, with_music: false };
             fetch_games_filtered(&conn, 1, 50, &f)
                 .unwrap()
                 .into_iter()
@@ -1076,7 +1107,7 @@ mod tests {
         ).unwrap();
 
         // Grid: one merged card (EN primary) + one standalone = 2, not 3.
-        let f = GameFilter { query: "", genre: "", sort_by: "", collection: "", favorites_only: false, playlist_id: None };
+        let f = GameFilter { query: "", genre: "", sort_by: "", collection: "", favorites_only: false, playlist_id: None, with_music: false };
         assert_eq!(count_games_filtered(&conn, &f).unwrap(), 2);
         let games = fetch_games_filtered(&conn, 1, 50, &f).unwrap();
         assert_eq!(games.len(), 2);
@@ -1087,13 +1118,13 @@ mod tests {
         assert_eq!(solo.available_languages, None);
 
         // Searching the localized title surfaces the merged EN primary.
-        let f = GameFilter { query: "11te Stunde", genre: "", sort_by: "", collection: "", favorites_only: false, playlist_id: None };
+        let f = GameFilter { query: "11te Stunde", genre: "", sort_by: "", collection: "", favorites_only: false, playlist_id: None, with_music: false };
         let hits = fetch_games_filtered(&conn, 1, 50, &f).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].language, "EN");
 
         // Filtering by the LP collection also surfaces the EN primary.
-        let f = GameFilter { query: "", genre: "", sort_by: "", collection: "eXoDOS_GLP", favorites_only: false, playlist_id: None };
+        let f = GameFilter { query: "", genre: "", sort_by: "", collection: "eXoDOS_GLP", favorites_only: false, playlist_id: None, with_music: false };
         let hits = fetch_games_filtered(&conn, 1, 50, &f).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].language, "EN");
@@ -1153,7 +1184,7 @@ mod tests {
             make_game("Doom"),
         ]).unwrap();
 
-        let f = GameFilter { query: "Space", genre: "", sort_by: "", collection: "", favorites_only: false, playlist_id: None };
+        let f = GameFilter { query: "Space", genre: "", sort_by: "", collection: "", favorites_only: false, playlist_id: None, with_music: false };
         let results = fetch_games_filtered(&conn, 1, 50, &f).unwrap();
         assert_eq!(results.len(), 2);
         assert!(results.iter().all(|g| g.title.contains("Space")));
@@ -1168,7 +1199,7 @@ mod tests {
         action.genre = Some("Action;Shooter".to_string());
         insert_games(&conn, &[rpg, action]).unwrap();
 
-        let f = GameFilter { query: "", genre: "Role-Playing", sort_by: "", collection: "", favorites_only: false, playlist_id: None };
+        let f = GameFilter { query: "", genre: "Role-Playing", sort_by: "", collection: "", favorites_only: false, playlist_id: None, with_music: false };
         let results = fetch_games_filtered(&conn, 1, 50, &f).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].title, "Baldur's Gate");
@@ -1184,7 +1215,7 @@ mod tests {
         conn.execute("UPDATE games SET torrent_source = 'eXoDOS' WHERE title = 'Doom'", []).unwrap();
         conn.execute("UPDATE games SET torrent_source = 'eXoDOS_GLP' WHERE title = 'Doom DE'", []).unwrap();
 
-        let f = GameFilter { query: "", genre: "", sort_by: "", collection: "eXoDOS_GLP", favorites_only: false, playlist_id: None };
+        let f = GameFilter { query: "", genre: "", sort_by: "", collection: "eXoDOS_GLP", favorites_only: false, playlist_id: None, with_music: false };
         let results = fetch_games_filtered(&conn, 1, 50, &f).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].title, "Doom DE");
@@ -1197,10 +1228,85 @@ mod tests {
         let id: i64 = conn.query_row("SELECT id FROM games WHERE title = 'Doom'", [], |r| r.get(0)).unwrap();
         toggle_favorite(&conn, id).unwrap();
 
-        let f = GameFilter { query: "", genre: "", sort_by: "", collection: "", favorites_only: true, playlist_id: None };
+        let f = GameFilter { query: "", genre: "", sort_by: "", collection: "", favorites_only: true, playlist_id: None, with_music: false };
         let results = fetch_games_filtered(&conn, 1, 50, &f).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].title, "Doom");
+    }
+
+    /// The hint has to name a format the webview plays AND an archive to read
+    /// it out of - a tracker module or a row without a GameData index is not a
+    /// playable theme.
+    #[test]
+    fn filter_with_music_keeps_playable_hints_only() {
+        let conn = open_test_db();
+        insert_games(&conn, &[
+            make_game("Has MP3"),
+            make_game("Has Module"),
+            make_game("Has Nothing"),
+            make_game("No Archive"),
+        ]).unwrap();
+        // music_file and gamedata_torrent_index are written post-import (XML
+        // hint + torrent matching), not by insert_games - set them directly.
+        conn.execute(
+            "UPDATE games SET music_file = 'Music/MS-DOS/X.mp3', gamedata_torrent_index = 1 WHERE title = 'Has MP3'", [],
+        ).unwrap();
+        conn.execute(
+            "UPDATE games SET music_file = 'Music/MS-DOS/X.XM', gamedata_torrent_index = 2 WHERE title = 'Has Module'", [],
+        ).unwrap();
+        conn.execute(
+            "UPDATE games SET gamedata_torrent_index = 3 WHERE title = 'Has Nothing'", [],
+        ).unwrap();
+        conn.execute(
+            "UPDATE games SET music_file = 'Music/MS-DOS/X.mp3' WHERE title = 'No Archive'", [],
+        ).unwrap();
+
+        let f = GameFilter { query: "", genre: "", sort_by: "", collection: "", favorites_only: false, playlist_id: None, with_music: true };
+        let results = fetch_games_filtered(&conn, 1, 50, &f).unwrap();
+        assert_eq!(
+            results.iter().map(|g| g.title.as_str()).collect::<Vec<_>>(),
+            vec!["Has MP3"]
+        );
+        assert_eq!(count_games_filtered(&conn, &f).unwrap(), 1);
+    }
+
+    /// Localized rows all carry a NULL gamedata index, so the hint lives on the
+    /// EN row only - the filter must still surface the merged card.
+    #[test]
+    fn filter_with_music_surfaces_the_merged_en_card() {
+        let conn = open_test_db();
+        let mut en = make_game("The 11th Hour");
+        en.shortcode = Some("11thHour".to_string());
+        let mut de = make_game("Die 11te Stunde");
+        de.language = "DE".to_string();
+        de.shortcode = Some("11thHour".to_string());
+        insert_games(&conn, &[en, de, make_game("Bloxit")]).unwrap();
+        conn.execute(
+            "UPDATE games SET torrent_source = CASE language WHEN 'EN' THEN 'eXoDOS' ELSE 'eXoDOS_GLP' END",
+            [],
+        ).unwrap();
+        conn.execute(
+            "UPDATE games SET music_file = 'Music/MS-DOS/X.ogg', gamedata_torrent_index = 7 \
+             WHERE title = 'The 11th Hour'", [],
+        ).unwrap();
+
+        let f = GameFilter { query: "", genre: "", sort_by: "", collection: "", favorites_only: false, playlist_id: None, with_music: true };
+        let results = fetch_games_filtered(&conn, 1, 50, &f).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].language, "EN");
+        assert_eq!(results[0].title, "The 11th Hour");
+        assert_eq!(results[0].available_languages.as_deref(), Some("EN:0,DE:0"));
+        assert_eq!(count_games_filtered(&conn, &f).unwrap(), 1);
+
+        // The collection shelf is always active, so this is the common case,
+        // not a corner: the GLP filter matches the DE row and the hint sits on
+        // the EN one. Both are group-wide questions, so the card still shows.
+        let f_glp = GameFilter { query: "", genre: "", sort_by: "", collection: "eXoDOS_GLP", favorites_only: false, playlist_id: None, with_music: true };
+        let hits = fetch_games_filtered(&conn, 1, 50, &f_glp).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].language, "EN");
+        assert_eq!(hits[0].title, "The 11th Hour");
+        assert_eq!(count_games_filtered(&conn, &f_glp).unwrap(), 1);
     }
 
     #[test]
@@ -1221,7 +1327,7 @@ mod tests {
             .unwrap();
         set_playlist_membership(&conn, pid, de_id, true).unwrap();
 
-        let f = GameFilter { query: "", genre: "", sort_by: "", collection: "", favorites_only: false, playlist_id: Some(pid) };
+        let f = GameFilter { query: "", genre: "", sort_by: "", collection: "", favorites_only: false, playlist_id: Some(pid), with_music: false };
         let results = fetch_games_filtered(&conn, 1, 50, &f).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].language, "EN");
@@ -1259,7 +1365,7 @@ mod tests {
             "UPDATE games SET torrent_source = CASE language WHEN 'EN' THEN 'eXoDOS' ELSE 'eXoDOS_GLP' END",
             [],
         ).unwrap();
-        let f_glp = GameFilter { query: "", genre: "", sort_by: "", collection: "eXoDOS_GLP", favorites_only: false, playlist_id: Some(pid) };
+        let f_glp = GameFilter { query: "", genre: "", sort_by: "", collection: "eXoDOS_GLP", favorites_only: false, playlist_id: Some(pid), with_music: false };
         let hits = fetch_games_filtered(&conn, 1, 50, &f_glp).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].language, "EN");
@@ -1295,7 +1401,7 @@ mod tests {
         let games: Vec<Game> = (1..=10).map(|i| make_game(&format!("Game {:02}", i))).collect();
         insert_games(&conn, &games).unwrap();
 
-        let f = GameFilter { query: "", genre: "", sort_by: "", collection: "", favorites_only: false, playlist_id: None };
+        let f = GameFilter { query: "", genre: "", sort_by: "", collection: "", favorites_only: false, playlist_id: None, with_music: false };
         let page1 = fetch_games_filtered(&conn, 1, 4, &f).unwrap();
         let page2 = fetch_games_filtered(&conn, 2, 4, &f).unwrap();
         let total = count_games_filtered(&conn, &f).unwrap();
@@ -1373,7 +1479,7 @@ mod tests {
             .collect();
         insert_games(&conn, &games).unwrap();
 
-        let f = GameFilter { query: "a", genre: "", sort_by: "", collection: "", favorites_only: false, playlist_id: None };
+        let f = GameFilter { query: "a", genre: "", sort_by: "", collection: "", favorites_only: false, playlist_id: None, with_music: false };
         let count = count_games_filtered(&conn, &f).unwrap();
         let fetched = fetch_games_filtered(&conn, 1, 50, &f).unwrap();
         assert_eq!(count, fetched.len(), "count must match number of fetched rows");

@@ -681,6 +681,52 @@ cold torrent takes a minute; the panel starts one on open, keeps it running
 when it closes, and caps concurrency at three (each stream has its own 32 MB
 lookahead and they compete for peers).
 
+**The theme track comes out of the same archive by the same road.** About
+half the eXoDOS games file one track under `Music/MS-DOS/<Title>.mp3` (or
+`.ogg`; a few tracker modules the webview cannot play are not offered). The
+pipeline in `media.rs` is parameterised by `MediaKind {Video, Music}` - only
+the finder (`find_music`), the cache dir (`content/musiccache/`), the marker
+(`.nomusic`) and the file naming differ; `MusicState` is a second job map.
+A music cache file KEEPS its real extension (ServeFile derives the
+Content-Type from it), so the cache lookup is by stem. The catalogue hint
+`music_file` (from LaunchBox `MusicPath`/`MissingMusic`, nulled where no
+GameData archive exists - Win3x says `MissingMusic=false` 1,120 times and
+ships nothing) only feeds the shuffle candidates and the "is this playable"
+pre-check; the archive has the last word, and the panel probes regardless.
+The three fetch slots are shared between videos and music in
+`stores/mediaQueue.ts` (foreground video > wanted track > everything else).
+The player (`stores/music.ts`, `NowPlayingBar`) yields to an unmuted preview
+and to a running game via pause reasons; `game-exited` (emitted from the
+emulator reap task) withdraws the game's. Those reasons are a LEVEL, not an
+edge - `pauseFor` records one whether or not anything was audible at the
+time, so a track loaded while a trailer or an emulator is running stays quiet
+until the reason is withdrawn; "a game launched into silence starts nothing
+on exit" is `userPaused` doing that work, not the reason set. The
+collection-wide shuffle only ever starts from a click, and offline it refuses
+to start at all - `advance` stops the auto-walk there too, because a backend
+without a torrent session answers every pick instantly. That answer is phase
+`none` carrying `OFFLINE_TOKEN` in `error`, and a "none" with a non-null
+error is PROVISIONAL: neither store caches it as "this game has no
+music/video" (music.ts `put`, videos.ts `put`), or one offline visit would
+blacklist the game for the rest of the session. A queue that walks past
+`AUTO_SKIP_MAX` duds in a row stops instead of asking the backend forever.
+
+**Browse is the jukebox; there is no music tab and no music collection.**
+Every track belongs to a game, so a second list over the same rows would be
+a duplicate, and a pseudo-collection would inherit every `COLLECTION_MAP`
+projection (§15). Instead the toolbar's "With theme" chip (`with_music`
+filter - its OWN EXISTS over the group, not a variant condition, because the
+hint sits on the EN row while a collection filter matches the LP row; the two
+combined used to empty the GLP shelf) flips the session into list view
+without touching `view_mode`, and `GameRow` carries a ▶. Playback started
+there runs in mode `list`: the LIVE Browse list is the queue, ⏭ walks it in
+the current sort, the end of a loaded page triggers `fetchMoreGames`, the end
+of the list stops. `music_cache_index` (one `read_dir` of `musiccache/`,
+stems split at the LAST underscore since collection ids contain `_`) tells the
+rows which tracks are cached or known-missing, and `put()` keeps those sets
+live so a dud row loses its ▶ without a reload. Opening the detail panel
+leaves list mode - `playTheme` is theme mode by definition.
+
 **Linux playback runs through WebKit's GStreamer, and WHICH GStreamer differs
 by package.** The .deb/.rpm use the distro's WebKit, so the distro's plugins
 apply and the packages declare them as dependencies. The AppImage bundles

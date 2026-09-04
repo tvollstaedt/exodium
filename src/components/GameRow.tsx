@@ -5,6 +5,9 @@ import { formatBytes, parseLangEntries, langBadgeClass } from "../util";
 import { downloads, cancelGameDownload } from "../stores/downloads";
 import { isOffline } from "../stores/network";
 import { toggleFavorite } from "../stores/games";
+import {
+  playableHint, playFromList, togglePlay, currentTrack, musicPlaying, musicCached, getMusicState,
+} from "../stores/music";
 import { GameActionsMenu } from "./GameActionsMenu";
 
 interface GameRowProps {
@@ -76,9 +79,29 @@ export function GameRow(props: GameRowProps) {
 
   const genreText = () => (props.game.genre ?? "").split(";").map(s => s.trim()).filter(Boolean).join(", ");
 
+  const isCurrentTrack = () => props.game.id != null && currentTrack()?.gameId === props.game.id;
+  const isCached = () => props.game.id != null && musicCached().has(props.game.id);
+  const isBusy = () => {
+    if (props.game.id == null) { return false; }
+    const phase = getMusicState(props.game.id)?.phase;
+    return phase === "probing" || phase === "fetching";
+  };
+  // Offline, an uncached track can never arrive - the button stays visible so
+  // the column doesn't jump, but says why it does nothing.
+  const playBlocked = () => isOffline() && !isCached();
+  const playTitle = () => {
+    if (playBlocked()) { return "Not cached – offline"; }
+    if (isCurrentTrack() && musicPlaying()) { return "Pause"; }
+    return "Play theme";
+  };
+  const onPlayClick = (e: MouseEvent) => {
+    e.stopPropagation();
+    if (isCurrentTrack()) { togglePlay(); } else { playFromList(props.game); }
+  };
+
   return (
     <div
-      class={`game-row ${props.game.installed || props.game.in_library ? "installed" : ""}`}
+      class={`game-row ${props.game.installed || props.game.in_library ? "installed" : ""}${isCurrentTrack() ? " is-playing" : ""}`}
       data-game-id={props.game.id != null ? String(props.game.id) : undefined}
       onClick={(e) => {
         // Solid's delegated clicks walk back through the Portal to this row,
@@ -97,6 +120,18 @@ export function GameRow(props: GameRowProps) {
           title={favorited() ? "Remove from favorites" : "Add to favorites"}
         >★</button>
       </Show>
+      {/* The cell is always rendered so the shared grid template keeps its
+          column even on rows with no theme. */}
+      <span class="row-play">
+        <Show when={playableHint(props.game) && props.game.id != null}>
+          <button
+            class={`row-play-btn${isCurrentTrack() ? " is-current" : ""}${isBusy() ? " is-busy" : ""}${isCached() ? " is-cached" : ""}`}
+            disabled={playBlocked()}
+            title={playTitle()}
+            onClick={onPlayClick}
+          >{isCurrentTrack() && musicPlaying() ? "⏸" : "▶"}</button>
+        </Show>
+      </span>
       <span class="row-title" title={props.game.title}>
         <span class="row-title-text">{props.game.title}</span>
         <For each={langEntries()}>

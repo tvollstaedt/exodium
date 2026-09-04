@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.14.0 - 2026-09-04
+
+### Added
+
+- Game music. Most eXoDOS games ship a theme track next to their preview
+  video; Exodium now plays it. Opening a game's details starts its theme
+  (off under Settings → Music), a player bar at the bottom shows cover, seek
+  bar and volume, and a music button in the top bar brings the bar back or
+  starts a collection-wide shuffle. Tracks are fetched from the torrent like
+  previews and cached; nothing is downloaded in bulk, and a played track
+  stays available offline.
+- Browse as jukebox. The "With theme" filter narrows the list to games with
+  a track and switches to list view, where each row gets a play button. The
+  visible list is the queue: skip walks it in the current sort, genre and
+  search apply as usual.
+- The player pauses for a preview playing with sound and for a running game,
+  and resumes when either ends. Paused by hand means paused until you press
+  play.
+- Option to stop after the current track (player bar, Settings → Music).
+
+### Changed
+
+- Linux .rpm packages depend on the GStreamer base and ugly-free plugin sets,
+  which carry the MP3 and Vorbis decoders the theme tracks need.
+
 ## 0.13.2 - 2026-08-25
 
 ### Fixed

@@ -773,6 +773,7 @@ pub fn run() {
             app.manage(TorrentState(RwLock::new(std::collections::HashMap::new())));
             app.manage(ContentPackState::new());
             app.manage(commands::media::VideoState::new());
+            app.manage(commands::media::MusicState::new());
             app.manage(commands::media::MediaServerState::new());
 
             // macOS uses native traffic-light controls (no custom titlebar).
@@ -817,6 +818,12 @@ pub fn run() {
             commands::media::media_url,
             commands::media::video_playback_supported,
             commands::media::cancel_game_video,
+            commands::media::start_game_music,
+            commands::media::get_music_status,
+            commands::media::cancel_game_music,
+            commands::media::music_playback_supported,
+            commands::media::music_shuffle_candidates,
+            commands::media::music_cache_index,
             factory_reset,
             download_game,
             cancel_download,

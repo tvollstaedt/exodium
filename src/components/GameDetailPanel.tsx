@@ -23,6 +23,7 @@ import { videos, requestVideo, releaseVideo, setForegroundVideo, getVideoState, 
 import { ensureDismissedNotesLoaded, isNoteDismissed, dismissedNotesLoaded, dismissNote } from "../stores/notes";
 import { packsByCollection, activeJobs, installedPacks, startContentPackInstall } from "../stores/contentPacks";
 import { ensurePreviewMutedLoaded, previewMuted, setPreviewMuted } from "../stores/playback";
+import { musicJobs, getMusicState, requestTheme, playTheme, pauseFor, resumeFrom, pauseForGame, resumeFromGame, togglePlay, currentTrack, wantedTrack, musicPlaying, musicAutoplay, ensureMusicAutoplayLoaded, musicUnsupported, MUSIC_QUEUED } from "../stores/music";
 
 interface Props {
   game: Game | null;
@@ -819,6 +820,54 @@ export function GameDetailPanel(props: Props) {
     });
   });
 
+  // ── Theme track ────────────────────────────────────────────────────────
+  // Same beat as the video: the archive is asked a moment after the panel
+  // settles. With autoplay on the theme becomes the player's wanted track;
+  // off, it is only fetched so the row below can offer it.
+  ensureMusicAutoplayLoaded();
+  /** The theme belongs to the GROUP, not the selected variant: extras live in
+   *  the EN archive only (every LP row has a NULL gamedata index, §14), so
+   *  switching the language chip must neither restart nor re-request it. */
+  const themeOwner = () => variants().find((v) => v.language === "EN") ?? props.game ?? selected();
+  createEffect(() => {
+    const g = themeOwner();
+    const id = g?.id;
+    if (g == null || id == null || musicUnsupported()) { return; }
+    const timer = window.setTimeout(() => {
+      // Already the active track (e.g. started from the Browse list, or the
+      // owner resolved while playing): leave the player alone - re-issuing
+      // playTheme would restart it and yank a list queue into theme mode.
+      if (currentTrack()?.gameId === id || wantedTrack()?.gameId === id) { return; }
+      if (musicAutoplay()) { playTheme(g); } else { void requestTheme(id); }
+    }, 400);
+    onCleanup(() => clearTimeout(timer));
+  });
+  const musicState = () => {
+    const id = themeOwner()?.id;
+    musicJobs(); // subscribe
+    return id != null ? getMusicState(id) : undefined;
+  };
+  const musicReady = () => musicState()?.phase === "ready" && !!musicState()?.path;
+  const musicBusy = () => {
+    const p = musicState()?.phase;
+    return p === "fetching" || p === PHASE_PROBING || p === MUSIC_QUEUED;
+  };
+  const musicFailed = () => musicState()?.phase === "error";
+  // No "no theme for this game" line, for the same reason there is no such
+  // pill for the video: the honest answer is also the useless one.
+  const musicRowVisible = () => musicReady() || musicBusy() || musicFailed();
+  const isPlayingThisTheme = () => {
+    const id = themeOwner()?.id;
+    return id != null && currentTrack()?.gameId === id && musicPlaying();
+  };
+
+  // A preview with sound is the foreground; the music yields to it and comes
+  // back when it ends. Switching games or closing the panel takes the video
+  // away without an `ended`, so both withdraw the reason too.
+  createEffect(on(() => selected()?.id, () => resumeFrom("video"), { defer: true }));
+  createEffect(() => { if (!props.game) { resumeFrom("video"); } });
+  onCleanup(() => resumeFrom("video"));
+
   // Was a fetch phase observed for the current game? Then the user already
   // spent the wait looking at the cover, and the ready video starts at once.
   // A cache hit reports "ready" as its first state and keeps the cover beat.
@@ -899,6 +948,8 @@ export function GameDetailPanel(props: Props) {
     if (heroVideoRef) {
       heroVideoRef.muted = next;
       if (!next && heroVideoRef.paused) { void heroVideoRef.play(); }
+      // Silent, the preview no longer needs the speakers; with sound, it does.
+      if (next) { resumeFrom("video"); } else if (!heroVideoRef.paused) { pauseFor("video"); }
     }
   };
 
@@ -909,6 +960,23 @@ export function GameDetailPanel(props: Props) {
   createEffect(() => {
     if (lightboxOpen()) { heroVideoRef?.pause(); }
   });
+
+  // ...and that pause hands the speakers back to the theme, while the lightbox
+  // goes on playing the same trailer with sound from its OWN <video>. So the
+  // reason is held here for as long as that one is the foreground. Entry 0 is
+  // the video, and only the hero video's own click opens there - a lightbox
+  // started on a screenshot is silent and must not silence the theme.
+  const lightboxHoldsAudio = () =>
+    lightboxOpen() && !!videoSrc() && !previewMuted() && lightboxStart() === 0;
+
+  // Only a hold-to-no-hold transition withdraws the reason: an unconditional
+  // resume would undo the hero's pauseFor the moment the mute preference
+  // changes.
+  createEffect((wasHolding: boolean) => {
+    const holding = lightboxHoldsAudio();
+    if (holding) { pauseFor("video"); } else if (wasHolding) { resumeFrom("video"); }
+    return holding;
+  }, false);
 
   const handleManualClick = () => {
     if (metadata()?.manual_path) { setManualOpen(true); }
@@ -934,6 +1002,9 @@ export function GameDetailPanel(props: Props) {
     setLaunchingId(gameId);
     setStatus("");
     const startedAt = Date.now();
+    // The game has its own sound; the theme waits and `game-exited` brings it
+    // back - only if this launch is what paused it.
+    pauseForGame(gameId);
     try {
       await launchGame(gameId);
       // DOSBox spawns immediately but the window can take 1-3s to paint
@@ -947,6 +1018,13 @@ export function GameDetailPanel(props: Props) {
       setLaunchingId(null);
       setStatus("");
       const detail = String(e).replace(/^Error:\s*/, "");
+      // One failure does NOT mean nothing is running: launch_game refuses a
+      // second start of a live game with "'<title>' is already running."
+      // (games.rs). That game's claim on the speakers belongs to the launch
+      // that succeeded, and withdrawing it here started the theme over a
+      // running emulator. Every other failure spawned nothing, so its claim
+      // goes back.
+      if (!detail.includes("already running")) { resumeFromGame(gameId); }
       showToast(`Couldn't launch ${props.game?.title ?? "game"}`, "error", { detail });
     }
   };
@@ -1138,9 +1216,19 @@ export function GameDetailPanel(props: Props) {
                 src={videoSrc()!}
                 playsinline
                 preload="auto"
-                onEnded={() => setVideoPlaying(false)}
-                onPause={() => setVideoPlaying(false)}
-                onPlay={() => setVideoPlaying(true)}
+                onEnded={() => { setVideoPlaying(false); resumeFrom("video"); }}
+                // A paused preview is not the foreground either: without this
+                // the speakers stay claimed by a video nobody hears - opening
+                // the lightbox pauses the hero, and closing it left silence.
+                // Unless the lightbox is the one holding them: `pause()` only
+                // QUEUES this event, so it lands after the effect above has
+                // taken the reason over and would withdraw it again - the
+                // theme then played over the lightbox's trailer.
+                onPause={() => {
+                  setVideoPlaying(false);
+                  if (!lightboxHoldsAudio()) { resumeFrom("video"); }
+                }}
+                onPlay={(e) => { setVideoPlaying(true); if (!e.currentTarget.muted) { pauseFor("video"); } }}
                 onClick={() => { setLightboxStart(0); setLightboxOpen(true); }}
               />
             </Show>
@@ -1450,6 +1538,47 @@ export function GameDetailPanel(props: Props) {
                       value={field("rating") != null ? ratingStars(field("rating") as number) : null}
                       valueClass="game-detail-stars"
                     />
+                  </div>
+                </div>
+              </Show>
+
+              {/* The theme track, once the archive has confirmed one - or
+                  while it is still being asked. Playback itself lives in the
+                  player bar; this is where it is started for this game. */}
+              <Show when={musicRowVisible()}>
+                <div class="game-detail-music">
+                  <div class="game-detail-section-label">Theme</div>
+                  <div class="game-detail-music-row">
+                    <Show when={musicReady()}>
+                      <Button
+                        variant="small"
+                        onClick={() => {
+                          const g = themeOwner();
+                          if (!g) { return; }
+                          if (isPlayingThisTheme()) { togglePlay(); } else { playTheme(g); }
+                        }}
+                      >{isPlayingThisTheme() ? "Pause" : "Play"}</Button>
+                      <span class="game-detail-music-name">
+                        {themeOwner()?.music_file?.replace(/\.[^.]+$/, "") ?? themeOwner()?.title}
+                      </span>
+                    </Show>
+                    <Show when={musicBusy()}>
+                      <span class="btn-spinner" />
+                      <span class="game-detail-music-name">
+                        <Show when={musicState()?.phase === "fetching"} fallback={
+                          musicState()?.phase === MUSIC_QUEUED ? "Theme queued…" : "Looking for a theme…"
+                        }>
+                          Loading theme {Math.round((musicState()?.progress ?? 0) * 100)}%
+                        </Show>
+                      </span>
+                    </Show>
+                    <Show when={musicFailed()}>
+                      <Button
+                        variant="small"
+                        title={musicState()?.error ?? undefined}
+                        onClick={() => { const id = themeOwner()?.id; if (id != null) { void requestTheme(id); } }}
+                      >↻ Theme retry</Button>
+                    </Show>
                   </div>
                 </div>
               </Show>

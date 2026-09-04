@@ -364,6 +364,19 @@ fn main() {
 
     println!("\nTotal imported: {} games", total_imported);
 
+    // The music hint only means something where a GameData archive exists to
+    // hold the track. eXoWin3x carries `MissingMusic=false` on 1,120 rows and
+    // ships no music at all - LaunchBox's default, not an inventory.
+    conn.execute(
+        "UPDATE games SET music_file = NULL WHERE gamedata_torrent_index IS NULL",
+        [],
+    )
+    .unwrap();
+    let music_hints: i64 = conn
+        .query_row("SELECT COUNT(*) FROM games WHERE music_file IS NOT NULL", [], |r| r.get(0))
+        .unwrap();
+    println!("Theme-track hints: {} games", music_hints);
+
     // One launcher, one row. eXoWin3x catalogues both Castle of the Winds games
     // against the same bat file (they ship as a single install), and two rows
     // sharing an application_path break refresh_catalog's matching key - it

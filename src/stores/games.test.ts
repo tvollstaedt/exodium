@@ -122,7 +122,28 @@ describe("games store", () => {
 
     expect(mockInvoke).toHaveBeenCalledWith(
       "get_games",
-      expect.objectContaining({ favoritesOnly: true })
+      expect.objectContaining({ favoritesOnly: true, withMusic: false })
     );
+  });
+
+  it("fetchGames passes the withMusic filter", async () => {
+    mockInvoke.mockResolvedValue({ games: [], total: 0 });
+
+    const { fetchGames, setWithMusic, withMusic, setSearchQuery, setGenreFilter, setSortBy, setCollectionFilter } =
+      await import("./games");
+
+    setSearchQuery("");
+    setGenreFilter("");
+    setSortBy("title");
+    setCollectionFilter("");
+
+    expect(withMusic()).toBe(false);
+    await fetchGames();
+    expect(mockInvoke).toHaveBeenCalledWith("get_games", expect.objectContaining({ withMusic: false }));
+
+    setWithMusic(true);
+    await fetchGames();
+    expect(mockInvoke).toHaveBeenCalledWith("get_games", expect.objectContaining({ withMusic: true }));
+    setWithMusic(false);
   });
 });

@@ -9,7 +9,7 @@ export function updateGameFavorited(id: number, value: boolean) {
 }
 
 export async function getFavoriteGames(): Promise<Game[]> {
-  const result = await getGames(1, 500, "", "", "title", "", true);
+  const result = await getGames(1, 500, "", "", "title", "", true, null, false);
   return result.games;
 }
 
@@ -36,6 +36,10 @@ const [collectionFilter, setCollectionFilter] = createSignal("");
 const [playlistFilter, setPlaylistFilter] = createSignal<number | null>(null);
 const [currentPage, setCurrentPage] = createSignal(1);
 const [hasMore, setHasMore] = createSignal(true);
+// "Only games with a theme track". Session-only on purpose: it narrows the
+// catalogue hard, and finding Browse still filtered after a restart would
+// read as missing games rather than as a filter.
+const [withMusic, setWithMusic] = createSignal(false);
 
 const PER_PAGE = 100;
 
@@ -53,6 +57,7 @@ export {
   sortBy, setSortBy,
   collectionFilter, setCollectionFilter,
   playlistFilter, setPlaylistFilter,
+  withMusic, setWithMusic,
 };
 
 /// Fetch the first page (resets the list).
@@ -63,7 +68,7 @@ export async function fetchGames() {
   setCurrentPage(1);
   try {
     const result: GameList = await getGames(
-      1, PER_PAGE, searchQuery(), genreFilter(), sortBy(), collectionFilter(), false, playlistFilter()
+      1, PER_PAGE, searchQuery(), genreFilter(), sortBy(), collectionFilter(), false, playlistFilter(), withMusic()
     );
     if (epoch !== fetchEpoch) { return; }
     setGames(result.games);
@@ -94,7 +99,7 @@ export async function refreshLoadedGames() {
   const epoch = ++fetchEpoch;
   try {
     const result: GameList = await getGames(
-      1, Math.max(count, PER_PAGE), searchQuery(), genreFilter(), sortBy(), collectionFilter(), false, playlistFilter()
+      1, Math.max(count, PER_PAGE), searchQuery(), genreFilter(), sortBy(), collectionFilter(), false, playlistFilter(), withMusic()
     );
     if (epoch !== fetchEpoch) { return; }
     setGames(result.games);
@@ -114,7 +119,7 @@ export async function fetchMoreGames() {
   const nextPage = currentPage() + 1;
   try {
     const result: GameList = await getGames(
-      nextPage, PER_PAGE, searchQuery(), genreFilter(), sortBy(), collectionFilter(), false, playlistFilter()
+      nextPage, PER_PAGE, searchQuery(), genreFilter(), sortBy(), collectionFilter(), false, playlistFilter(), withMusic()
     );
     if (epoch !== fetchEpoch) { return; }
     setGames((prev) => [...prev, ...result.games]);
@@ -133,7 +138,7 @@ export async function fetchAllGames() {
   const epoch = ++fetchEpoch;
   setLoading(true);
   try {
-    const result: GameList = await getGames(1, totalGames() || 9999, searchQuery(), genreFilter(), sortBy(), collectionFilter(), false, playlistFilter());
+    const result: GameList = await getGames(1, totalGames() || 9999, searchQuery(), genreFilter(), sortBy(), collectionFilter(), false, playlistFilter(), withMusic());
     if (epoch !== fetchEpoch) { return; }
     setGames(result.games);
     setHasMore(false);
