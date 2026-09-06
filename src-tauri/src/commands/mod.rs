@@ -2,6 +2,7 @@ pub mod media;
 pub(crate) mod collections;
 pub(crate) mod paths;
 pub(crate) mod assets;
+pub(crate) mod layout;
 pub(crate) mod content_packs;
 mod games;
 mod playlists;
