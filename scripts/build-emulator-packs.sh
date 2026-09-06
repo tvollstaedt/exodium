@@ -1,13 +1,19 @@
 #!/usr/bin/env bash
-# build-emulator-packs.sh — Assemble the Win9x emulator content-pack tarballs
-# for one platform. The packs replace the emulators that used to ship inside
-# the installer (344 MB of the macOS bundle served 29-of-662 games).
+# build-emulator-packs.sh — Assemble the emulator content-pack tarballs for one
+# platform. The packs replace the emulators that used to ship inside the
+# installer (344 MB of the macOS bundle served 29-of-662 games).
 #
+#   --emulator win9x (default)
 #   --platform macos   dosbox-x-macos-arm64-v<N>.tar.gz   (upstream .app, arm64)
 #                      86box-macos-universal-v<N>.tar.gz  (upstream .app)
 #   --platform linux   dosbox-x-linux-x86_64-v<N>.tar.gz  (our self-built
 #                        AppImage, pass it via --dosbox-x-appimage <path>)
 #                      86box-linux-x86_64-v<N>.tar.gz     (upstream AppImage)
+#
+#   --emulator scummvm --scummvm-version <v>
+#   --platform macos   scummvm-<v>-macos-universal-v<N>.tar.gz (upstream DMG)
+#   --platform linux   scummvm-<v>-linux-x86_64-v<N>.tar.gz    (our self-built
+#                        AppImage, pass it via --scummvm-appimage <path>)
 #
 # Tarball rules (each one guards a shipped incident - see CLAUDE.md §10/§16):
 #   - payload wrapped in a dir named EXACTLY like the pack id ("dosbox-x/",
@@ -25,15 +31,21 @@
 set -euo pipefail
 
 PLATFORM=""
+EMULATOR="win9x"
 DBX_APPIMAGE=""
+SVM_APPIMAGE=""
+SCUMMVM_VERSION=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --platform) PLATFORM="$2"; shift 2 ;;
+    --emulator) EMULATOR="$2"; shift 2 ;;
     --dosbox-x-appimage) DBX_APPIMAGE="$2"; shift 2 ;;
+    --scummvm-appimage) SVM_APPIMAGE="$2"; shift 2 ;;
+    --scummvm-version) SCUMMVM_VERSION="$2"; shift 2 ;;
     *) echo "Unknown argument: $1"; exit 1 ;;
   esac
 done
-[[ -z "$PLATFORM" ]] && { echo "Usage: $0 --platform macos|linux [--dosbox-x-appimage <path>]"; exit 1; }
+[[ -z "$PLATFORM" ]] && { echo "Usage: $0 --platform macos|linux [--emulator win9x|scummvm]"; exit 1; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -77,6 +89,62 @@ roll_tar() { # roll_tar <staging-parent> <wrapper-name> <out.tar.gz>
   (cd "$1" && COPYFILE_DISABLE=1 tar czf "$3" "$2")
   echo "Packed: $3"
 }
+
+if [[ "$EMULATOR" == "scummvm" ]]; then
+  [[ -z "$SCUMMVM_VERSION" ]] && { echo "ERROR: --scummvm-version <v> is required"; exit 1; }
+  # The wrapper repeats install_path's last segment (content/emulators/
+  # scummvm-<v>), which is what unwrapped_source strips by name.
+  STAGE="$TMP_DIR/stage-svm/scummvm-${SCUMMVM_VERSION}"
+  mkdir -p "$STAGE"
+
+  case "$PLATFORM" in
+    macos)
+      [[ "$(uname -s)" == "Darwin" ]] || { echo "--platform macos must run on macOS (codesign)"; exit 1; }
+      # The universal DMG serves both Mac architectures - verified on 2.5.0:
+      # Contents/MacOS/scummvm is x86_64 + arm64.
+      fetch "https://downloads.scummvm.org/frs/scummvm/${SCUMMVM_VERSION}/scummvm-${SCUMMVM_VERSION}-macosx.dmg" \
+        "$TMP_DIR/svm.dmg"
+      MNT="$TMP_DIR/mnt-svm"
+      mkdir -p "$MNT"
+      hdiutil attach -nobrowse -quiet "$TMP_DIR/svm.dmg" -mountpoint "$MNT"
+      trap 'hdiutil detach "'"$MNT"'" -quiet 2>/dev/null || true; rm -rf "$TMP_DIR"' EXIT
+      [[ -d "$MNT/ScummVM.app" ]] || { echo "ERROR: ScummVM.app not in the DMG"; exit 1; }
+      cp -R "$MNT/ScummVM.app" "$STAGE/ScummVM.app"
+      cp "$MNT/COPYRIGHT" "$STAGE/COPYRIGHT" 2>/dev/null || true
+      cp "$MNT/License (GPL)" "$STAGE/COPYING" 2>/dev/null || true
+      hdiutil detach "$MNT" -quiet
+      trap 'rm -rf "$TMP_DIR"' EXIT
+
+      # Sparkle cannot be stripped (scummvm links it via @rpath), so the
+      # self-updater is disabled instead - same reason the DOSBox-X AppImage
+      # ships without its updater hook: a build that replaces itself under
+      # eXo's pin is exactly what the pin exists to prevent. "Check for
+      # Updates" in the menu still works; nothing happens on its own.
+      plutil -replace SUEnableAutomaticChecks -bool false "$STAGE/ScummVM.app/Contents/Info.plist"
+      plutil -replace SUAutomaticallyUpdate -bool false "$STAGE/ScummVM.app/Contents/Info.plist"
+
+      xattr -cr "$STAGE/ScummVM.app" 2>/dev/null || true
+      codesign --force --deep --sign - "$STAGE/ScummVM.app"
+      chmod +x "$STAGE/ScummVM.app/Contents/MacOS/scummvm"
+      roll_tar "$TMP_DIR/stage-svm" "scummvm-${SCUMMVM_VERSION}" \
+        "$OUT_DIR/scummvm-${SCUMMVM_VERSION}-macos-universal-v${PACK_VERSION}.tar.gz"
+      ;;
+
+    linux)
+      [[ -z "$SVM_APPIMAGE" ]] && { echo "ERROR: --scummvm-appimage <path> is required for linux"; exit 1; }
+      [[ -f "$SVM_APPIMAGE" ]] || { echo "ERROR: $SVM_APPIMAGE not found"; exit 1; }
+      cp "$SVM_APPIMAGE" "$STAGE/ScummVM.AppImage"
+      chmod +x "$STAGE/ScummVM.AppImage"
+      fetch_license "https://raw.githubusercontent.com/scummvm/scummvm/v${SCUMMVM_VERSION}/COPYING" "$STAGE/COPYING"
+      roll_tar "$TMP_DIR/stage-svm" "scummvm-${SCUMMVM_VERSION}" \
+        "$OUT_DIR/scummvm-${SCUMMVM_VERSION}-linux-x86_64-v${PACK_VERSION}.tar.gz"
+      ;;
+
+    *)
+      echo "Unknown platform: $PLATFORM (expected macos or linux)"; exit 1 ;;
+  esac
+
+else
 
 case "$PLATFORM" in
   macos)
@@ -140,6 +208,8 @@ case "$PLATFORM" in
   *)
     echo "Unknown platform: $PLATFORM (expected macos or linux)"; exit 1 ;;
 esac
+
+fi
 
 echo
 echo "sha256 / sizes for manifest.json:"

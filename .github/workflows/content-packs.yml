@@ -1,4 +1,5 @@
-# Builds the Win9x emulator content-pack tarballs (manual dispatch only).
+# Builds the emulator content-pack tarballs (manual dispatch only): the two
+# Win9x emulators, or one ScummVM build per eXo pin.
 #
 # Produces workflow ARTIFACTS, never a release: publishing stays the manual
 # `gh release create content-vN ... --latest=false` flow (CLAUDE.md §10 - a
@@ -11,6 +12,16 @@ name: Emulator Content Packs
 on:
   workflow_dispatch:
     inputs:
+      packs:
+        description: "Which set to build"
+        type: choice
+        options: [win9x, scummvm]
+        default: win9x
+        required: true
+      scummvm_versions:
+        description: "ScummVM releases to package (JSON array; eXo's pins)"
+        default: '["2.5.0", "2.8.0", "2.9.0", "2026.1.0"]'
+        required: true
       dosbox_x_version:
         description: "DOSBox-X tag to build (keep near eXo's x98 build)"
         default: "2025.02.01"
@@ -28,6 +39,7 @@ jobs:
   # DOSBox-X has no upstream Linux binaries: build the pinned tag from source
   # and package it as an anylinux AppImage (sharun/uruntime).
   dosbox-x-linux:
+    if: inputs.packs == 'win9x'
     runs-on: ubuntu-latest
     container: ghcr.io/pkgforge-dev/archlinux:latest
     steps:
@@ -47,6 +59,7 @@ jobs:
           if-no-files-found: error
 
   linux-packs:
+    if: inputs.packs == 'win9x'
     needs: dosbox-x-linux
     runs-on: ubuntu-latest
     steps:
@@ -76,6 +89,7 @@ jobs:
           if-no-files-found: error
 
   macos-packs:
+    if: inputs.packs == 'win9x'
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
@@ -98,6 +112,7 @@ jobs:
   # sidecars (invisible to `tar tzf`, break .app signatures), and surviving
   # .app symlinks (a materialized Frameworks symlink breaks the seal).
   assemble:
+    if: inputs.packs == 'win9x'
     needs: [linux-packs, macos-packs]
     runs-on: ubuntu-latest
     steps:
@@ -170,5 +185,127 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: emulator-packs
+          path: packs/
+          if-no-files-found: error
+
+  # ── ScummVM: one pack per eXo pin ──────────────────────────────────────────
+  # Upstream ships a universal macOS DMG but no Linux binary of any release,
+  # so Linux compiles from the release tarball, exactly like DOSBox-X.
+  scummvm-linux:
+    if: inputs.packs == 'scummvm'
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ${{ fromJSON(inputs.scummvm_versions) }}
+    runs-on: ubuntu-latest
+    container: ghcr.io/pkgforge-dev/archlinux:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare container (quick-sharun toolchain)
+        uses: pkgforge-dev/anylinux-setup-action@v2
+      - name: Build ScummVM ${{ matrix.version }} AppImage from source
+        env:
+          SCUMMVM_VERSION: ${{ matrix.version }}
+        run: sh scripts/build-scummvm-appimage.sh
+      - name: Assemble the Linux pack tarball
+        env:
+          SCUMMVM_VERSION: ${{ matrix.version }}
+          PACK_VERSION: ${{ inputs.pack_version }}
+        run: |
+          bash scripts/build-emulator-packs.sh --platform linux --emulator scummvm \
+            --scummvm-version "${{ matrix.version }}" --scummvm-appimage dist/ScummVM.AppImage
+          cp dist/scummvm-*-source.tar.xz dist/packs/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scummvm-linux-${{ matrix.version }}
+          path: dist/packs/*
+          if-no-files-found: error
+
+  scummvm-macos:
+    if: inputs.packs == 'scummvm'
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ${{ fromJSON(inputs.scummvm_versions) }}
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble the macOS pack tarball
+        env:
+          SCUMMVM_VERSION: ${{ matrix.version }}
+          PACK_VERSION: ${{ inputs.pack_version }}
+        run: |
+          bash scripts/build-emulator-packs.sh --platform macos --emulator scummvm \
+            --scummvm-version "${{ matrix.version }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scummvm-macos-${{ matrix.version }}
+          path: dist/packs/*.tar.gz
+          if-no-files-found: error
+
+  scummvm-assemble:
+    if: inputs.packs == 'scummvm'
+    needs: [scummvm-linux, scummvm-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: scummvm-*
+          merge-multiple: true
+          path: packs
+      - name: Verification gate
+        run: |
+          set -euo pipefail
+          cd packs
+          check() { # check <tarball> <binary-path> [expect-symlinks]
+            local tb="$1" bin="$2" want_links="${3:-no}"
+            local dir; dir="$(mktemp -d)"
+            tar xzf "$tb" -C "$dir"
+            [ -f "$dir/$bin" ] || { echo "::error::$tb: expected binary $bin missing"; exit 1; }
+            [ -x "$dir/$bin" ] || { echo "::error::$tb: $bin is not executable"; exit 1; }
+            if find "$dir" -name '._*' | grep -q .; then
+              echo "::error::$tb: AppleDouble ._* entries present"; exit 1
+            fi
+            if [ "$want_links" = "yes" ] && ! find "$dir" -type l | grep -q .; then
+              echo "::error::$tb: .app bundle lost its symlinks"; exit 1
+            fi
+            rm -rf "$dir"
+            echo "OK: $tb"
+          }
+          V="${{ inputs.pack_version }}"
+          for ver in $(echo '${{ inputs.scummvm_versions }}' | jq -r '.[]'); do
+            # ScummVM.app carries Sparkle.framework, so its symlinks must survive.
+            check "scummvm-$ver-macos-universal-v$V.tar.gz" \
+                  "scummvm-$ver/ScummVM.app/Contents/MacOS/scummvm" yes
+            check "scummvm-$ver-linux-x86_64-v$V.tar.gz" \
+                  "scummvm-$ver/ScummVM.AppImage"
+          done
+      - name: Emit manifest snippet + checksums
+        run: |
+          set -euo pipefail
+          cd packs
+          sha256sum *.tar.gz > SHA256SUMS
+          BASE="https://github.com/${{ github.repository }}/releases/download/content-vN"
+          V="${{ inputs.pack_version }}"
+          # The macOS tarball is universal (x86_64 + arm64), so both Mac
+          # platform tokens point at the same file.
+          for ver in $(echo '${{ inputs.scummvm_versions }}' | jq -r '.[]'); do
+            mac="scummvm-$ver-macos-universal-v$V.tar.gz"
+            lin="scummvm-$ver-linux-x86_64-v$V.tar.gz"
+            jq -n --arg id "scummvm-$ver" --arg base "$BASE" \
+              --arg mac "$mac" --arg lin "$lin" \
+              --arg h_mac "$(sha256sum "$mac" | cut -d' ' -f1)" \
+              --arg h_lin "$(sha256sum "$lin" | cut -d' ' -f1)" \
+              --argjson s_mac "$(wc -c < "$mac" | tr -d ' ')" \
+              --argjson s_lin "$(wc -c < "$lin" | tr -d ' ')" \
+              '{ ($id): { platforms: {
+                   "darwin-aarch64": { url: ($base + "/" + $mac), sha256: $h_mac, size_bytes: $s_mac },
+                   "darwin-x86_64":  { url: ($base + "/" + $mac), sha256: $h_mac, size_bytes: $s_mac },
+                   "linux-x86_64":   { url: ($base + "/" + $lin), sha256: $h_lin, size_bytes: $s_lin } } } }'
+          done | jq -s 'add' > manifest-snippet.json
+          cat manifest-snippet.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scummvm-packs
           path: packs/
           if-no-files-found: error

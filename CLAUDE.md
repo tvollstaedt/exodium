@@ -1325,9 +1325,19 @@ when nothing resolves and when a system copy would run unpinned. Until
 Linux: our own AppImage builds), the manifest URLs are empty and the note
 falls back to scummvm.org.
 
-**Still open:** 2b - the `content-packs.yml` matrix and the release;
-snapshot builds from their commits; `Feria D'Arles` has no cover
-(apostrophe in the image name); poster pack.
+The build side is in place (`content-packs.yml` input `packs: scummvm`, a
+matrix over the pins): macOS repacks upstream's UNIVERSAL DMG - verified on
+2.5.0, `Contents/MacOS/scummvm` is x86_64 + arm64, so both Mac tokens point
+at the same tarball - with Sparkle's auto-update disabled in the Info.plist
+(the framework cannot be stripped, `scummvm` links it via `@rpath`) and an
+ad-hoc re-sign. Linux compiles the release tarball
+(`build-scummvm-appimage.sh`) because upstream ships no Linux binary at all;
+that half is UNVERIFIED - it needs the pkgforge container, and an old pin
+(2.5.0, 2021) may not build against a current toolchain.
+
+**Still open:** running that workflow and publishing `content-v7`, then the
+URLs and hashes in `manifest.json`; snapshot builds from their commits;
+`Feria D'Arles` has no cover (apostrophe in the image name); poster pack.
 
 ## Conventions
 
