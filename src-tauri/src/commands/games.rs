@@ -27,61 +27,8 @@ use crate::models::Game;
 use crate::torrent::manager::DownloadProgress;
 
 use super::TorrentState;
+use super::collections::{collection_game_prefix, collection_lang_dir, collection_rel_game_dir, collection_rel_zip};
 
-/// Get the game directory prefix for a collection (path from inner_folder to game dirs).
-fn collection_game_prefix(source: &str) -> &'static str {
-    crate::commands::setup::collection_def(source)
-        .map(|c| c.game_prefix)
-        .unwrap_or("eXo/eXoDOS")
-}
-
-/// Get the language subdirectory for an LP collection, if any.
-fn collection_lang_dir(source: &str) -> Option<&'static str> {
-    crate::commands::setup::collection_def(source).and_then(|c| c.lang_dir)
-}
-
-/// The year directory a `year_subdirs` collection nests its games under,
-/// read from the application_path (`eXo\eXoWin9x\!win9x\<year>\<TitleDir>\…`).
-/// None for every other collection - and for a malformed path, in which case
-/// callers fall back to the flat `<game_prefix>/<shortcode>` layout.
-fn collection_year_dir(source: &str, app_path: Option<&str>) -> Option<String> {
-    let def = crate::commands::setup::collection_def(source)?;
-    if !def.year_subdirs {
-        return None;
-    }
-    let normalized = app_path?.replace('\\', "/");
-    let needle = format!("/{}/", def.shortcode_segment);
-    let idx = normalized.find(&needle)?;
-    let year = normalized[idx + needle.len()..].split('/').next()?;
-    (year.len() == 4 && year.bytes().all(|b| b.is_ascii_digit())).then(|| year.to_string())
-}
-
-/// Torrent-relative directory holding a game's installed files.
-/// Standard: <game_prefix>[/<lang_dir>]/<shortcode>
-/// year_subdirs (eXoWin9x): <game_prefix>/<year>/<shortcode> - the shortcode
-/// IS the title directory there ("Connect4 (1995)").
-pub(crate) fn collection_rel_game_dir(source: &str, shortcode: &str, app_path: Option<&str>) -> String {
-    let prefix = collection_game_prefix(source);
-    if let Some(year) = collection_year_dir(source, app_path) {
-        return format!("{}/{}/{}", prefix, year, shortcode);
-    }
-    match collection_lang_dir(source) {
-        Some(ld) => format!("{}/{}/{}", prefix, ld, shortcode),
-        None => format!("{}/{}", prefix, shortcode),
-    }
-}
-
-/// Torrent-relative path of a game's ZIP (same year/lang nesting as the dir).
-pub(crate) fn collection_rel_zip(source: &str, game_name: &str, app_path: Option<&str>) -> String {
-    let prefix = collection_game_prefix(source);
-    if let Some(year) = collection_year_dir(source, app_path) {
-        return format!("{}/{}/{}.zip", prefix, year, game_name);
-    }
-    match collection_lang_dir(source) {
-        Some(ld) => format!("{}/{}/{}.zip", prefix, ld, game_name),
-        None => format!("{}/{}.zip", prefix, game_name),
-    }
-}
 
 pub struct DbState(pub Mutex<Connection>);
 
@@ -424,8 +371,8 @@ pub async fn download_game(
         (manager, main_mgr)
     };
 
-    let is_win9x_collection = crate::commands::setup::collection_def(source)
-        .is_some_and(|c| c.launcher == crate::commands::setup::Launcher::Win9x);
+    let is_win9x_collection = crate::commands::collections::collection_def(source)
+        .is_some_and(|c| c.launcher == crate::commands::collections::Launcher::Win9x);
 
     // Win9x games need the shared support payload (parent OS VHDs +
     // emulators) from utilWin9x.zip before they can launch; queued further
@@ -530,7 +477,7 @@ pub async fn download_game(
         // Queue !DOSmetadata.zip (DOSBox configs) if the configs tree is
         // missing (normally pre-created by the bundled configs zip).
         let main_prefix = collection_game_prefix("eXoDOS");
-        let main_segment = crate::commands::setup::collection_def("eXoDOS")
+        let main_segment = crate::commands::collections::collection_def("eXoDOS")
             .map(|c| c.shortcode_segment)
             .unwrap_or("!dos");
         let dosbox_dir = main_mgr
@@ -1410,14 +1357,14 @@ fn resolve_game_conf(data_dir: &str, dosbox_conf: &str) -> Option<(PathBuf, Path
     }
 
     let prefix = collection_game_prefix("eXoDOS");
-    let segment = crate::commands::setup::collection_def("eXoDOS")
+    let segment = crate::commands::collections::collection_def("eXoDOS")
         .map(|c| c.shortcode_segment)
         .unwrap_or("!dos");
     let shortcode = rel
         .strip_suffix("/dosbox.conf")
         .and_then(|p| p.rsplit('/').next())
         .filter(|s| !s.is_empty())?;
-    for lang_dir in crate::commands::setup::COLLECTION_MAP.iter().filter_map(|c| c.lang_dir) {
+    for lang_dir in crate::commands::collections::COLLECTION_MAP.iter().filter_map(|c| c.lang_dir) {
         let alt = root.join(format!("{prefix}/{segment}/{lang_dir}/{shortcode}/dosbox.conf"));
         if alt.exists() {
             return Some((alt, root));
@@ -2974,13 +2921,13 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
     // they have their own engine pipeline and none of the Staging conf
     // machinery below applies (their confs run verbatim, §10a). ScummVM
     // games have no conf at all: one command line, see scummvm.rs.
-    let launcher = crate::commands::setup::collection_def(
+    let launcher = crate::commands::collections::collection_def(
         game.torrent_source.as_deref().unwrap_or("eXoDOS"),
     )
     .map(|c| c.launcher)
-    .unwrap_or(crate::commands::setup::Launcher::DosBox);
+    .unwrap_or(crate::commands::collections::Launcher::DosBox);
     match launcher {
-        crate::commands::setup::Launcher::Win9x => {
+        crate::commands::collections::Launcher::Win9x => {
             return crate::commands::win9x::launch_win9x_game(
                 &app,
                 game,
@@ -2991,7 +2938,7 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
             )
             .await;
         }
-        crate::commands::setup::Launcher::ScummVm => {
+        crate::commands::collections::Launcher::ScummVm => {
             return crate::commands::scummvm::launch_scummvm_game(
                 &app,
                 game,
@@ -3002,7 +2949,7 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
             )
             .await;
         }
-        crate::commands::setup::Launcher::DosBox => {}
+        crate::commands::collections::Launcher::DosBox => {}
     }
 
     let dosbox_conf = game

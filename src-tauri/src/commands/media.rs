@@ -303,7 +303,7 @@ pub(crate) fn resolve_gamedata(conn: &rusqlite::Connection, game: &crate::models
             game.torrent_source.clone().unwrap_or_else(|| "eXoDOS".to_string()),
         );
     }
-    let base = crate::commands::setup::collection_base_id(
+    let base = crate::commands::collections::collection_base_id(
         game.torrent_source.as_deref().unwrap_or("eXoDOS"),
     );
     let sibling = game.shortcode.as_deref().and_then(|sc| {

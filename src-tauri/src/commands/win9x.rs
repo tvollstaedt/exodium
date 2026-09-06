@@ -655,8 +655,8 @@ pub async fn win9x_multiplayer_info(
         (game, data_dir, asked)
     };
     let source = game.torrent_source.as_deref().unwrap_or("eXoDOS");
-    if !crate::commands::setup::collection_def(source)
-        .is_some_and(|c| c.launcher == crate::commands::setup::Launcher::Win9x)
+    if !crate::commands::collections::collection_def(source)
+        .is_some_and(|c| c.launcher == crate::commands::collections::Launcher::Win9x)
     {
         return Ok(not_multiplayer);
     }
