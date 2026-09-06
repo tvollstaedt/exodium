@@ -276,6 +276,24 @@ The 4.9 GB of LaunchBox XML + images from the torrent is replaced with ~4.2 MB o
 - `core:window:allow-start-resize-dragging`
 - `core:window:allow-minimize` / `allow-maximize` / `allow-close`
 
+## Testing on Linux and Windows
+
+Two local UTM VMs on MARU cover what macOS cannot show: `tauri-driver` E2E
+(Linux and Windows only), window behaviour, installers, path handling.
+
+```bash
+cd ~/Sync/Dev/privat/vm-lab
+./lab.sh start linux && ./lab.sh wait linux
+./lab.sh run linux exodium.sh ~/Sync/Dev/privat/exodium
+./lab.sh run windows exodium.ps1 ~/Sync/Dev/privat/exodium
+```
+
+Usage and pitfalls: `~/Sync/Dev/privat/vm-lab/CLAUDE.md`. Both jobs install
+the toolchain on first run, then run typecheck, vitest, clippy, cargo test
+and a debug `tauri build`. Windows is ARM64, which is where `ring` wants
+clang and CI's x86_64 build never does; `.vmlabignore` keeps the 1.4 GB of
+thumbnails and the platform-foreign sidecar out of the transfer.
+
 ## Development workflow
 
 ```bash

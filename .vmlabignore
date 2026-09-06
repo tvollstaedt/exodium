@@ -1,0 +1,13 @@
+# Pfade, die lab.sh nicht in die Test-VMs syncen soll (siehe vm-lab/CLAUDE.md).
+# Alles hier ist gitignorierte Entwicklerdaten, die der Job selbst beschafft
+# oder fuer Typecheck, Tests und Bau nicht braucht - zusammen ~1,4 GB.
+thumbnails/
+dist/
+work/
+# Plattformfremd: der Sidecar traegt das Ziel-Triple im Namen, die Kopie vom
+# Mac ist im Gast wertlos. jobs/exodium.sh laedt den passenden selbst.
+src-tauri/binaries/
+# get-emulators.sh fuellt diese beiden nur fuer die Entwicklung; Release-Builds
+# buendeln sie seit 0.13 nicht mehr (CLAUDE.md §16).
+src-tauri/resources/86box/
+src-tauri/resources/dosbox-x/
