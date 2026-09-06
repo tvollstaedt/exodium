@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { launchNote, emulatorName, emulatorPackId, type NoteContext } from "./launchNotes";
+import { launchNote, emulatorName, emulatorPackId, svmVariantLabel, type NoteContext } from "./launchNotes";
 import type { Game, ContentPackStatus } from "./api/tauri";
 
 const game = (over: Partial<Game> = {}): Game =>
@@ -12,6 +12,7 @@ const ctx = (over: Partial<NoteContext> = {}): NoteContext => ({
   installed: false,
   downloading: false,
   svmEngine: null,
+  svmNote: null,
   engineInfo: null,
   win9xEngineMissing: false,
   support: null,
@@ -51,6 +52,13 @@ describe("launchNote", () => {
       expect(n?.text).toContain("org.scummvm.ScummVM");
       const win = launchNote(svm({ isWindows: true, svmEngine: { available: false, pinned_version: "2.9.0", source: null } }));
       expect(win?.text).not.toContain("Flatpak");
+    });
+    it("eXo's note outranks the version warning, never the missing engine", () => {
+      const ok = { available: true, pinned_version: "2.9.0", source: "path" as const };
+      const n = launchNote(svm({ svmEngine: ok, svmNote: "Audio is off in this port." }));
+      expect(n?.key).toBe("svm-note");
+      expect(n?.blocking).toBeUndefined();
+      expect(key(svm({ svmEngine: { ...ok, available: false }, svmNote: "x" }))).toBe("engine-missing");
     });
     it("warns when a system ScummVM ignores the pin, not for eXo's or the pack's build", () => {
       expect(key(svm({ svmEngine: { available: true, pinned_version: "2.9.0", source: "path" } }))).toBe("scummvm-version");
@@ -131,6 +139,14 @@ describe("launchNote", () => {
       expect(key(ctx({ videoUnsupported: true }))).toBe("no-gstreamer");
       expect(key(ece({ videoUnsupported: true, engineInfo: { ece_available: false, uses_ece: false } }))).toBe("ece");
     });
+  });
+});
+
+describe("svmVariantLabel", () => {
+  it("keeps the parenthesised part, or the whole name", () => {
+    expect(svmVariantLabel("Maniac Mansion (DOS v1)")).toBe("DOS v1");
+    expect(svmVariantLabel("Maniac Mansion (NES, English, USA)")).toBe("NES, English, USA");
+    expect(svmVariantLabel("Other Languages")).toBe("Other Languages");
   });
 });
 

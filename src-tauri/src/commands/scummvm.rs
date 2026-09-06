@@ -562,6 +562,199 @@ pub async fn scummvm_engine_info(
     })
 }
 
+/// One level-2 entry (`menu.txt` variants such as CGA/EGA/Hercules).
+#[derive(Debug, Clone, Serialize)]
+pub struct SvmSub {
+    pub name: String,
+    pub sounds: Vec<String>,
+    pub has_subtitles: bool,
+}
+
+/// One platform variant of a game, as its folder describes it.
+#[derive(Debug, Clone, Serialize)]
+pub struct SvmVariant {
+    pub name: String,
+    pub platform: Option<String>,
+    pub subs: Vec<SvmSub>,
+    /// The sound menu at this level; a sub's own list wins when non-empty.
+    pub sounds: Vec<String>,
+    pub has_subtitles: bool,
+}
+
+/// What a launch would use right now: stored choices with eXo's defaults
+/// filled in.
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct SvmSelection {
+    pub variant: Option<String>,
+    pub sub: Option<String>,
+    pub sound: Option<String>,
+    pub subtitles: bool,
+    pub aspect: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ScummVmVariants {
+    pub variants: Vec<SvmVariant>,
+    /// eXo's `note.txt` for the game.
+    pub note: Option<String>,
+    pub selected: SvmSelection,
+}
+
+fn sound_menu(dir: &Path) -> Vec<String> {
+    std::fs::read_to_string(dir.join("sound.txt"))
+        .ok()
+        .map(|t| {
+            t.lines()
+                .next()
+                .unwrap_or("")
+                .split(':')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The whole variant tree, the levels `select_variant` walks.
+pub(crate) fn list_variants(game_dir: &Path) -> Vec<SvmVariant> {
+    subdirs(game_dir)
+        .into_iter()
+        .map(|name| {
+            let dir1 = game_dir.join(&name);
+            let subs = if dir1.join("menu.txt").is_file() {
+                subdirs(&dir1)
+                    .into_iter()
+                    .map(|sub| {
+                        let d = dir1.join(&sub);
+                        SvmSub {
+                            sounds: sound_menu(&d),
+                            has_subtitles: d.join("subtitle.txt").is_file(),
+                            name: sub,
+                        }
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            SvmVariant {
+                platform: first_field(&dir1.join("platform.txt")),
+                sounds: sound_menu(&dir1),
+                has_subtitles: dir1.join("subtitle.txt").is_file(),
+                subs,
+                name,
+            }
+        })
+        .collect()
+}
+
+/// The variant tree of an installed eXoScummVM game, None for any other
+/// collection or before the game is unpacked (the tree lives in the zip).
+#[tauri::command]
+pub async fn scummvm_variants(
+    db_state: State<'_, DbState>,
+    id: i64,
+) -> Result<Option<ScummVmVariants>, String> {
+    let (game, data_dir, cfg) = {
+        let conn = db_state.lock()?;
+        let game = queries::fetch_game_by_id(&conn, id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("Game with id {} not found", id))?;
+        let data_dir = queries::get_config(&conn, "data_dir").map_err(|e| e.to_string())?;
+        let cfg = queries::get_all_game_config(&conn, id).unwrap_or_default();
+        (game, data_dir, cfg)
+    };
+    let source = game.torrent_source.as_deref().unwrap_or("");
+    let is_svm = crate::commands::collections::collection_def(source)
+        .is_some_and(|c| c.launcher == crate::commands::collections::Launcher::ScummVm);
+    let (Some(data_dir), Some(shortcode), true) = (data_dir, game.shortcode.as_deref(), is_svm) else {
+        return Ok(None);
+    };
+    let root = crate::commands::paths::game_root(&data_dir);
+    let game_dir = root.join(crate::commands::collections::collection_rel_game_dir(
+        source,
+        shortcode,
+        game.application_path.as_deref(),
+    ));
+    if !game_dir.is_dir() {
+        return Ok(None);
+    }
+    let variants = list_variants(&game_dir);
+    let Ok(chosen) = select_variant(&game_dir, &root, &cfg) else {
+        return Ok(None);
+    };
+    let (sub, variant) = match chosen.names.as_slice() {
+        [sub, variant] => (Some(sub.clone()), Some(variant.clone())),
+        [variant] => (None, Some(variant.clone())),
+        _ => (None, None),
+    };
+    let sounds: Vec<String> = variants
+        .iter()
+        .find(|v| Some(&v.name) == variant.as_ref())
+        .map(|v| {
+            sub.as_ref()
+                .and_then(|s| v.subs.iter().find(|x| &x.name == s))
+                .filter(|x| !x.sounds.is_empty())
+                .map(|x| x.sounds.clone())
+                .unwrap_or_else(|| v.sounds.clone())
+        })
+        .unwrap_or_default();
+    let sound = cfg
+        .get("svm_sound")
+        .filter(|w| sounds.iter().any(|s| s == *w))
+        .cloned()
+        .or_else(|| sounds.first().cloned());
+    Ok(Some(ScummVmVariants {
+        variants,
+        note: chosen.note,
+        selected: SvmSelection {
+            variant,
+            sub,
+            sound,
+            subtitles: cfg.get("svm_subtitles").map(String::as_str) == Some("true"),
+            aspect: cfg.get("svm_aspect").map(String::as_str) != Some("false"),
+        },
+    }))
+}
+
+/// The full set of ScummVM choices for a game; a missing or null field is
+/// cleared, so callers send everything they mean to keep.
+#[derive(Debug, Clone, serde::Deserialize, Default)]
+pub struct SvmOptions {
+    #[serde(default)]
+    pub variant: Option<String>,
+    #[serde(default)]
+    pub sub: Option<String>,
+    #[serde(default)]
+    pub sound: Option<String>,
+    #[serde(default)]
+    pub subtitles: Option<bool>,
+    #[serde(default)]
+    pub aspect: Option<bool>,
+}
+
+#[tauri::command]
+pub async fn set_scummvm_options(
+    db_state: State<'_, DbState>,
+    id: i64,
+    options: SvmOptions,
+) -> Result<(), String> {
+    let conn = db_state.lock()?;
+    let keys = [
+        ("svm_variant", options.variant),
+        ("svm_sub", options.sub),
+        ("svm_sound", options.sound),
+        ("svm_subtitles", options.subtitles.filter(|&b| b).map(|_| "true".to_string())),
+        ("svm_aspect", options.aspect.filter(|&b| !b).map(|_| "false".to_string())),
+    ];
+    for (key, value) in keys {
+        match value.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+            Some(v) => queries::set_game_config(&conn, id, key, v).map_err(|e| e.to_string())?,
+            None => queries::delete_game_config(&conn, id, key).map_err(|e| e.to_string())?,
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -650,5 +843,31 @@ mod tests {
         let e = lookup(&["Arthur - The Quest for Excalibur (DOS)"]).unwrap();
         assert_eq!(e.build, "svn2.8_9335");
         assert_eq!(build_version(&e.build), "2.8.0git9335-g00e72a17004");
+    }
+
+    /// The picker needs the whole tree, the launcher only one path.
+    #[test]
+    fn list_variants_reads_every_level() {
+        let tmp = tempfile::tempdir().unwrap();
+        let game = tmp.path().join("Maniac Mansion (Multi-Platform)");
+        write(&game.join("Maniac Mansion (Amiga)/platform.txt"), "amiga\n");
+        write(&game.join("Maniac Mansion (DOS v1)/menu.txt"), "");
+        write(&game.join("Maniac Mansion (DOS v1)/Maniac Mansion CGA/video.txt"), "--render-mode=CGA\n");
+        write(&game.join("Maniac Mansion (DOS v1)/Maniac Mansion EGA/sound.txt"), "Sound Blaster:Tandy\n");
+        write(&game.join("Maniac Mansion (DOS v1)/Maniac Mansion EGA/subtitle.txt"), "--subtitles\n");
+        write(&game.join("Maniac Mansion (NES)/platform.txt"), "nes\n");
+        write(&game.join("Maniac Mansion (NES)/sound.txt"), "Sound Blaster:Roland MT32\n");
+
+        let v = list_variants(&game);
+        let names: Vec<&str> = v.iter().map(|x| x.name.as_str()).collect();
+        assert_eq!(names, ["Maniac Mansion (Amiga)", "Maniac Mansion (DOS v1)", "Maniac Mansion (NES)"]);
+        assert_eq!(v[0].platform.as_deref(), Some("amiga"));
+        assert!(v[0].subs.is_empty() && v[0].sounds.is_empty());
+        let dos = &v[1];
+        assert_eq!(dos.subs.len(), 2);
+        assert!(dos.subs[0].sounds.is_empty());
+        assert_eq!(dos.subs[1].sounds, ["Sound Blaster", "Tandy"]);
+        assert!(dos.subs[1].has_subtitles);
+        assert_eq!(v[2].sounds, ["Sound Blaster", "Roland MT32"]);
     }
 }

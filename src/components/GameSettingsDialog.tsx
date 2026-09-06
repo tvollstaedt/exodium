@@ -1,7 +1,7 @@
-import { createSignal, createEffect, Show } from "solid-js";
+import { createSignal, createEffect, Show, For } from "solid-js";
 import { Portal } from "solid-js/web";
 import { Dialog } from "@ark-ui/solid/dialog";
-import { gameEngineInfo, getGameSettings, setGameSettings } from "../api/tauri";
+import { gameEngineInfo, getGameSettings, setGameSettings, scummvmVariants, setScummvmOptions, type ScummVmVariants } from "../api/tauri";
 import { Button } from "./Button";
 
 interface GameSettingsDialogProps {
@@ -26,6 +26,27 @@ export function GameSettingsDialog(props: GameSettingsDialogProps) {
    *  is what the shader note has to reflect - switching the engine has to take
    *  the warning away before saving, or the two controls contradict. */
   const usesEce = () => eceIsDefault() && engine() !== "staging";
+  /** Non-null for an installed eXoScummVM game: the dialog then shows the
+   *  variant tree's menus instead of the DOSBox controls. */
+  const [svm, setSvm] = createSignal<ScummVmVariants | null>(null);
+  const [svmSub, setSvmSub] = createSignal("");
+  const [svmSound, setSvmSound] = createSignal("");
+  const [svmSubtitles, setSvmSubtitles] = createSignal(false);
+  const [svmAspect, setSvmAspect] = createSignal(true);
+  const svmVariant = () => svm()?.variants.find((v) => v.name === svm()?.selected.variant) ?? null;
+  const svmSubs = () => svmVariant()?.subs ?? [];
+  const svmSounds = () => {
+    const v = svmVariant();
+    if (!v) { return []; }
+    const sub = v.subs.find((s) => s.name === svmSub());
+    return sub && sub.sounds.length > 0 ? sub.sounds : v.sounds;
+  };
+  const svmHasSubtitles = () => {
+    const v = svmVariant();
+    if (!v) { return false; }
+    const sub = v.subs.find((s) => s.name === svmSub());
+    return (sub?.has_subtitles ?? false) || v.has_subtitles;
+  };
 
   createEffect(() => {
     if (!props.open || props.gameId == null) { return; }
@@ -40,6 +61,15 @@ export function GameSettingsDialog(props: GameSettingsDialogProps) {
     setCustomConf("");
     setSaveError("");
     setEceIsDefault(false);
+    setSvm(null);
+    scummvmVariants(id).then((v) => {
+      if (props.gameId !== id || !v) { return; }
+      setSvm(v);
+      setSvmSub(v.selected.sub ?? "");
+      setSvmSound(v.selected.sound ?? "");
+      setSvmSubtitles(v.selected.subtitles);
+      setSvmAspect(v.selected.aspect);
+    }).catch(() => {});
     gameEngineInfo(id).then((info) => {
       if (props.gameId === id) { setEceIsDefault(info.ece_available); }
     }).catch(() => {});
@@ -58,14 +88,26 @@ export function GameSettingsDialog(props: GameSettingsDialogProps) {
     setSaving(true);
     setSaveError("");
     try {
-      await setGameSettings(
-        props.gameId,
-        engine() || null,
-        glshader() || null,
-        fullscreen() || null,
-        cycles() || null,
-        customConf() || null,
-      );
+      const tree = svm();
+      if (tree) {
+        await setScummvmOptions(props.gameId, {
+          variant: tree.selected.variant,
+          sub: svmSub() || null,
+          sound: svmSound() || null,
+          subtitles: svmSubtitles(),
+          aspect: svmAspect(),
+        });
+        await setGameSettings(props.gameId, null, null, fullscreen() || null, null, null);
+      } else {
+        await setGameSettings(
+          props.gameId,
+          engine() || null,
+          glshader() || null,
+          fullscreen() || null,
+          cycles() || null,
+          customConf() || null,
+        );
+      }
       props.onClose();
     } catch (e) {
       console.error("Failed to save game settings:", e);
@@ -90,7 +132,62 @@ export function GameSettingsDialog(props: GameSettingsDialogProps) {
             </Dialog.Title>
 
             <div class="game-settings-body">
-              <Show when={eceIsDefault()}>
+              <Show when={svm()}>
+                <Show when={svmSubs().length > 0}>
+                  <div class="game-settings-row">
+                    <label class="game-settings-label">Edition</label>
+                    <select
+                      class="game-settings-select"
+                      value={svmSub()}
+                      onChange={(e) => setSvmSub(e.currentTarget.value)}
+                    >
+                      <For each={svmSubs()}>{(s) => <option value={s.name}>{s.name}</option>}</For>
+                    </select>
+                  </div>
+                </Show>
+                <Show when={svmSounds().length > 0}>
+                  <div class="game-settings-row">
+                    <label class="game-settings-label">Sound</label>
+                    <select
+                      class="game-settings-select"
+                      value={svmSound()}
+                      onChange={(e) => setSvmSound(e.currentTarget.value)}
+                    >
+                      <For each={svmSounds()}>{(s) => <option value={s}>{s}</option>}</For>
+                    </select>
+                  </div>
+                </Show>
+                <Show when={svmHasSubtitles()}>
+                  <div class="game-settings-row">
+                    <label class="game-settings-label">Subtitles</label>
+                    <select
+                      class="game-settings-select"
+                      value={svmSubtitles() ? "true" : "false"}
+                      onChange={(e) => setSvmSubtitles(e.currentTarget.value === "true")}
+                    >
+                      <option value="false">Off</option>
+                      <option value="true">On</option>
+                    </select>
+                  </div>
+                </Show>
+                <div class="game-settings-row">
+                  <label class="game-settings-label">Aspect ratio</label>
+                  <select
+                    class="game-settings-select"
+                    value={svmAspect() ? "true" : "false"}
+                    onChange={(e) => setSvmAspect(e.currentTarget.value === "true")}
+                  >
+                    <option value="true">Corrected (4:3)</option>
+                    <option value="false">Pixel-exact</option>
+                  </select>
+                </div>
+                <p class="game-settings-note">
+                  The version itself is picked in the game's panel; these are
+                  the menus eXo would ask about at launch.
+                </p>
+              </Show>
+
+              <Show when={!svm() && eceIsDefault()}>
                 <div class="game-settings-row">
                   <label class="game-settings-label">Emulator</label>
                   <select
@@ -110,6 +207,7 @@ export function GameSettingsDialog(props: GameSettingsDialogProps) {
                 </p>
               </Show>
 
+              <Show when={!svm()}>
               <div class="game-settings-row">
                 <label class="game-settings-label">CRT Shader</label>
                 <select
@@ -131,6 +229,7 @@ export function GameSettingsDialog(props: GameSettingsDialogProps) {
                   DOSBox Staging if you want the CRT look.
                 </p>
               </Show>
+              </Show>
 
               <div class="game-settings-row">
                 <label class="game-settings-label">Fullscreen</label>
@@ -145,6 +244,7 @@ export function GameSettingsDialog(props: GameSettingsDialogProps) {
                 </select>
               </div>
 
+              <Show when={!svm()}>
               <div class="game-settings-row">
                 <label class="game-settings-label">CPU Cycles</label>
                 <div class="game-settings-cycles">
@@ -185,6 +285,7 @@ export function GameSettingsDialog(props: GameSettingsDialogProps) {
                   spellcheck={false}
                 />
               </div>
+              </Show>
             </div>
 
             <div class="game-settings-actions">

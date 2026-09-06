@@ -213,6 +213,56 @@ export async function scummvmEngineInfo(id: number): Promise<ScummVmEngineInfo> 
   return invoke("scummvm_engine_info", { id });
 }
 
+export interface SvmSub {
+  name: string;
+  sounds: string[];
+  has_subtitles: boolean;
+}
+
+export interface SvmVariant {
+  name: string;
+  platform: string | null;
+  subs: SvmSub[];
+  /** The sound menu at this level; a sub's own list wins when non-empty. */
+  sounds: string[];
+  has_subtitles: boolean;
+}
+
+export interface SvmSelection {
+  variant: string | null;
+  sub: string | null;
+  sound: string | null;
+  subtitles: boolean;
+  aspect: boolean;
+}
+
+export interface ScummVmVariants {
+  variants: SvmVariant[];
+  /** eXo's note.txt for the game. */
+  note: string | null;
+  /** What a launch would use right now, defaults filled in. */
+  selected: SvmSelection;
+}
+
+/** The variant tree of an installed eXoScummVM game; null for any other
+ *  collection and before the game is unpacked. */
+export async function scummvmVariants(id: number): Promise<ScummVmVariants | null> {
+  return invoke("scummvm_variants", { id });
+}
+
+/** The full set of ScummVM choices; a missing or null field is cleared. */
+export interface SvmOptions {
+  variant?: string | null;
+  sub?: string | null;
+  sound?: string | null;
+  subtitles?: boolean | null;
+  aspect?: boolean | null;
+}
+
+export async function setScummvmOptions(id: number, options: SvmOptions): Promise<void> {
+  return invoke("set_scummvm_options", { id, options });
+}
+
 /** Whether the emulator a Win9x game needs (DOSBox-X / 86Box) is resolvable
  *  on this machine. Backend answers with the launcher's own resolver, so the
  *  panel note can never disagree with an actual launch. */

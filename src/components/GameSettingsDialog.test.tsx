@@ -119,4 +119,54 @@ describe("GameSettingsDialog", () => {
     expect(selectFor("CRT Shader")!.disabled).toBe(false);
     dispose();
   });
+
+  /** An eXoScummVM game has no DOSBox controls; the dialog shows the menus
+   *  from the game's own variant tree and saves them as ScummVM options. */
+  it("shows the ScummVM menus instead of the DOSBox controls", async () => {
+    const tree = {
+      variants: [
+        { name: "Maniac Mansion (Amiga)", platform: "amiga", subs: [], sounds: [], has_subtitles: false },
+        {
+          name: "Maniac Mansion (DOS v1)", platform: null, sounds: ["Sound Blaster", "Tandy"], has_subtitles: false,
+          subs: [
+            { name: "Maniac Mansion CGA", sounds: [], has_subtitles: false },
+            { name: "Maniac Mansion EGA", sounds: [], has_subtitles: true },
+          ],
+        },
+      ],
+      note: null,
+      selected: { variant: "Maniac Mansion (DOS v1)", sub: "Maniac Mansion CGA", sound: "Sound Blaster", subtitles: false, aspect: true },
+    };
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_game_settings") { return NO_SETTINGS; }
+      if (cmd === "game_engine_info") { return { ece_available: false, uses_ece: false }; }
+      if (cmd === "scummvm_variants") { return tree; }
+      return null;
+    });
+    const { dispose } = mount();
+    await flush();
+
+    expect(selectFor("CRT Shader")).toBeUndefined();
+    expect(selectFor("CPU Cycles")).toBeUndefined();
+    expect(selectFor("Fullscreen")).toBeDefined();
+    const edition = selectFor("Edition")!;
+    expect([...edition.options].map((o) => o.value)).toEqual(["Maniac Mansion CGA", "Maniac Mansion EGA"]);
+    expect([...selectFor("Sound")!.options].map((o) => o.value)).toEqual(["Sound Blaster", "Tandy"]);
+    expect(selectFor("Subtitles")).toBeUndefined();
+
+    edition.value = "Maniac Mansion EGA";
+    edition.dispatchEvent(new Event("change", { bubbles: true }));
+    await flush();
+    expect(selectFor("Subtitles")).toBeDefined();
+
+    const save = [...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Save")!;
+    save.click();
+    await flush();
+    const call = mockInvoke.mock.calls.find(([cmd]) => cmd === "set_scummvm_options");
+    expect(call?.[1]).toEqual({
+      id: 1,
+      options: { variant: "Maniac Mansion (DOS v1)", sub: "Maniac Mansion EGA", sound: "Sound Blaster", subtitles: false, aspect: true },
+    });
+    dispose();
+  });
 });

@@ -3432,6 +3432,12 @@ body {
   white-space: nowrap;
 }
 
+.variant-chip-label {
+  font-size: 12px;
+  padding-left: 4px;
+  white-space: nowrap;
+}
+
 /* Language qualifier on a button label, e.g. Manual [EN] on a DE selection. */
 .btn-suffix {
   font-size: 10px;

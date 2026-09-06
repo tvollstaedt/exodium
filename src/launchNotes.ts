@@ -23,6 +23,8 @@ export interface NoteContext {
   downloading: boolean;
   /** Null while the backend is still answering. */
   svmEngine: ScummVmEngineInfo | null;
+  /** eXo's note.txt for an installed ScummVM game. */
+  svmNote: string | null;
   engineInfo: GameEngineInfo | null;
   win9xEngineMissing: boolean;
   support: Win9xSupportStatus | null;
@@ -60,6 +62,13 @@ export function emulatorName(g: Game | null, svmEngine: ScummVmEngineInfo | null
   if (v?.startsWith("86box")) { return "86Box"; }
   if (v?.startsWith("ece")) { return runsUnderEce ? "DOSBox ECE" : "DOSBox Staging"; }
   return "DOSBox Staging";
+}
+
+/** The part of a ScummVM variant folder worth a chip: "Maniac Mansion
+ *  (DOS v1)" -> "DOS v1"; a name without parentheses stays whole. */
+export function svmVariantLabel(name: string): string {
+  const m = /\(([^()]+)\)\s*$/.exec(name);
+  return m ? m[1] : name;
 }
 
 /** Backend's `emulator_pack_for_variant`, mirrored. */
@@ -102,6 +111,9 @@ function scummVmNote(ctx: NoteContext, engine: string): PanelNote | null {
         + (ctx.isWindows ? "" : " (Linux: the Flatpak org.scummvm.ScummVM works too)")
         + " and try again.",
     };
+  }
+  if (ctx.svmNote) {
+    return { key: "svm-note", text: ctx.svmNote };
   }
   if (e.source === "path" || e.source === "flatpak") {
     return {

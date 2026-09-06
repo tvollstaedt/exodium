@@ -1302,13 +1302,20 @@ fetch here).
 `enable_new_collections`, shelf card, torrent download of Maniac Mansion
 Deluxe, extraction, Play -> ScummVM boots the game (official 2026.3.0 build
 staged as a `scummvm-2.9.0` pack), save dir created, exit tracked.
+**Variant picker (Phase 3, done):** `scummvm_variants` returns the tree of
+an installed game (`list_variants`, the levels `select_variant` walks) plus
+the selection a launch would use; the panel renders one chip per platform
+folder (`svmVariantLabel`: the parenthesised part), and the settings dialog
+swaps the DOSBox controls for Edition / Sound / Subtitles / Aspect ratio.
+`set_scummvm_options` takes the FULL set and clears what is missing, so a
+chip click re-sends sound/subtitles/aspect and resets only `svm_sub`. Both
+are null for an uninstalled game - the tree lives in the zip.
+
 **Still open:** Phase 2 - the seven emulator packs (`content-packs.yml`
 matrix, manifest entries), Windows extraction of `utilSVM.zip` (also the
 MT-32 ROMs on every platform), auto-queueing the pack with the first
-download; Phase 3 - the variant picker and the ScummVM branch of the
-settings dialog (today's settings dialog still shows the DOSBox controls
-for these games); `Feria D'Arles` has no cover (apostrophe in the image
-name); poster pack.
+download; `Feria D'Arles` has no cover (apostrophe in the image name);
+poster pack.
 
 ## Conventions
 

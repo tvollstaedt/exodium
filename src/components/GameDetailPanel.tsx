@@ -9,11 +9,11 @@ import { FieldIcon, IconSoundOn, IconSoundOff, IconZoom, type FieldIconName } fr
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Button } from "./Button";
 import type { Game, GameMetadata } from "../api/tauri";
-import { launchGame, gameEngineInfo, gamePrintingUnavailable, scummvmEngineInfo, win9xMultiplayerInfo, dismissWin9xNetworkPrompt, enableWin9xNetwork, mediaUrl } from "../api/tauri";
-import type { GameEngineInfo, ScummVmEngineInfo } from "../api/tauri";
+import { launchGame, gameEngineInfo, gamePrintingUnavailable, scummvmEngineInfo, scummvmVariants, setScummvmOptions, win9xMultiplayerInfo, dismissWin9xNetworkPrompt, enableWin9xNetwork, mediaUrl } from "../api/tauri";
+import type { GameEngineInfo, ScummVmEngineInfo, ScummVmVariants } from "../api/tauri";
 import { createWin9xStatus } from "./win9xStatus";
 import { formatBytes, parseLangEntries, langBadgeClass, performUninstall, performReset } from "../util";
-import { launchNote, emulatorName as describeEmulator, emulatorPackId, isScummVm, type PanelNote } from "../launchNotes";
+import { launchNote, emulatorName as describeEmulator, emulatorPackId, isScummVm, svmVariantLabel, type PanelNote } from "../launchNotes";
 import { showToast } from "../stores/toasts";
 import { bestThumbnailPath, thumbnailCandidates } from "../stores/thumbnails";
 import { downloads, startGameDownload, getDownloadState, cancelGameDownload, watchExtrasIfPending } from "../stores/downloads";
@@ -127,6 +127,25 @@ export function GameDetailPanel(props: Props) {
    *  every ECE game on Windows flash the wrong engine and the wrong note. */
   const runsUnderEce = () => engineInfo()?.uses_ece ?? isWindows;
   const [svmEngine, setSvmEngine] = createSignal<ScummVmEngineInfo | null>(null);
+  /** The platform variants inside an installed ScummVM game; null until
+   *  unpacked (the tree lives in the zip). */
+  const [svmVariants, setSvmVariants] = createSignal<ScummVmVariants | null>(null);
+  const loadSvmVariants = (id: number) => {
+    scummvmVariants(id)
+      .then((v) => { if (props.game?.id === id) { setSvmVariants(v); } })
+      .catch(() => {});
+  };
+  const chooseSvmVariant = async (name: string) => {
+    const id = props.game?.id;
+    const sel = svmVariants()?.selected;
+    if (id == null || !sel || sel.variant === name) { return; }
+    try {
+      await setScummvmOptions(id, { variant: name, sub: null, sound: sel.sound, subtitles: sel.subtitles, aspect: sel.aspect });
+      loadSvmVariants(id);
+    } catch (e) {
+      showToast("Couldn't switch the version", "error", { detail: String(e) });
+    }
+  };
   const emulatorName = () => describeEmulator(selected() ?? props.game, svmEngine(), runsUnderEce());
   const packCollection = () => selected()?.torrent_source ?? props.game?.torrent_source ?? "eXoWin9x";
   /** The content pack that could supply the missing Win9x emulator. */
@@ -145,6 +164,7 @@ export function GameDetailPanel(props: Props) {
       installed: selectedInstalled(),
       downloading: selectedDownloading(),
       svmEngine: svmEngine(),
+      svmNote: svmVariants()?.note ?? null,
       engineInfo: engineInfo(),
       win9xEngineMissing: win9x.engineMissing(),
       support: win9x.support(),
@@ -327,11 +347,13 @@ export function GameDetailPanel(props: Props) {
         .catch(() => {});
     }
     setSvmEngine(null);
+    setSvmVariants(null);
     if (isScummVm(g) && g.id != null) {
       const id = g.id;
       scummvmEngineInfo(id)
         .then((e) => { if (props.game?.id === id) { setSvmEngine(e); } })
         .catch(() => {});
+      loadSvmVariants(id);
     }
     // Force a metadata refetch: the cache key below would otherwise match the
     // previous visit to this same game and leave the panel with the null
@@ -388,6 +410,7 @@ export function GameDetailPanel(props: Props) {
     }
     if (!freshInstall) { return; }
     const g = props.game;
+    if (isScummVm(g) && g?.id != null) { loadSvmVariants(g.id); }
     if (!g?.shortcode || !isMultiLang()) { return; }
     const shortcode = g.shortcode;
     loadVariants(g, true).then((v) => {
@@ -1000,6 +1023,24 @@ export function GameDetailPanel(props: Props) {
                   </Show>
                 </div>
               )}
+            </Show>
+
+            {/* ScummVM platform variants (§18): one chip per folder, the
+                choice is a per-game setting the next launch uses. */}
+            <Show when={isScummVm(selected() ?? props.game) && (svmVariants()?.variants.length ?? 0) > 1}>
+              <div class="variant-switcher" role="group" aria-label="Versions">
+                <For each={svmVariants()!.variants}>
+                  {(v) => (
+                    <button
+                      class={`variant-chip${svmVariants()?.selected.variant === v.name ? " is-selected" : ""}`}
+                      title={v.name}
+                      onClick={() => { void chooseSvmVariant(v.name); }}
+                    >
+                      <span class="variant-chip-label">{svmVariantLabel(v.name)}</span>
+                    </button>
+                  )}
+                </For>
+              </div>
             </Show>
 
             {/* Language switcher: picking a chip re-points the whole panel -
