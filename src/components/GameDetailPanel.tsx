@@ -25,7 +25,7 @@ import { videos, requestVideo, releaseVideo, setForegroundVideo, getVideoState, 
 import { ensureDismissedNotesLoaded, isNoteDismissed, dismissedNotesLoaded, dismissNote } from "../stores/notes";
 import { packsByCollection, activeJobs, installedPacks, startContentPackInstall } from "../stores/contentPacks";
 import { ensurePreviewMutedLoaded, previewMuted, setPreviewMuted } from "../stores/playback";
-import { musicJobs, getMusicState, requestTheme, playTheme, pauseFor, resumeFrom, pauseForGame, resumeFromGame, togglePlay, currentTrack, wantedTrack, musicPlaying, musicAutoplay, ensureMusicAutoplayLoaded, musicUnsupported, MUSIC_QUEUED } from "../stores/music";
+import { musicJobs, getMusicState, requestTheme, playTheme, pauseFor, resumeFrom, pauseForGame, resumeFromGame, togglePlay, currentTrack, wantedTrack, musicPlaying, musicAutoplay, musicUserPaused, playerHidden, ensureMusicAutoplayLoaded, musicUnsupported, MUSIC_QUEUED } from "../stores/music";
 
 interface Props {
   game: Game | null;
@@ -556,7 +556,11 @@ export function GameDetailPanel(props: Props) {
       // owner resolved while playing): leave the player alone - re-issuing
       // playTheme would restart it and yank a list queue into theme mode.
       if (currentTrack()?.gameId === id || wantedTrack()?.gameId === id) { return; }
-      if (musicAutoplay()) { playTheme(g); } else { void requestTheme(id); }
+      // Autoplay never overrules the listener: `playTheme` clears the bar's
+      // hidden and paused flags, which is right for a click on ▶ and wrong
+      // here - it made the × last only until the next game was opened.
+      const dismissed = musicUserPaused() || playerHidden();
+      if (musicAutoplay() && !dismissed) { playTheme(g); } else { void requestTheme(id); }
     }, 400);
     onCleanup(() => clearTimeout(timer));
   });

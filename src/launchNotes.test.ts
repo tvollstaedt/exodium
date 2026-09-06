@@ -53,18 +53,33 @@ describe("launchNote", () => {
       const win = launchNote(svm({ isWindows: true, svmEngine: { available: false, pinned_version: "2.9.0", source: null, pack_id: null } }));
       expect(win?.text).not.toContain("Flatpak");
     });
+    it("an uninstalled game states the engine's cost instead of a second download button", () => {
+      const missing = { available: false, pinned_version: "2.8.0", source: null, pack_id: "scummvm-2.8.0" };
+      const svmPack = { ...pack, id: "scummvm-2.8.0", display_name: "ScummVM 2.8.0", size_bytes: 127_745_114 };
+      const n = launchNote(svm({ svmEngine: missing, emulatorPack: svmPack }));
+      expect(n?.key).toBe("scummvm-engine-size");
+      expect(n?.blocking).toBeUndefined();
+      expect(n?.action).toBeUndefined();
+      expect(n?.text).toContain("one-time 127.7 MB");
+      // Installed, or already downloading: the blocking offer is the only fix.
+      expect(key(svm({ svmEngine: missing, emulatorPack: svmPack, installed: true }))).toBe("engine-missing");
+      expect(key(svm({ svmEngine: missing, emulatorPack: svmPack, downloading: true }))).toBe("engine-missing");
+      // No pack to offer at all: the scummvm.org advice stands either way.
+      expect(launchNote(svm({ svmEngine: missing }))?.text).toContain("scummvm.org");
+    });
     it("offers the pinned build's pack instead of scummvm.org, and on a system ScummVM too", () => {
       const missing = { available: false, pinned_version: "2.9.0", source: null, pack_id: "scummvm-2.9.0" };
       const svmPack = { ...pack, id: "scummvm-2.9.0", display_name: "ScummVM 2.9.0" };
       const install = vi.fn();
-      const n = launchNote(svm({ svmEngine: missing, emulatorPack: svmPack, installPack: install }));
+      // Installed game: nothing else can fix it, so the offer is the note.
+      const n = launchNote(svm({ svmEngine: missing, emulatorPack: svmPack, installed: true, installPack: install }));
       expect(n?.key).toBe("engine-missing");
       expect(n?.blocking).toBe(true);
       expect(n?.text).not.toContain("scummvm.org");
       n?.action?.onClick();
       expect(install).toHaveBeenCalledWith(svmPack);
       const job = { phase: "downloading", progress: 0.2, downloaded_bytes: 20, total_bytes: 100, finished: false, installed: false, error: null };
-      expect(launchNote(svm({ svmEngine: missing, emulatorPack: svmPack, packJob: job }))?.text).toBe("Downloading ScummVM 2.9.0… 20%");
+      expect(launchNote(svm({ svmEngine: missing, emulatorPack: svmPack, installed: true, packJob: job }))?.text).toBe("Downloading ScummVM 2.9.0… 20%");
       const system = { ...missing, available: true, source: "path" as const };
       const v = launchNote(svm({ svmEngine: system, emulatorPack: svmPack }));
       expect(v?.key).toBe("scummvm-version");

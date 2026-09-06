@@ -138,6 +138,16 @@ function scummVmNote(ctx: NoteContext, engine: string): PanelNote | null {
   const e = ctx.svmEngine;
   if (!e) { return null; }
   if (!e.available) {
+    // The game's own Download button already fetches the engine with it
+    // (download_game queues the pack), so an uninstalled game gets the price
+    // rather than a second, competing action next to it.
+    if (!ctx.installed && !ctx.downloading && ctx.emulatorPack) {
+      return {
+        key: "scummvm-engine-size",
+        text: `Downloading this game also fetches ${engine}`
+          + `${oneTime(ctx.emulatorPack.size_bytes)} - every game eXo pins to that build uses it.`,
+      };
+    }
     return packRemedy(ctx, "engine-missing", engine, true) ?? {
       key: "engine-missing",
       blocking: true,
