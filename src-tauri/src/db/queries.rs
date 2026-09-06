@@ -117,22 +117,6 @@ pub fn insert_games(conn: &Connection, games: &[Game]) -> DbResult<usize> {
     Ok(count)
 }
 
-/// Update torrent indices and download size for a game by title.
-pub fn set_game_torrent_info(
-    conn: &Connection,
-    title: &str,
-    game_index: Option<i64>,
-    gamedata_index: Option<i64>,
-    download_size: Option<i64>,
-) -> DbResult<usize> {
-    let changed = conn.execute(
-        "UPDATE games SET game_torrent_index = ?1, gamedata_torrent_index = ?2,
-         download_size = ?3 WHERE title = ?4",
-        params![game_index, gamedata_index, download_size, title],
-    )?;
-    Ok(changed)
-}
-
 /// Add a game to the user's library (triggered on download).
 pub fn set_in_library(conn: &Connection, game_id: i64) -> DbResult<()> {
     conn.execute("UPDATE games SET in_library = 1 WHERE id = ?1", params![game_id])?;

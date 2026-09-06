@@ -392,12 +392,6 @@ impl DownloadManager {
         }
     }
 
-    /// Convenience: create session + manager in one call (for single-torrent use).
-    pub async fn new(torrent_path: &Path, data_dir: &Path) -> anyhow::Result<Self> {
-        let persistence = fastresume_dir(data_dir);
-        let session = Self::create_session(data_dir, &persistence).await?;
-        Self::new_with_session(session, torrent_path, data_dir, &persistence)
-    }
 
     /// Get the torrent file index.
     pub fn index(&self) -> &TorrentIndex {
@@ -867,16 +861,6 @@ impl DownloadManager {
             .await
             .map(|p| p.finished)
             .unwrap_or(false)
-    }
-
-    /// Wait for a specific file to complete downloading.
-    pub async fn wait_for_file(&self, file_index: usize) -> anyhow::Result<()> {
-        loop {
-            if self.is_file_complete(file_index).await {
-                return Ok(());
-            }
-            tokio::time::sleep(Duration::from_millis(500)).await;
-        }
     }
 
     /// Get the output path for a downloaded file.

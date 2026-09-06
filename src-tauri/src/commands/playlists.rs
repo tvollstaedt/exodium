@@ -10,7 +10,7 @@ use crate::models::Playlist;
 
 #[tauri::command]
 pub async fn get_playlists(state: State<'_, DbState>) -> Result<Vec<Playlist>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock()?;
     queries::fetch_playlists(&conn).map_err(|e| e.to_string())
 }
 
@@ -20,7 +20,7 @@ pub async fn create_playlist(state: State<'_, DbState>, name: String) -> Result<
     if name.is_empty() {
         return Err("Playlist name cannot be empty".into());
     }
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock()?;
     queries::create_playlist(&conn, &name).map_err(|e| map_name_conflict(e, &name))
 }
 
@@ -47,13 +47,13 @@ pub async fn rename_playlist(
     if name.is_empty() {
         return Err("Playlist name cannot be empty".into());
     }
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock()?;
     queries::rename_playlist(&conn, id, &name).map_err(|e| map_name_conflict(e, &name))
 }
 
 #[tauri::command]
 pub async fn delete_playlist(state: State<'_, DbState>, id: i64) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock()?;
     queries::delete_playlist(&conn, id).map_err(|e| e.to_string())
 }
 
@@ -64,7 +64,7 @@ pub async fn set_playlist_membership(
     game_id: i64,
     member: bool,
 ) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock()?;
     queries::set_playlist_membership(&conn, playlist_id, game_id, member).map_err(|e| e.to_string())
 }
 
@@ -73,6 +73,6 @@ pub async fn get_game_playlists(
     state: State<'_, DbState>,
     game_id: i64,
 ) -> Result<Vec<i64>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock()?;
     queries::fetch_game_playlist_ids(&conn, game_id).map_err(|e| e.to_string())
 }

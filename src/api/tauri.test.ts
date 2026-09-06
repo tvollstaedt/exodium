@@ -18,7 +18,6 @@ import {
   setupStart,
   initDownloadManager,
   getAvailableCollections,
-  getThumbnailDir,
   setPlaylistMembership,
   getGamePlaylists,
   createPlaylist,
@@ -172,11 +171,5 @@ describe("API invoke mapping", () => {
     mockInvoke.mockResolvedValue([]);
     await getAvailableCollections();
     expect(mockInvoke).toHaveBeenCalledWith("get_available_collections");
-  });
-
-  it("getThumbnailDir passes collection", async () => {
-    mockInvoke.mockResolvedValue("/path/to/thumbs");
-    await getThumbnailDir("eXoDOS");
-    expect(mockInvoke).toHaveBeenCalledWith("get_thumbnail_dir", { collection: "eXoDOS" });
   });
 });

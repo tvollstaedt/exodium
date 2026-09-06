@@ -8,6 +8,7 @@
 #   pnpm run init-dev --slp        # also download Spanish language pack (~3.8 GB)
 #   pnpm run init-dev --plp        # also download Polish language pack (~800 MB)
 #   pnpm run init-dev --win3x      # also download eXoWin3x box art (~2.3 GB)
+#   pnpm run init-dev --scummvm    # also download eXoScummVM box art + launch index (~4.8 GB)
 #   pnpm run init-dev --win9x      # also download eXoWin9x metadata (~13 GB)
 #   pnpm run init-dev --all-packs  # download all language packs
 #
@@ -26,6 +27,7 @@ WANT_SLP=0
 WANT_PLP=0
 WANT_WIN3X=0
 WANT_WIN9X=0
+WANT_SCUMMVM=0
 PACKS_EXPLICIT=0   # set to 1 if any pack flag was passed (skip interactive prompt)
 
 for arg in "$@"; do
@@ -36,7 +38,8 @@ for arg in "$@"; do
     --plp)       WANT_PLP=1; PACKS_EXPLICIT=1 ;;
     --win3x)     WANT_WIN3X=1; PACKS_EXPLICIT=1 ;;
     --win9x)     WANT_WIN9X=1; PACKS_EXPLICIT=1 ;;
-    --all-packs) WANT_GLP=1; WANT_SLP=1; WANT_PLP=1; WANT_WIN3X=1; WANT_WIN9X=1; PACKS_EXPLICIT=1 ;;
+    --scummvm)   WANT_SCUMMVM=1; PACKS_EXPLICIT=1 ;;
+    --all-packs) WANT_GLP=1; WANT_SLP=1; WANT_PLP=1; WANT_WIN3X=1; WANT_WIN9X=1; WANT_SCUMMVM=1; PACKS_EXPLICIT=1 ;;
   esac
 done
 
@@ -200,6 +203,8 @@ PLP_ZIP="$DATA_DIR/eXoDOS_PLP/eXoDOS/Content/eXoDOS_PLP_Metadata.zip"
 WIN3X_ZIP="$DATA_DIR/eXoWin3x/eXoWin3x/Content/XOWin3xMetadata.zip"
 WIN9X_ZIP="$DATA_DIR/eXoWin9x/eXoWin9x/Content/XOWin9xMetadata.zip"
 WIN9X_CONFIGS_ZIP="$DATA_DIR/eXoWin9x/eXoWin9x/Content/!Win9Xmetadata.zip"
+SCUMMVM_ZIP="$DATA_DIR/eXoScummVM/eXoScummVM/Content/XOScummVMMetadata.zip"
+SCUMMVM_UTIL_ZIP="$DATA_DIR/eXoScummVM/eXoScummVM/eXo/util/utilSVM.zip"
 
 if [[ "$WANT_GLP" -eq 1 ]]; then
   echo "── GLP (German) metadata ────────────────────────────────────────────────────"
@@ -273,6 +278,33 @@ if [[ "$WANT_WIN9X" -eq 1 ]]; then
   if [[ ! -s "$REPO_ROOT/metadata/Win9x.xml.gz" || "$FORCE" -eq 1 ]]; then
     echo "Regenerating bundled eXoWin9x metadata (gen_win9x_assets.py)..."
     $PYTHON "$SCRIPT_DIR/gen_win9x_assets.py"
+  fi
+fi
+
+if [[ "$WANT_SCUMMVM" -eq 1 ]]; then
+  echo "── eXoScummVM metadata ──────────────────────────────────────────────────────"
+  # XOScummVMMetadata.zip carries covers + the two catalogue XMLs,
+  # utilSVM.zip the launch index (scummvm.txt) and the per-build inis that
+  # gen_scummvm_assets.py bundles.
+  if ! validate_zip "$SCUMMVM_ZIP"; then
+    echo "Downloading XOScummVMMetadata.zip (~3.8 GB)..."
+    download_torrent_file "$REPO_ROOT/torrents/eXoScummVM.torrent" \
+      "$(torrent_file_index "$REPO_ROOT/torrents/eXoScummVM.torrent" "XOScummVMMetadata.zip" 6)" \
+      "$DATA_DIR/eXoScummVM" "$SCUMMVM_ZIP"
+  else
+    echo "XOScummVMMetadata.zip already present, skipping."
+  fi
+  if ! validate_zip "$SCUMMVM_UTIL_ZIP"; then
+    echo "Downloading utilSVM.zip (~1.0 GB)..."
+    download_torrent_file "$REPO_ROOT/torrents/eXoScummVM.torrent" \
+      "$(torrent_file_index "$REPO_ROOT/torrents/eXoScummVM.torrent" "utilSVM.zip" 840)" \
+      "$DATA_DIR/eXoScummVM" "$SCUMMVM_UTIL_ZIP"
+  else
+    echo "utilSVM.zip already present, skipping."
+  fi
+  if [[ ! -s "$REPO_ROOT/metadata/ScummVM.xml.gz" || "$FORCE" -eq 1 ]]; then
+    echo "Regenerating bundled eXoScummVM metadata (gen_scummvm_assets.py)..."
+    $PYTHON "$SCRIPT_DIR/gen_scummvm_assets.py"
   fi
 fi
 
@@ -356,6 +388,22 @@ if [[ "$WANT_WIN9X" -eq 1 && -s "$WIN9X_ZIP" ]]; then
     --platform "Windows 9x" \
     --db "$REPO_ROOT/metadata/exodium.db" \
     $FORCE_FLAG
+fi
+
+if [[ "$WANT_SCUMMVM" -eq 1 && -s "$SCUMMVM_ZIP" ]]; then
+  echo "eXoScummVM..."
+  # Two LaunchBox platforms share the zip (eXo files its "may be unstable"
+  # titles under "ScummVM SVN"), so two passes into one thumbnail dir.
+  for platform in "ScummVM" "ScummVM SVN"; do
+    $PYTHON "$SCRIPT_DIR/gen_thumbnails.py" \
+      "$SCUMMVM_ZIP" \
+      "$REPO_ROOT/metadata/ScummVM.xml.gz" \
+      "$REPO_ROOT/thumbnails/eXoScummVM" \
+      --preview-dir "$REPO_ROOT/src-tauri/resources/previews/eXoScummVM" \
+      --platform "$platform" \
+      --db "$REPO_ROOT/metadata/exodium.db" \
+      $FORCE_FLAG
+  done
 fi
 
 echo ""

@@ -179,6 +179,11 @@
           "supersedes": []
         }
       }
+    },
+    "eXoScummVM": {
+      "torrent_infohash": "8d490e5c405dc30161c16bd907372ac01523f5c7",
+      "game_count": 832,
+      "content_packs": {}
     }
   }
 }

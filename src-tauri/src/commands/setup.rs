@@ -76,6 +76,25 @@ pub struct CollectionDef {
     /// `<game_prefix>/<year>/<Title (Year)>/` (eXoWin9x layout). All path
     /// derivation keys off this flag, never off the collection id.
     pub year_subdirs: bool,
+    /// Which launch pipeline runs the collection's games. Path derivation
+    /// never keys on this (that is `year_subdirs` and `lang_dir`); it is the
+    /// one switch `launch_game`/`download_game` dispatch on, so a collection
+    /// with its own emulator is added by naming it here, not by string
+    /// comparisons on the id.
+    pub launcher: Launcher,
+}
+
+/// The emulator pipeline a collection's games go through.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Launcher {
+    /// DOSBox Staging (or eXo's ECE build on Windows) driven by a patched
+    /// per-game dosbox.conf - eXoDOS, its language packs and eXoWin3x.
+    DosBox,
+    /// DOSBox-X / 86Box booting a Windows 9x VHD - eXoWin9x.
+    Win9x,
+    /// ScummVM launched with a game id, no conf at all - eXoScummVM.
+    ScummVm,
 }
 
 /// Name of the ONE folder inside the data dir that holds every collection.
@@ -239,7 +258,7 @@ pub async fn pending_layout_migration(
     db_state: State<'_, DbState>,
 ) -> Result<Option<LayoutMigration>, String> {
     let (data_dir, asked) = {
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let conn = db_state.lock()?;
         load_root_folder(&conn);
         (
             queries::get_config(&conn, "data_dir").map_err(|e| e.to_string())?,
@@ -302,7 +321,7 @@ fn dir_size_shallow(root: &Path) -> u64 {
 /// Remember that the user does not want the folders merged.
 #[tauri::command]
 pub async fn skip_layout_migration(db_state: State<'_, DbState>) -> Result<(), String> {
-    let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+    let conn = db_state.lock()?;
     queries::set_config(&conn, "layout_migration", "skip").map_err(|e| e.to_string())
 }
 
@@ -330,11 +349,9 @@ pub async fn migrate_layout(
     torrent_state.0.write().await.clear();
 
     let data_dir = {
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let conn = db_state.lock()?;
         load_root_folder(&conn);
-        queries::get_config(&conn, "data_dir")
-            .map_err(|e| e.to_string())?
-            .ok_or("No data directory configured")?
+        crate::commands::games::configured_data_dir(&conn)?
     };
     let root = game_root(&data_dir);
     let mut tally = MergeTally::default();
@@ -373,7 +390,7 @@ pub async fn migrate_layout(
     }
 
     {
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let conn = db_state.lock()?;
         queries::set_config(&conn, "layout_migration", "done").map_err(|e| e.to_string())?;
     }
     log::info!(
@@ -605,7 +622,7 @@ pub async fn get_available_collections(
     // collection filter can't reach them, so counting them would make the
     // shelf number disagree with the grid it opens.
     let counts: std::collections::HashMap<String, i64> = {
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let conn = db_state.lock()?;
         let mut stmt = conn
             .prepare("SELECT torrent_source, COUNT(*) FROM games GROUP BY torrent_source")
             .map_err(|e| e.to_string())?;
@@ -808,7 +825,7 @@ pub async fn init_download_manager(
     torrent_state.0.write().await.clear();
 
     let data_dir = {
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let conn = db_state.lock()?;
         // Every path below (and in launch/uninstall/scan) is derived from the
         // root, so it has to be in the cache before anything asks.
         load_root_folder(&conn);
@@ -824,7 +841,7 @@ pub async fn init_download_manager(
 
     // Get selected collections from config
     let collections_str = {
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let conn = db_state.lock()?;
         queries::get_config(&conn, "collections")
             .map_err(|e| e.to_string())?
             .unwrap_or_else(|| "eXoDOS".to_string())
@@ -930,14 +947,11 @@ pub async fn init_download_manager(
         }
     }
 
-    // Resume support-file extraction (MT-32 ROMs / ECE build) if util.zip
-    // was in flight when the app last quit - its watcher died with the app.
-    if let Some((_, mgr)) = new_managers.iter().find(|(id, _)| id == "eXoDOS") {
-        crate::commands::games::rearm_support_extraction(mgr).await;
-    }
-    // Same for the Win9x support payload (OS parent VHDs + emulators).
-    if let Some((_, mgr)) = new_managers.iter().find(|(id, _)| id == "eXoWin9x") {
-        crate::commands::win9x::rearm_win9x_support(mgr).await;
+    // A util zip in flight when the app last quit lost its watcher with it.
+    for pack in crate::support_files::PACKS {
+        if let Some((_, mgr)) = new_managers.iter().find(|(id, _)| id == pack.collection) {
+            crate::support_files::rearm(pack, mgr).await;
+        }
     }
 
     // Acquire write lock only for the insert - no blocking work inside.
@@ -1112,7 +1126,7 @@ pub async fn factory_reset(
     log::info!("factory_reset called (delete_game_data={})", delete_game_data);
     // Read data_dir before clearing config (Mutex must not be held across await)
     let data_dir = if delete_game_data {
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let conn = db_state.lock()?;
         queries::get_config(&conn, "data_dir").map_err(|e| e.to_string())?
     } else {
         None
@@ -1148,7 +1162,7 @@ pub async fn factory_reset(
     // Games are catalog data (from the bundled DB) - clearing them would leave
     // the library empty until next restart. Only reset per-user flags and config.
     {
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let conn = db_state.lock()?;
         conn.execute_batch(
             "UPDATE games SET in_library = 0, installed = 0, favorited = 0, last_played = NULL;
              DELETE FROM game_config;
@@ -1241,35 +1255,6 @@ pub(crate) fn path_to_fwd_slash(p: &Path) -> String {
     p.to_string_lossy().replace('\\', "/")
 }
 
-/// Get the thumbnail directory path.
-/// Checks: dev project dir → data_dir/thumbnails → exe dir/thumbnails
-#[tauri::command]
-pub async fn get_thumbnail_dir(
-    db_state: State<'_, DbState>,
-    collection: String,
-) -> Result<String, String> {
-    // Dev: project directory
-    let dev_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .map(|p| p.join("thumbnails").join(&collection))
-        .unwrap_or_default();
-    if dev_path.exists() {
-        return Ok(path_to_fwd_slash(&dev_path));
-    }
-
-    // Production: data_dir/thumbnails/<collection>
-    if let Ok(conn) = db_state.0.lock() {
-        if let Ok(Some(data_dir)) = queries::get_config(&conn, "data_dir") {
-            let prod_path = PathBuf::from(&data_dir).join("thumbnails").join(&collection);
-            if prod_path.exists() {
-                return Ok(path_to_fwd_slash(&prod_path));
-            }
-        }
-    }
-
-    Err("Thumbnail directory not found".to_string())
-}
-
 /// Get the Tier 0 preview directory for a collection.
 /// Checks multiple platform-specific layouts because Tauri's bundle.resources
 /// placement varies: macOS uses Contents/Resources/, Linux deb uses
@@ -1355,10 +1340,8 @@ pub async fn get_poster_dir(
     db_state: State<'_, DbState>,
     collection: String,
 ) -> Result<String, String> {
-    let conn = db_state.0.lock().map_err(|e| e.to_string())?;
-    let data_dir = queries::get_config(&conn, "data_dir")
-        .map_err(|e| e.to_string())?
-        .ok_or("Data directory not configured")?;
+    let conn = db_state.lock()?;
+    let data_dir = crate::commands::games::configured_data_dir(&conn)?;
     let base = PathBuf::from(&data_dir).join("content").join("posters");
     // Check collection-specific dir first, fall back to eXoDOS.
     // All poster thumbnails live in the eXoDOS pack; LP collections share them.
@@ -1655,10 +1638,8 @@ pub async fn get_game_metadata(
     manual_path: Option<String>,
 ) -> Result<GameMetadata, String> {
     let data_dir = {
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
-        queries::get_config(&conn, "data_dir")
-            .map_err(|e| e.to_string())?
-            .ok_or("Data directory not configured")?
+        let conn = db_state.lock()?;
+        crate::commands::games::configured_data_dir(&conn)?
     };
 
     tauri::async_runtime::spawn_blocking(move || {
@@ -1926,6 +1907,7 @@ pub const COLLECTION_MAP: &[CollectionDef] = &[
         lang_dir: Some("!german"),
         platform: "MS-DOS",
         year_subdirs: false,
+        launcher: Launcher::DosBox,
     },
     CollectionDef {
         id: "eXoDOS_PLP",
@@ -1939,6 +1921,7 @@ pub const COLLECTION_MAP: &[CollectionDef] = &[
         lang_dir: Some("!polish"),
         platform: "MS-DOS",
         year_subdirs: false,
+        launcher: Launcher::DosBox,
     },
     CollectionDef {
         id: "eXoDOS_SLP",
@@ -1952,6 +1935,7 @@ pub const COLLECTION_MAP: &[CollectionDef] = &[
         lang_dir: Some("!spanish"),
         platform: "MS-DOS",
         year_subdirs: false,
+        launcher: Launcher::DosBox,
     },
     CollectionDef {
         id: "eXoDOS",
@@ -1965,6 +1949,7 @@ pub const COLLECTION_MAP: &[CollectionDef] = &[
         lang_dir: None,
         platform: "MS-DOS",
         year_subdirs: false,
+        launcher: Launcher::DosBox,
     },
     // First collection with an inner_folder of its own: the eXoWin3x torrent
     // carries the internal name "eXoWin3x", so it cannot collide with the four
@@ -1981,6 +1966,7 @@ pub const COLLECTION_MAP: &[CollectionDef] = &[
         lang_dir: None,
         platform: "Windows 3x",
         year_subdirs: false,
+        launcher: Launcher::DosBox,
     },
     // eXoWin9x nests its games one level deeper than every other pack
     // (`eXo/eXoWin9x/<year>/<Title (Year)>.zip`) and has no 8-char shortcodes:
@@ -1998,6 +1984,25 @@ pub const COLLECTION_MAP: &[CollectionDef] = &[
         lang_dir: None,
         platform: "Windows 9x",
         year_subdirs: true,
+        launcher: Launcher::Win9x,
+    },
+    // eXoScummVM: flat title-named zips like eXoWin3x, but no shortcodes -
+    // the zip stem (`Maniac Mansion (Multi-Platform)`) is the title directory
+    // AND the key into eXo's launch index (metadata/scummvm.txt). No configs
+    // zip: there is no per-game conf, the whole launch is one command line.
+    CollectionDef {
+        id: "eXoScummVM",
+        display_name: "eXoScummVM",
+        metadata_file: "ScummVM.xml.gz",
+        torrent_file: "eXoScummVM.torrent",
+        configs_zip: None,
+        inner_folder: "eXoScummVM",
+        game_prefix: "eXo/eXoScummVM",
+        shortcode_segment: "!ScummVM",
+        lang_dir: None,
+        platform: "ScummVM",
+        year_subdirs: false,
+        launcher: Launcher::ScummVm,
     },
 ];
 
@@ -2067,7 +2072,7 @@ pub async fn setup_start(
     // Save data_dir to config. A fresh install keeps the historical root
     // name, so nothing existing has to move.
     {
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let conn = db_state.lock()?;
         queries::set_config(&conn, "data_dir", &data_dir).map_err(|e| e.to_string())?;
         queries::set_config(&conn, "root_folder", DEFAULT_ROOT_FOLDER).map_err(|e| e.to_string())?;
     }
@@ -2141,7 +2146,7 @@ pub async fn get_setup_status(
         None => {
             // Ready if data_dir is configured AND the game DB has content
             let (has_data_dir, count) = {
-                let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+                let conn = db_state.lock()?;
                 load_root_folder(&conn);
                 let dir = queries::get_config(&conn, "data_dir").map_err(|e| e.to_string())?;
                 let count = queries::count_games(&conn, "").map_err(|e| e.to_string())?;
@@ -2184,7 +2189,7 @@ pub async fn get_setup_status(
 
     // Check if games are already imported
     let games_imported = {
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let conn = db_state.lock()?;
         queries::count_games(&conn, "").map_err(|e| e.to_string())?
     };
 
@@ -2245,7 +2250,7 @@ pub async fn setup_import(
 
     // Get DB path for a separate connection
     let db_path = {
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let conn = db_state.lock()?;
         conn.path()
             .map(PathBuf::from)
             .ok_or_else(|| "Cannot determine database path".to_string())?
@@ -2426,7 +2431,7 @@ pub async fn setup_from_local(
 
     // Save data_dir, the root folder and all collections to config
     {
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let conn = db_state.lock()?;
         queries::set_config(&conn, "data_dir", &data_dir).map_err(|e| e.to_string())?;
         queries::set_config(&conn, "root_folder", &root_folder).map_err(|e| e.to_string())?;
         // Remembered, not just passed to this one scan: every later startup
@@ -2443,7 +2448,7 @@ pub async fn setup_from_local(
     // eXoDOS XML (XODOSMetadata.zip is 5 GB and would block for minutes).
     // Just report how many games are in the current DB.
     let count = {
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let conn = db_state.lock()?;
         conn.query_row("SELECT COUNT(*) FROM games", [], |r| r.get::<_, i64>(0))
             .unwrap_or(0) as usize
     };
@@ -2518,7 +2523,7 @@ pub async fn setup_from_local(
             }
 
             let already_in_db: i64 = {
-                let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+                let conn = db_state.lock()?;
                 conn.query_row(
                     "SELECT COUNT(*) FROM games WHERE torrent_source = ?1",
                     rusqlite::params![col_id],
@@ -2537,7 +2542,7 @@ pub async fn setup_from_local(
             }
 
             let imported = {
-                let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+                let conn = db_state.lock()?;
                 import::import_from_gz(&xml_gz, &conn, col.shortcode_segment)
                     .unwrap_or_else(|e| {
                         log::warn!("Failed to import {} XML: {}", col_id, e);
@@ -2549,7 +2554,7 @@ pub async fn setup_from_local(
             if imported > 0 {
                 // Wire up game_torrent_index and torrent_source for the newly imported rows.
                 let col_id_owned = col_id.clone();
-                let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+                let conn = db_state.lock()?;
                 if let Err(e) = match_torrent_indices(&conn, torrent_index, &col_id_owned) {
                     log::warn!("match_torrent_indices failed for {}: {}", col_id_owned, e);
                 }
@@ -2563,7 +2568,7 @@ pub async fn setup_from_local(
         // in db::populate_thumbnail_keys uses the same hash function as
         // gen_thumbnails.py and generate_db.rs.
         {
-            let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+            let conn = db_state.lock()?;
             db::populate_thumbnail_keys(&conn).map_err(|e| e.to_string())?;
         }
 
@@ -2572,7 +2577,7 @@ pub async fn setup_from_local(
         // shortcodes (and derived dosbox_conf) come out as NULL after import.  Mirror the same
         // two-step approach as generate_db.rs: exact EN title match first.
         // This is idempotent - rows already having values are unaffected.
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let conn = db_state.lock()?;
         // Every LP↔EN match is family-scoped (CLAUDE.md §1): titles and
         // shortcodes repeat across pack families, and an unscoped match hands
         // an LP row another family's shortcode - which orphans it from its
@@ -3294,10 +3299,9 @@ pub async fn scan_installed_games(
     adopt: Option<bool>,
 ) -> Result<usize, String> {
     let data_dir = {
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
-        queries::get_config(&conn, "data_dir").map_err(|e| e.to_string())?
+        let conn = db_state.lock()?;
+        crate::commands::games::configured_data_dir(&conn)?
     };
-    let data_dir = data_dir.ok_or("data_dir not configured")?;
     scan_installed_games_with_db(&db_state.0, &data_dir, adopt.unwrap_or(false))
 }
 

@@ -356,13 +356,11 @@ async fn start_media(
     id: i64,
 ) -> Result<VideoStatus, String> {
     let (gamedata_idx, source, data_dir) = {
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let conn = db_state.lock()?;
         let game = queries::fetch_game_by_id(&conn, id)
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("Game {} not found", id))?;
-        let data_dir = queries::get_config(&conn, "data_dir")
-            .map_err(|e| e.to_string())?
-            .ok_or("Data directory not configured")?;
+        let data_dir = crate::commands::games::configured_data_dir(&conn)?;
         let (idx, source) = resolve_gamedata(&conn, &game);
         (idx, source, data_dir)
     };
@@ -789,7 +787,7 @@ pub async fn music_shuffle_candidates(
 ) -> Result<Vec<MusicCandidate>, String> {
     let count = count.clamp(1, 100) as usize;
     let (rows, data_dir) = {
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let conn = db_state.lock()?;
         let data_dir = queries::get_config(&conn, "data_dir")
             .map_err(|e| e.to_string())?
             .unwrap_or_default();
@@ -881,7 +879,7 @@ pub async fn music_cache_index(db_state: State<'_, DbState>) -> Result<MusicCach
     // (one stat per cached track) and every other DB command would queue behind
     // it. So: lock once for the two queries, drop, then scan.
     let (data_dir, ids) = {
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let conn = db_state.lock()?;
         let data_dir = queries::get_config(&conn, "data_dir")
             .map_err(|e| e.to_string())?
             .unwrap_or_default();
@@ -1231,10 +1229,8 @@ pub async fn media_url(
     #[cfg(target_os = "linux")]
     {
         let data_dir = {
-            let conn = db_state.0.lock().map_err(|e| e.to_string())?;
-            queries::get_config(&conn, "data_dir")
-                .map_err(|e| e.to_string())?
-                .ok_or("Data directory not configured")?
+            let conn = db_state.lock()?;
+            crate::commands::games::configured_data_dir(&conn)?
         };
         // Same containment rule as the asset-protocol scope: only files under
         // the user's data dir are servable. Canonicalize both sides so a

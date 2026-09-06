@@ -1,0 +1,363 @@
+//! One-time support payloads that ride inside a torrent's `eXo/util/*.zip`.
+//!
+//! Every pack has the same matryoshka shape: the util zip holds ONE inner zip
+//! whose subtrees land under `<torrent_root>/eXo/`. The payload is queued
+//! with the first game that needs it, extracted by a watcher task once the
+//! zip is complete, and re-armed at startup if the app quit mid-download.
+//! Readiness gates test directory EXISTENCE, so extraction stages into a
+//! temp dir and moves each subtree into place with an atomic rename.
+
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
+use crate::torrent::manager::DownloadManager;
+
+pub(crate) struct SupportPack {
+    /// Collection whose torrent carries the util zip.
+    pub collection: &'static str,
+    /// Suffix of the util zip's path inside the torrent.
+    pub util_suffix: &'static str,
+    /// Name of the nested zip holding the payload.
+    pub inner_zip: &'static str,
+    /// Subtrees to extract, lowercase with forward slashes and trailing `/`.
+    /// Each becomes one rename unit under `eXo/`, real case preserved.
+    pub prefixes: &'static [&'static str],
+    /// What the log calls the payload.
+    pub label: &'static str,
+    /// Everything this pack provides is on disk.
+    pub ready: fn(&Path) -> bool,
+    /// Runs on the `eXo` dir after the renames.
+    pub post: Option<fn(&Path)>,
+    running: AtomicBool,
+    /// Latched when the watcher gives up (3 failures, e.g. disk full), so a
+    /// status query can say "failed" instead of "setting up" forever.
+    failed: AtomicBool,
+}
+
+impl SupportPack {
+    pub(crate) fn failed(&self) -> bool {
+        self.failed.load(Ordering::SeqCst)
+    }
+}
+
+#[cfg(windows)]
+const DOS_PREFIXES: &[&str] = &["mt32/", "emulators/dosbox/ece4230/", "emulators/dosbox/ece4460/"];
+#[cfg(not(windows))]
+const DOS_PREFIXES: &[&str] = &["mt32/"];
+
+fn dos_ready(root: &Path) -> bool {
+    root.join("eXo/mt32").exists()
+        && (!cfg!(windows) || root.join("eXo/emulators/dosbox/ece4230").exists())
+}
+
+fn win9x_ready(root: &Path) -> bool {
+    use crate::commands::win9x::win9x_support_ready;
+    win9x_support_ready(root, None) && win9x_support_ready(root, Some("86box"))
+}
+
+/// MT-32/CM32L ROMs and soundfonts (~54 MB); on Windows also eXo's DOSBox
+/// ECE builds. The rest of EXTDOS.zip (467 MB) is never extracted.
+pub(crate) static DOS_SUPPORT: SupportPack = SupportPack {
+    collection: "eXoDOS",
+    util_suffix: "util/util.zip",
+    inner_zip: "EXTDOS.zip",
+    prefixes: DOS_PREFIXES,
+    label: "MT-32 ROMs + SoundCanvas soundfont for MIDI music",
+    ready: dos_ready,
+    post: None,
+    running: AtomicBool::new(false),
+    failed: AtomicBool::new(false),
+};
+
+/// Windows 9x parent VHDs plus the emulators that boot them (x98 DOSBox-X,
+/// 86Box). Needed on every platform - the VHDs are data. `emulators/PCBox/`
+/// and `emulators/audio/` stay in the zip.
+pub(crate) static WIN9X_SUPPORT: SupportPack = SupportPack {
+    collection: "eXoWin9x",
+    util_suffix: "util/utilWin9x.zip",
+    inner_zip: "EXTWin9x.zip",
+    prefixes: &["emulators/dosbox/", "emulators/86box98/"],
+    label: "Windows 9x OS images + emulators",
+    ready: win9x_ready,
+    post: Some(crate::commands::win9x::add_parent_case_aliases),
+    running: AtomicBool::new(false),
+    failed: AtomicBool::new(false),
+};
+
+pub(crate) static PACKS: [&SupportPack; 2] = [&DOS_SUPPORT, &WIN9X_SUPPORT];
+
+/// Extract the pack's subtrees from the util zip (blocking). Serialised per
+/// pack: the startup rearm and a download-click watcher can both find the
+/// zip complete at the same moment.
+pub(crate) fn extract(pack: &SupportPack, util_zip: &Path, torrent_root: &Path) -> Result<usize, String> {
+    if pack.running.swap(true, Ordering::SeqCst) {
+        return Err("extraction already running".to_string());
+    }
+    let result = do_extract(pack, util_zip, torrent_root);
+    pack.running.store(false, Ordering::SeqCst);
+    result
+}
+
+fn do_extract(pack: &SupportPack, util_zip: &Path, torrent_root: &Path) -> Result<usize, String> {
+    // Unique temp names so a leftover from a killed run can't collide.
+    let pid = std::process::id();
+    let tmp_path = util_zip.with_extension(format!("support_tmp_{pid}"));
+    let staging_root = torrent_root.join("eXo").join(format!(".support_staging_{pid}"));
+
+    let result = (|| {
+        let file = std::fs::File::open(util_zip).map_err(|e| e.to_string())?;
+        let mut outer = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+        {
+            let mut inner_entry = outer.by_name(pack.inner_zip).map_err(|e| {
+                format!("{} not found inside {}: {}", pack.inner_zip, util_zip.display(), e)
+            })?;
+            let mut tmp = std::fs::File::create(&tmp_path).map_err(|e| e.to_string())?;
+            std::io::copy(&mut inner_entry, &mut tmp).map_err(|e| e.to_string())?;
+        }
+
+        let tmp = std::fs::File::open(&tmp_path).map_err(|e| e.to_string())?;
+        let mut inner = zip::ZipArchive::new(tmp).map_err(|e| e.to_string())?;
+        let mut extracted = 0usize;
+        for i in 0..inner.len() {
+            let mut entry = inner.by_index(i).map_err(|e| e.to_string())?;
+            let name = entry.name().replace('\\', "/");
+            let lower = name.to_ascii_lowercase();
+            if !pack.prefixes.iter().any(|p| lower.starts_with(p))
+                || name.contains("..")
+                || entry.is_dir()
+            {
+                continue;
+            }
+            let out_path = staging_root.join(&name);
+            if let Some(parent) = out_path.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            let mut out = std::fs::File::create(&out_path).map_err(|e| e.to_string())?;
+            std::io::copy(&mut entry, &mut out).map_err(|e| e.to_string())?;
+            extracted += 1;
+        }
+        if extracted == 0 {
+            return Err(format!("no matching entries in {}", pack.inner_zip));
+        }
+
+        let dest_root = torrent_root.join("eXo");
+        for prefix in pack.prefixes {
+            let Some(rel) = staged_dir(&staging_root, prefix) else { continue };
+            let dst = dest_root.join(&rel);
+            if let Some(parent) = dst.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            if dst.exists() {
+                std::fs::remove_dir_all(&dst).map_err(|e| e.to_string())?;
+            }
+            std::fs::rename(staging_root.join(&rel), &dst)
+                .map_err(|e| format!("moving {} into place: {}", rel.display(), e))?;
+        }
+        if let Some(post) = pack.post {
+            post(&dest_root);
+        }
+        Ok(extracted)
+    })();
+
+    let _ = std::fs::remove_file(&tmp_path);
+    let _ = std::fs::remove_dir_all(&staging_root);
+    result
+}
+
+/// The staged directory a lowercase prefix names, in its real case.
+fn staged_dir(staging_root: &Path, prefix: &str) -> Option<PathBuf> {
+    let mut rel = PathBuf::new();
+    for want in prefix.trim_end_matches('/').split('/') {
+        let found = std::fs::read_dir(staging_root.join(&rel))
+            .ok()?
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name())
+            .find(|n| n.to_string_lossy().eq_ignore_ascii_case(want))?;
+        rel.push(found);
+    }
+    Some(rel)
+}
+
+/// Queue the util zip if it is not selected yet and arm the watcher. Called
+/// from `download_game` when a game needs the pack and it is not on disk.
+pub(crate) async fn ensure_queued(pack: &'static SupportPack, mgr: &Arc<DownloadManager>) {
+    let Some(util) = mgr.index().find_by_suffix(pack.util_suffix) else {
+        log::warn!("{} not found in the {} torrent index", pack.util_suffix, pack.collection);
+        return;
+    };
+    if !mgr.is_file_selected(util.index).await {
+        let _ = mgr.download_files(vec![util.index]).await;
+        log::info!(
+            "Also downloading {} ({}, one-time: {})",
+            pack.util_suffix,
+            crate::commands::content_packs::format_bytes(util.size),
+            pack.label
+        );
+    }
+    // Always re-arm: the zip may have finished in an earlier run with nobody
+    // left to extract it.
+    spawn_watcher(pack, Arc::clone(mgr), util.index);
+}
+
+/// Re-arm the watcher after an app restart: one armed by a download click
+/// dies with the app, and a zip finishing in a later session would never
+/// extract (observed on Windows: 736 MB downloaded, ROMs never landed).
+pub(crate) async fn rearm(pack: &'static SupportPack, mgr: &Arc<DownloadManager>) {
+    if (pack.ready)(&mgr.torrent_root()) {
+        return;
+    }
+    let Some(util) = mgr.index().find_by_suffix(pack.util_suffix) else {
+        return;
+    };
+    let selected = mgr.is_file_selected(util.index).await;
+    let on_disk = mgr
+        .file_output_path(util.index)
+        .and_then(|p| std::fs::metadata(p).ok())
+        .is_some_and(|m| m.len() > 0);
+    if !selected && !on_disk {
+        return; // never requested - nothing to resume
+    }
+    log::info!(
+        "Re-arming {} extraction watcher ({})",
+        pack.util_suffix,
+        if selected { "still selected" } else { "present on disk" }
+    );
+    spawn_watcher(pack, Arc::clone(mgr), util.index);
+}
+
+/// Watch the util zip until it is complete, then extract. Its own task
+/// because the frontend only polls while a GAME download is active, and the
+/// util zip routinely finishes long after the game that triggered it.
+fn spawn_watcher(pack: &'static SupportPack, mgr: Arc<DownloadManager>, util_index: usize) {
+    tauri::async_runtime::spawn(async move {
+        pack.failed.store(false, Ordering::SeqCst);
+        let torrent_root = mgr.torrent_root();
+        let expected_size = mgr.index().files.get(util_index).map(|f| f.size).unwrap_or(0);
+        let mut failures = 0u32;
+        // 6 h at 10 s per check, for slow swarms.
+        for _ in 0..2160 {
+            if (pack.ready)(&torrent_root) {
+                return; // someone else finished the job
+            }
+            let Some(zip_path) = mgr.file_output_path(util_index) else {
+                return;
+            };
+            // librqbit's per-file stat can stall short of total for a file
+            // fully on disk, and after a restart without session state the
+            // handle is gone - so the on-disk size is a second completion test.
+            let stats_complete = mgr.is_file_complete(util_index).await;
+            let disk_complete = expected_size > 0
+                && std::fs::metadata(&zip_path).is_ok_and(|m| m.len() >= expected_size);
+            if stats_complete || disk_complete {
+                let root = torrent_root.clone();
+                let outcome =
+                    tauri::async_runtime::spawn_blocking(move || extract(pack, &zip_path, &root)).await;
+                match outcome {
+                    Ok(Ok(n)) => {
+                        log::info!("Extracted {} files from {}", n, pack.util_suffix);
+                        return;
+                    }
+                    Ok(Err(e)) if e == "extraction already running" => return,
+                    Ok(Err(e)) => {
+                        failures += 1;
+                        log::error!(
+                            "Failed to extract {} (attempt {}): {}",
+                            pack.util_suffix, failures, e
+                        );
+                        if failures >= 3 {
+                            pack.failed.store(true, Ordering::SeqCst);
+                            return;
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("{} extraction task panicked: {}", pack.util_suffix, e);
+                        pack.failed.store(true, Ordering::SeqCst);
+                        return;
+                    }
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+        }
+        log::warn!("{} extraction watcher timed out", pack.util_suffix);
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn never_ready(_: &Path) -> bool {
+        false
+    }
+
+    static TEST_PACK: SupportPack = SupportPack {
+        collection: "test",
+        util_suffix: "util/util.zip",
+        inner_zip: "INNER.zip",
+        prefixes: &["mt32/", "emulators/foo98/"],
+        label: "test payload",
+        ready: never_ready,
+        post: None,
+        running: AtomicBool::new(false),
+        failed: AtomicBool::new(false),
+    };
+
+    fn zip_bytes(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut buf = std::io::Cursor::new(Vec::new());
+        {
+            let mut w = zip::ZipWriter::new(&mut buf);
+            let opts: zip::write::FileOptions<'_, ()> = zip::write::FileOptions::default();
+            for (name, data) in entries {
+                w.start_file(*name, opts).unwrap();
+                w.write_all(data).unwrap();
+            }
+            w.finish().unwrap();
+        }
+        buf.into_inner()
+    }
+
+    #[test]
+    fn extracts_prefixes_case_preserved_and_replaces_old_tree() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let inner = zip_bytes(&[
+            ("mt32/a.rom", b"rom"),
+            ("emulators/Foo98/x.bin", b"bin"),
+            ("emulators/audio/skip.dll", b"no"),
+            ("readme.txt", b"no"),
+        ]);
+        let util = root.join("util.zip");
+        std::fs::write(&util, zip_bytes(&[("INNER.zip", &inner)])).unwrap();
+        let stale = root.join("eXo/mt32/old.rom");
+        std::fs::create_dir_all(stale.parent().unwrap()).unwrap();
+        std::fs::write(&stale, b"stale").unwrap();
+
+        let n = extract(&TEST_PACK, &util, root).unwrap();
+
+        assert_eq!(n, 2);
+        assert_eq!(std::fs::read(root.join("eXo/mt32/a.rom")).unwrap(), b"rom");
+        assert_eq!(std::fs::read(root.join("eXo/emulators/Foo98/x.bin")).unwrap(), b"bin");
+        assert!(!stale.exists(), "old subtree is replaced, not merged");
+        assert!(!root.join("eXo/emulators/audio").exists());
+        assert!(!root.join("eXo/readme.txt").exists());
+        let leftovers: Vec<_> = std::fs::read_dir(root.join("eXo"))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with('.'))
+            .collect();
+        assert!(leftovers.is_empty(), "staging dir removed");
+        assert!(!util.with_extension(format!("support_tmp_{}", std::process::id())).exists());
+    }
+
+    #[test]
+    fn missing_inner_zip_is_an_error_and_cleans_up() {
+        let tmp = tempfile::tempdir().unwrap();
+        let util = tmp.path().join("util.zip");
+        std::fs::write(&util, zip_bytes(&[("OTHER.zip", b"x")])).unwrap();
+        let err = extract(&TEST_PACK, &util, tmp.path()).unwrap_err();
+        assert!(err.contains("INNER.zip not found"));
+        assert!(!TEST_PACK.running.load(Ordering::SeqCst));
+    }
+}

@@ -130,10 +130,6 @@ export async function getGamePlaylists(gameId: number): Promise<number[]> {
   return invoke("get_game_playlists", { gameId });
 }
 
-export async function getThumbnailDir(collection: string): Promise<string> {
-  return invoke("get_thumbnail_dir", { collection });
-}
-
 export async function getGameVariants(shortcode: string, collection: string): Promise<Game[]> {
   return invoke("get_game_variants", { shortcode, collection });
 }
@@ -202,6 +198,21 @@ export interface GameEngineInfo {
  *  until the ECE build has been extracted, and always false elsewhere. */
 export async function gameEngineInfo(id: number): Promise<GameEngineInfo> {
   return invoke("game_engine_info", { id });
+}
+
+export interface ScummVmEngineInfo {
+  available: boolean;
+  /** The ScummVM version eXo pins this game to. */
+  pinned_version: string;
+  /** Where the binary that would run comes from: eXo's own build (Windows),
+   *  the per-version pack, or a system copy of some other version. */
+  source: "exo" | "pack" | "path" | "flatpak" | null;
+}
+
+/** Which ScummVM would run an eXoScummVM game here - the launcher's own
+ *  resolver, so the panel note can never disagree with an actual launch. */
+export async function scummvmEngineInfo(id: number): Promise<ScummVmEngineInfo> {
+  return invoke("scummvm_engine_info", { id });
 }
 
 /** Whether the emulator a Win9x game needs (DOSBox-X / 86Box) is resolvable
@@ -428,13 +439,6 @@ export async function downloadGame(id: number): Promise<string> {
 
 export async function getDownloadProgress(id: number): Promise<DownloadProgress | null> {
   return invoke("get_download_progress", { id });
-}
-
-export interface CollectionUpdate {
-  collection: string;
-  current_hash: string;
-  latest_hash: string;
-  new_game_count: number;
 }
 
 export interface CollectionInfo {

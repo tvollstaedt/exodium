@@ -1,0 +1,953 @@
+.i.f (Macintosh);wage;2026.1.0\scummvm.exe
+007 (Macintosh);wage;2026.1.0\scummvm.exe
+1.5 Ritter (Windows);wintermute:ritter;2026.1.0\scummvm.exe
+11 Mysterious Adventures (C64);glk:mysadv1;scummvm.exe
+11 Mysterious Adventures Disk 1;glk:mysadv1;scummvm.exe
+11 Mysterious Adventures Disk 2;glk:mysadv2;scummvm.exe
+11th Hour, The (Windows);groovie:11h;2.9.0\scummvm.exe
+11th Hour, The - Making Of;groovie:making11h;2.9.0\scummvm.exe
+11th Hour, The - Souped Up (CD Windows);groovie:11hsu;2.9.0\scummvm.exe
+13th Disciple, The (DOS);agi:agi-fanmade;2.9.0\scummvm.exe
+3 Geeks (Windows);ags:3geeks;scummvm.exe
+3 Skulls of the Toltecs (CD DOS);toltecs:toltecs;scummvm.exe
+3rd Floor (Macintosh);wage;2026.1.0\scummvm.exe
+404 - Life Not Found (IF);glk:404life;scummvm.exe
+5 Days A Stranger (Windows);ags:5daysastranger;scummvm.exe
+5 Days A Stranger;ags:5daysastranger;scummvm.exe
+6 Days A Sacrifice (Windows);ags:6daysasacrifice;scummvm.exe
+69,105 Keys (IF);glk:69105keys;scummvm.exe
+7 Days A Skeptic (Windows);ags:7daysaskeptic;scummvm.exe
+7th Guest, The (Macintosh);groovie:t7g;2.5\scummvm.exe
+7th Guest, The (Multi-Platform);groovie:t7g;2.9.0\scummvm.exe
+905 (IF);glk:905;scummvm.exe
+AAS Masters, in Which All is Revealed (IF);glk:aasmasters;scummvm.exe
+Aboard the Adventure (Demo, Windows);ags:aboardtheadventure;scummvm.exe
+Above the Waves (Windows);atw;2026.1.0\scummvm.exe
+Absence of the Law, The (IF);glk:if17_absenceoflaw;2.9.0\scummvm.exe
+Abyss, The (IF);glk:nihilism;scummvm.exe
+Accuse (IF);glk:accuse;scummvm.exe
+Acheton (IF);glk:acheton;scummvm.exe
+Acidopolis (DOS);agi:agi-fanmade;2.9.0\scummvm.exe
+Acorn Court, The (IF);glk:acorncourt;scummvm.exe
+Across the Stars (IF);glk:acrossstars;scummvm.exe
+Across the Stars Hints File;glk:acrossstarsclues;scummvm.exe
+Across the Stars;glk:acrossstars;scummvm.exe
+Act of Misdirection (IF);glk:misdirection;scummvm.exe
+Actual Destination (Windows);wintermute:actualdest;2.9.0\scummvm.exe
+Ad Verbum (IF);glk:adverbum;scummvm.exe
+Adiboo Magical Playland (CD Windows, UK);gob:adibou2;2.9.0\scummvm.exe
+Adibou 2 (Windows);adibou2;2026.1.0\scummvm.exe
+Adventure in Humongous Cave (IF);glk:humongouscave;scummvm.exe
+Adventure in Humongous Cave Hints File;glk:humongouscavehints;scummvm.exe
+Adventure in Humongous Cave;glk:humongouscave;scummvm.exe
+Adventure Quest (IF);glk:adventurequest;scummvm.exe
+Adventureland (IF);glk:adventureland;scummvm.exe
+Adventures of Buckaroo Banzaii, The (IF);glk:buckaroobanzai;scummvm.exe
+Adventures of Robin Hood, The (DOS);lilliput:robin;svn3.0.0git19492\scummvm.exe
+Adventures of Steve Reeve, The (Macintosh);wage;2026.1.0\scummvm.exe
+Adventures of the Good Soldier Schweik, The (Windows);qdengine:shveik ;2.9.0\scummvm.exe
+Adventures of Willy Beamish, The (Multi-Platform);beamish;2026.1.0\scummvm.exe
+AGI Tetris (DOS);agi:tetris;2.9.0\scummvm.exe
+AJs World of Discovery (DOS);gob:adibou1;2.9.0\scummvm.exe
+Al Emmo And The Lost Dutchman's Mine (Windows);ags:alemmo;scummvm.exe
+Al Emmos Postcards from Anozira (Windows);ags:alemmoanozira;2.9.0\scummvm.exe
+Alice - Interactive Museum (CD Windows);director:alice;scummvm.exe
+Alien Clutch (Macintosh);wage;2026.1.0\scummvm.exe
+Alimardan Meets Merlin (Windows);wintermute:alimardan2;2026.1.0\scummvm.exe
+Alimardan's Mischief (Windows);wintermute:alimardan1;2026.1.0\scummvm.exe
+Alpha Polaris (Windows);wintermute:alphapolaris;2026.1.0\scummvm.exe
+Amazon - Guardians of Eden (Multi-Platform);access:amazon;2026.1.0\scummvm.exe
+Another Fine Mess (Macintosh);wage:afm;2026.1.0\scummvm.exe
+Archers, The (IF);glk:thearchers;scummvm.exe
+Art of Murder - FBI Confidential (Windows);wintermute:artofmurder1;2026.1.0\scummvm.exe
+Arthur - The Quest for Excalibur (DOS);glk:questforexcalibur;svn2.8_9335\scummvm.exe
+Ash Pines (Windows);ags:ashpines;scummvm.exe
+Ashina - The Red Witch (Windows);ags:ashinaredwitch;scummvm.exe
+Ashland Revolution, The (Macintosh);wage;2026.1.0\scummvm.exe
+Astro Chicken (Floppy DOS);sci:astrochicken;2.9.0\scummvm.exe
+Axe-orcist, The (Macintosh);wage;2026.1.0\scummvm.exe
+Backyard Baseball (Multi-Platform);scumm:baseball;2.9.0\scummvm.exe
+Backyard Baseball 2001 (CD Windows);scumm:baseball2001;2.9.0\scummvm.exe
+Backyard Baseball 2003 (CD Windows);scumm:baseball2003;2.9.0\scummvm.exe
+Backyard Basketball (CD Windows);scumm:basketball;2.9.0\scummvm.exe
+Backyard Football (CD Windows);scumm:football;2.9.0\scummvm.exe
+Backyard Football 2002 (CD Windows);scumm:football2002;2.9.0\scummvm.exe
+Backyard Soccer (Multi-Platform);scumm:soccer;2.9.0\scummvm.exe
+Backyard Soccer 2004 (Multi-Platform);scumm:Soccer2004;2.9.0\scummvm.exe
+Backyard Soccer MLS Edition (Multi-Platform);scumm:SoccerMLS;2.9.0\scummvm.exe
+Ballyhoo (DOS);glk:ballyhoo;scummvm.exe
+Bargon Attack (Multi-Platform);gob:bargon;2.9.0\scummvm.exe
+Bear Stormin' (DOS);scumm:brstorm;2.9.0\scummvm.exe
+Beavis and Butt-head Do U (Windows);illusions:bbdou;2026.1.0\scummvm.exe
+Beavis and Butt-head in Virtual Stupidity (CD Windows);bbvs:bbvs;2.9.0\scummvm.exe
+Beer (Windows);ags:beer;scummvm.exe
+Behind the Developers Shield (DOS);sci:chest;2.9.0\scummvm.exe
+Ben's Castle (Macintosh);wage;2026.1.0\scummvm.exe
+Beneath a Steel Sky (Multi-Platform);sky:sky;scummvm.exe
+Bestowers of Eternity (Windows);ags:bestowersofeternity;scummvm.exe
+Better Dead Ratification, The (Macintosh);director:betterd;scummvm.exe
+Beyond the Threshold (Windows);wintermute:bthreshold;2026.1.0\scummvm.exe
+Beyond Twilight Vale (Macintosh);wage;2026.1.0\scummvm.exe
+Beyond Zork - The Coconut of Quendor (DOS);glk:beyondzork;scummvm.exe
+Bickadoodle (Windows);wintermute:bickadoodle;2026.1.0\scummvm.exe
+Big Red Adventure, The (Multi-Platform);parallaction:BRA;2026.1.0\scummvm.exe
+Big Thinkers 1st Grade (Windows);scumm:thinker1;2.9.0\scummvm.exe
+Big Thinkers Kindergarten (Windows);scumm:thinkerk;2.9.0\scummvm.exe
+Bizarre Adventures of Woodruff and the Schnibble of Azimuth, The (CD Windows, Multilanguage);gob:woodruff;2.9.0\scummvm.exe
+Black Cauldron, The (Multi-Platform);agi:bc;2.9.0\scummvm.exe
+Blackwell (Windows);ags:blackwell1;scummvm.exe
+Blade Runner (CD Windows);bladerunner:bladerunner;2.9.0\scummvm.exe
+Blade Runner with Restored Content (CD Windows);bladerunner:bladerunner-final;2.9.0\scummvm.exe
+Blazing Dragons (CD PS1);dragons:dragons;scummvm.exe
+Bloody Life, A (IF);glk:abloodylife;scummvm.exe
+Blue Force (CD DOS);tsage:blueforce;2.9.0\scummvm.exe
+Blue's 123 Time Activities (Multi-Platform);scumm:Blues123Time;2.9.0\scummvm.exe
+Blue's ABC Time (Multi-Platform);scumm:BluesABCTime;2.9.0\scummvm.exe
+Blue's Art Time Activities (Multi-Platform);scumm:arttime;2.9.0\scummvm.exe
+Blue's Birthday Adventure (Multi-Platform);scumm:BluesBirthday;2.9.0\scummvm.exe
+Blue's Reading Time Activities (Multi-Platform);scumm:readtime;2.9.0\scummvm.exe
+Blue's Treasure Hunt (Multi-Platform);scumm:BluesTreasureHunt;2026.1.0\scummvm.exe
+BookMania (Windows);wintermute:bookmania;2026.1.0\scummvm.exe
+Border Zone (DOS);glk:borderzone;scummvm.exe
+Boredom of Agustin Cordes (Windows);wintermute:agustin;2026.1.0\scummvm.exe
+Box, The (Windows);wintermute:thebox;2026.1.0\scummvm.exe
+Broken Sword 1 - The Shadow of the Templar (Multi-Platform);sword1:sword1;2.9.0\scummvm.exe
+Broken Sword 2 - The Smoking Mirror (Multi-Platform);sword2:sword2;2.9.0\scummvm.exe
+Broken Sword 2.5 - The Return of the Templars (Windows, Multilanguage);sword25:sword25;2.9.0\scummvm.exe
+Brownie Saves the Day (Macintosh);wage;2026.1.0\scummvm.exe
+Brownies Dream (Macintosh);wage;2026.1.0\scummvm.exe
+Brownies Time Travels (Macintosh);wage;2026.1.0\scummvm.exe
+Bud Tucker in Double Trouble (CD DOS);tucker:tucker;2.9.0\scummvm.exe
+Bug Hunt (Macintosh);wage;2026.1.0\scummvm.exe
+Bureaucracy (DOS);glk:bureaucracy;scummvm.exe
+Busted (Advsys);glk:bustedadvsys;scummvm.exe
+Busted (IF);glk:busted;scummvm.exe
+Busted (ZCode);glk:busted;scummvm.exe
+Caitlyn's Destiny (DOS);agi:caitlyn;2.9.0\scummvm.exe
+Camp Cantitoe (Macintosh);wage:cantitoe;2026.1.0\scummvm.exe
+Can James Be Found (Macintosh);wage;2026.1.0\scummvm.exe
+Canal District (Macintosh);wage;2026.1.0\scummvm.exe
+Captain Disaster in Death has a Million Stomping Boots (Windows);ags:captaindisaster;scummvm.exe
+Carbon Copy (Macintosh);wage;2026.1.0\scummvm.exe
+Carol Reed 10 - Boschs Damnation (Windows);wintermute:carolreed10;2026.1.0\scummvm.exe
+Carol Reed 11 - Shades Of Black (Windows);wintermute:carolreed11;2026.1.0\scummvm.exe
+Carol Reed 12 - Profound Red (Windows);wintermute:carolreed12;2026.1.0\scummvm.exe
+Carol Reed 13 - The Birdwatcher (Windows);wintermute:carolreed13;2026.1.0\scummvm.exe
+Carol Reed 14 - The Fall Of April (Windows);wintermute:carolreed14;2026.1.0\scummvm.exe
+Carol Reed 15 - Geospots (Windows);wintermute:carolreed15;2026.1.0\scummvm.exe
+Carol Reed 16 - Quarantine Diary (Windows);wintermute:carolreed16;2026.1.0\scummvm.exe
+Carol Reed 4 - East Side Story (Windows);wintermute:carolreed4;2026.1.0\scummvm.exe
+Carol Reed 5 - The Colour of Murder (Windows);wintermute:carolreed5;2026.1.0\scummvm.exe
+Carol Reed 6 - Black Circle (Windows);wintermute:carolreed6;2026.1.0\scummvm.exe
+Carol Reed 7 - Blue Madonna (Windows);wintermute:carolreed7;2026.1.0\scummvm.exe
+Carol Reed 8 - Ambers Blood (Windows);wintermute:carolreed8;2026.1.0\scummvm.exe
+Carol Reed 9 - Cold Case Summer (Windows);wintermute:carolreed9;2026.1.0\scummvm.exe
+Castle Master (Multi-Platform);freescape:castlemaster;svn2.8_9335\scummvm.exe
+Castle Master (ZX Spectrum);freescape:castlemaster;2.9.0\scummvm.exe
+Castle of Dr. Brain (Multi-Platform);sci:castlebrain;2.9.0\scummvm.exe
+Castle of Ert (Macintosh);wage;2026.1.0\scummvm.exe
+Castle, The (Windows);ags:thecastle;scummvm.exe
+Charnel House Trilogy, The (Windows);ags:charnelhousetrilogy;scummvm.exe
+Chewy - Esc from F5 (CD DOS);chewy:chewy;2.9.0\scummvm.exe
+Chivalry is Not Dead (Windows);wintermute:chivalry;2026.1.0\scummvm.exe
+Chop Suey (Windows);director:chopsuey;scummvm.exe
+Christmas Card 1986 (DOS);agi:xmascard;2.9.0\scummvm.exe
+Christmas Card 1988 (DOS);sci:christmas1988;2.9.0\scummvm.exe
+Christmas Card 1990 - The Seasoned Professional (Multi-Platform);sci:christmas1990;2.9.0\scummvm.exe
+Christmas Card 1992 (DOS);sci:christmas1992;2.9.0\scummvm.exe
+Chronicle of Innsmouth (Windows);ags:chronicleofinnsmouth;scummvm.exe
+City Adventure (Macintosh);wage;2026.1.0\scummvm.exe
+Clandestiny (CD Windows);groovie:clandestiny;2.9.0\scummvm.exe
+Classical Cats (Macintosh);director:classicalcats;scummvm.exe
+Cloak of Darkness (Windows);agi:agi-fanmade;2.9.0\scummvm.exe
+Codename Iceman (Multi-Platform);sci:iceman;2.9.0\scummvm.exe
+Colossal Cave Adventure (Adventure 1, 350pt R1);glk:adv350_zcode;scummvm.exe
+Colossal Cave Adventure (Adventure 1, 350pt R9);glk:adv350_zcode;scummvm.exe
+Colossal Cave Adventure (Adventure 1, Hugo);glk:adv350h;scummvm.exe
+Colossal Cave Adventure (Adventure 2, 440pt);glk:adv440;scummvm.exe
+Colossal Cave Adventure (Adventure 3, 550pt);glk:adv550;scummvm.exe
+Colossal Cave Adventure (Adventure 6, 551pt);glk:adv551;scummvm.exe
+Colossal Cave Adventure (IF);glk:adv350_glulx;scummvm.exe
+Conquests of Camelot (Multi-Platform);sci:camelot;2.9.0\scummvm.exe
+Conquests of the Longbow - The Legend of Robin Hood (Multi-Platform);sci:longbow;2.9.0\scummvm.exe
+Corrosion - Cold Winter Waiting (Windows);wintermute:corrosion;2026.1.0\scummvm.exe
+Corruption (Floppy DOS);glk:corruption;scummvm.exe
+Count, The (IF);glk:thecount;scummvm.exe
+Crazy Nicks Picks King Graham's Board Game Challenge (DOS);sci:cnick-kq;2.9.0\scummvm.exe
+Crazy Nicks Picks Leisure Suit Larrys Casino (DOS);sci:cnick-lsl;2.9.0\scummvm.exe
+Crazy Nicks Picks Parlor Games with Laura Bow (DOS);sci:cnick-laurabow;2.9.0\scummvm.exe
+Crazy Nicks Picks Robin Hoods Game Of Skill And Chance (DOS);sci:cnick-longbow;2.9.0\scummvm.exe
+Crazy Nicks Picks Roger Wilcos Spaced Out Game Pack (DOS);sci:cnick-sq;2.9.0\scummvm.exe
+Crimson Crown, The (DOS);glk:crimsoncrown;scummvm.exe
+Crimson Diamond (Windows);ags:ags;scummvm.exe
+Crimson Spring, A (IF);glk:acs;scummvm.exe
+Cruise for a Corpse (Multi-Platform);cruise:cruise;2.9.0\scummvm.exe
+Crusader - No Regret (CD DOS);ultima:regret;2.9.0\scummvm.exe
+Crusader - No Remorse (CD DOS);ultima:remorse;2.9.0\scummvm.exe
+Crystal Adventure (Macintosh);wage;2026.1.0\scummvm.exe
+Crystal Search (Macintosh);wage;2026.1.0\scummvm.exe
+Cubert Badbone, P.I. (Windows);sludge;2026.1.0\scummvm.exe
+Curse Of Monkey Island, The (CD Windows);scumm:comi;2.9.0\scummvm.exe
+Cutthroats (DOS);glk:cutthroats;scummvm.exe
+Darby the Dragon (Mulit-Platform);composer:darby;2.9.0\scummvm.exe
+Dark Eye, The (CD Windows);director:darkeye;scummvm.exe
+Dark Seed (Multi-Platform);darkseed;2026.1.0\scummvm.exe
+Dark Seed (DOS Floppy);darkseed-floppy;2026.1.0\scummvm.exe
+Dark Side (Multi-Platform);freescape:darkside;2026.1.0\scummvm.exe
+Dash Hansen and the Search for the Black Orchid (Macintosh);wage;2026.1.0\scummvm.exe
+Date in the Park, A (Windows);ags:adateinthepark;scummvm.exe
+Day Of The Tentacle (Multi-Platform);scumm:tentacle;2.9.0\scummvm.exe
+Dead City, The (Windows);wintermute:deadcity;2026.1.0\scummvm.exe
+Deadline (DOS);glk:deadline;scummvm.exe
+Death Mall 3000 (Demo)(Macintosh);wage;2026.1.0\scummvm.exe
+Death of Erin Myers, The (Windows);wintermute:erinmyers;2026.1.0\scummvm.exe
+Deep Angst (Macintosh);wage;2026.1.0\scummvm.exe
+Deep Angst II - The Nightmare Ends (Macintosh);wage;2026.1.0\scummvm.exe
+Deep Ennui (Macintosh);wage;2026.1.0\scummvm.exe
+Deja Vu (Floppy Macintosh);macventure:deja_vu;svn2.3_18903\scummvm.exe
+Deja Vu II (Floppy Macintosh);macventure:deja_vu2;svn3.0.0git19492\scummvm.exe
+Des Reves Elastiques Avec Mille Insectes Nommes Georges (Windows);wintermute:dreaming;2026.1.0\scummvm.exe
+Detective Gallo (Windows);ags:detectivegallo;scummvm.exe
+DFAF Adventure (Windows);wintermute:dfafadventure;2026.1.0\scummvm.exe
+Dig, The (Multi-Platform);scumm:dig;2.9.0\scummvm.exe
+Dirty Split (Windows);wintermute:dirtysplit;2026.1.0\scummvm.exe
+Discworld 1 (Multi-Platform);tinsel:dw;2.9.0\scummvm.exe
+Discworld 2 (CD DOS);tinsel:dw2;2.9.0\scummvm.exe
+Dog-n-cat - In the Footsteps of Unprecedented Beasts (Windows);dogncat;2026.1.0\scummvm.exe
+Dog-n-cat - Island of Dr Ratiarty (Windows);dogncat2;2026.1.0\scummvm.exe
+Donald Duck's Playground (Multi-Platform);agi:ddp;2.9.0\scummvm.exe
+Doomsday Machine, The (Macintosh);wage;2026.1.0\scummvm.exe
+Double Trouble (Macintosh);wage;2026.1.0\scummvm.exe
+Dr. Doyle - Mystery Of The Cloche Hat (Windows);wintermute:drdoylemotch;2026.1.0\scummvm.exe
+Dragon History (Floppy DOS);draci:draci;2.9.0\scummvm.exe
+Drakmyth Castle (Macintosh);wage:drakmythcastle;2026.1.0\scummvm.exe
+Drascula The Vampire Strikes Back (CD DOS, Multilanguage);drascula:drascula;scummvm.exe
+Dreamcat (Windows);wintermute:dreamcat;2026.1.0\scummvm.exe
+Dreams in the Witch House (Windows);ags:dreamswitchhouse;scummvm.exe
+Dreamweb (Multi-Platform);dreamweb:dreamweb;2.9.0\scummvm.exe
+Driller (Amiga);freescape:driller;2.9.0\scummvm.exe
+Driller (Amstrad);freescape:driller;2.9.0\scummvm.exe
+Driller (Atari ST);freescape:driller;2.9.0\scummvm.exe
+Driller (Multi-Platform);freescape:spacestationoblivion;2.9.0\scummvm.exe
+Driller (ZX Spectrum);freescape:driller;2.9.0\scummvm.exe
+Driller Incident, The (Windows);wintermute:driller;2026.1.0\scummvm.exe
+Duckman (CD Windows);illusions:duckman;2.9.0\scummvm.exe
+Dune Eternity (Macintosh);wage;2026.1.0\scummvm.exe
+Dungeon Master (Multi-Platform);dm:dm;svn3.0.0git19492\scummvm.exe
+DungeonWorld (Macintosh);wage;2026.1.0\scummvm.exe
+Dustbowl (Windows);ags:dustbowl;scummvm.exe
+Dynasty of Dar (Macintosh);wage;2026.1.0\scummvm.exe
+Eastern Mind - The Lost Souls of Tong Nou (Windows);director:easternmind;scummvm.exe
+EcoQuest 1 - The Search for Cetus (Multi-Platform);sci:ecoquest;2.9.0\scummvm.exe
+EcoQuest 2 - Lost Secret of the Rainforest (Floppy DOS);sci:ecoquest2;2.9.0\scummvm.exe
+Edg's World (Macintosh);wage;2026.1.0\scummvm.exe
+Eidisi (Macintosh);wage;2026.1.0\scummvm.exe
+Eight Squares in The Garden (Windows);wintermute:8squares;2026.1.0\scummvm.exe
+Elite Commando (Macintosh);wage;2026.1.0\scummvm.exe
+Elvira 1 - Mistress of the Dark (DOS);elvir1;2.9.0\scummvm.exe
+Elvira 1 - Mistress of the Dark (Multi-Platform);agos:elvira1;2.9.0\scummvm.exe
+Elvira 2 - The Jaws of Cerberus (DOS);elvir2;2.9.0\scummvm.exe
+Elvira 2 - The Jaws of Cerberus (Multi-Platform);agos:elvira2;2.9.0\scummvm.exe
+Emerald Isle (Multi-Platform);glk:emeraldisle;scummvm.exe
+Enchanted Pencils (Macintosh);wage;2026.1.0\scummvm.exe
+Enchanted Scepters (Macintosh);wage:scepters;2026.1.0\scummvm.exe
+Enchanter (DOS);glk:enchanter;scummvm.exe
+Episode 1 - Blackwell Legacy (Windows);ags:blackwell1;scummvm.exe
+Episode 2 - Blackwell Unbound (Windows);ags:blackwell2;scummvm.exe
+Episode 3 - Blackwell Convergence (Windows);ags:blackwell3;scummvm.exe
+Episode 4 - Blackwell Deception (Windows);ags:blackwell4;scummvm.exe
+Episode 5 - Blackwell Epiphany (Windows);ags:blackwell5;scummvm.exe
+Errand (Windows);ags:errand;scummvm.exe
+Escape (Macintosh);wage;2026.1.0\scummvm.exe
+Escape from Hell (DOS);efh:efh;2.9.0\scummvm.exe
+Escape from Monkey Island (Multi-Platform);grim:monkey4;svn3.0.0git19492\scummvm.exe
+Escape from Monkey Island (Playstation 2);grim:monkey4;svn2.3_18903\scummvm.exe
+Escape From Saecvrom (Macintosh);wage;2026.1.0\scummvm.exe
+Escape from School (Macintosh);wage;2026.1.0\scummvm.exe
+Escape from the Mansion (Windows);wintermute:escapemansion;2026.1.0\scummvm.exe
+Everyday Grey (Windows);wintermute:everydaygray;2026.1.0\scummvm.exe
+Everyman (Macintosh);wage;2026.1.0\scummvm.exe
+EveryMan 2 (Macintosh);wage;2026.1.0\scummvm.exe
+Excavation of Hobs Barrow, The (Windows);ags:excavationhb;scummvm.exe
+Exploration Zeta (Macintosh);wage;2026.1.0\scummvm.exe
+Explorer (Macintosh);wage;2026.1.0\scummvm.exe
+Eye of the Beholder (Multi-Platform);eob1;2.9.0\scummvm.exe
+Eye of the Beholder (PC-98);eob-pc98-ja;2.9.0\scummvm.exe
+Eye of the Beholder II - The Legend of Darkmoon (FM Towns CD);eob2-fm-ja;2.9.0\scummvm.exe
+Eye of the Beholder II - The Legend of Darkmoon (Multi-Platform);eb2;2.9.0\scummvm.exe
+Eye of the Beholder II - The Legend of Darkmoon (PC-98);eob2-pc98-ja;2.9.0\scummvm.exe
+Fantasy Quest (Macintosh);wage;2026.1.0\scummvm.exe
+Fascination (Multi-Platform);gob:fascination;2.9.0\scummvm.exe
+Fatty Bear's Birthday Surprise (Multi-Platform);scumm:fbear;2.9.0\scummvm.exe
+Fatty Bear's Funpack (Multi-Platform);scumm:fbpack;2.9.0\scummvm.exe
+Features of National Fishing (Windows);rybalka;2026.1.0\scummvm.exe
+Feeble Files, The (Multi-Platform);agos:feeble;2.9.0\scummvm.exe
+Feria d'Arles (Multi-Platform);ags:feriadarles;scummvm.exe
+Find the Heart (Macintosh);wage;2026.1.0\scummvm.exe
+Finding D (Macintosh);wage;2026.1.0\scummvm.exe
+Finding Hope (Windows);wintermute:findinghope;2026.1.0\scummvm.exe
+Fish! (Floppy DOS);glk:fish;scummvm.exe
+Five Lethal Demons (Windows);wintermute:5ld;2026.1.0\scummvm.exe
+Five Magical Amulets (Windows);wintermute:5ma;2026.1.0\scummvm.exe
+Flight of the Amazon Queen (Multi-Platform);queen:queen;scummvm.exe
+Football Game (Windows);ags:footballgame;scummvm.exe
+Forgotten Sound 1 - Revelation (Windows);wintermute:forgottensound1;2026.1.0\scummvm.exe
+Forgotten Sound 2 - Destiny (Windows);wintermute:forgottensound2;2026.1.0\scummvm.exe
+Fortune Teller (Macintosh);wage;2026.1.0\scummvm.exe
+Four (Windows);wintermute:Four;2026.1.0\scummvm.exe
+Framed (Windows);wintermute:framed;2026.1.0\scummvm.exe
+Frasse and the Peas of Kejick (Windows);sludge:frasse;2026.1.0\scummvm.exe
+Fred Rogers - Terrorist (Macintosh);wage;2026.1.0\scummvm.exe
+Freddi Fish 1 The Case of the Missing Kelp Seeds (Multi-Platform);scumm:freddi;2.9.0\scummvm.exe
+Freddi Fish 2 The Case of the Haunted Schoolhouse (Multi-Platform);scumm:freddi2;2.9.0\scummvm.exe
+Freddi Fish 3 The Case of the Stolen Conch Shell (Multi-Platform);scumm:freddi3;2.9.0\scummvm.exe
+Freddi Fish 4 The Case of the Hogfish Rustlers of Briny Gulch (Multi-Platform);scumm:freddi4;2.9.0\scummvm.exe
+Freddi Fish 5 The Case of the Creature of Coral Cave (Multi-Platform);scumm:freddicove;2.9.0\scummvm.exe
+Freddi Fish and Luther's Maze Madness (Multi-Platform);scumm:maze;2.9.0\scummvm.exe
+Freddi Fish and Luther's Water Worries (CD Windows);scumm:water;2.9.0\scummvm.exe
+Freddi Fish's One-Stop Fun Shop (Multi-Platform);scumm:FreddisFunShop;2.9.0\scummvm.exe
+Freddy Pharkas - Frontier Pharmacist (Multi-Platform);sci:freddypharkas;2.9.0\scummvm.exe
+Full Pipe (CD Windows);ngi:fullpipe;scummvm.exe
+Full Throttle (Multi-Platform);scumm:ft;2.9.0\scummvm.exe
+Fun Seeker's Guide to Eastern Madera County (Floppy DOS);sci:funseeker;2.9.0\scummvm.exe
+Future Wars (Multi-Platform);cine:fw;2.9.0\scummvm.exe
+Gabriel Knight - Sins Of The Fathers (Multi-Platform);sci:gk1;2.9.0\scummvm.exe
+Gabriel Knight 2 - The Beast Within (CD DOS);sci:gk2;2.9.0\scummvm.exe
+Gadget - Invention, Travel and Adventure (CD Windows);director:gadget;scummvm.exe
+Galactic Warrior (Macintosh);wage;2026.1.0\scummvm.exe
+Game That Takes Place on a Cruise Ship, The (Windows);sludge:tgttpoacs;2026.1.0\scummvm.exe
+Gamma World (IF);glk:gammaworld;scummvm.exe
+Geisha (Multi-Platform);gob:geisha;2.9.0\scummvm.exe
+Gemini Rue (Windows);ags:geminirue;scummvm.exe
+Get out of MAZE (Macintosh);wage;2026.1.0\scummvm.exe
+Get-a-Mac (Macintosh);wage;2026.1.0\scummvm.exe
+Ghost in the Sheet (Windows);wintermute:ghostsheet;2026.1.0\scummvm.exe
+Ghost Town (IF);glk:ghosttown_sa;scummvm.exe
+Gnome Ranger (Multi-Platform);glk:gnomeranger;scummvm.exe
+Gobliiins 1 (DOS CD);gob:gob1cd;2.9.0\scummvm.exe
+Gobliiins 1 (Multi-Platform);gob:gob1;2.9.0\scummvm.exe
+Gobliiins 5 (Windows);ags:gobliiins5-1;2.9.0\scummvm.exe
+Gobliiins 5 Part 1 (Windows);ags:gobliiins5-1;2.9.0\scummvm.exe
+Gobliiins 5 Part 2 (Windows);ags:gobliiins5-2;2.9.0\scummvm.exe
+Gobliiins 5 Part 3 (Windows);ags:gobliiins5-3;2.9.0\scummvm.exe
+Gobliiins 5 Part 4 (Windows);ags:gobliiins5-4;2.9.0\scummvm.exe
+Gobliins 2 (DOS CD);gob:gob2cd;2.9.0\scummvm.exe
+Gobliins 2 (Multi-Platform);gob:gob2;2.9.0\scummvm.exe
+Goblins 3 (Multi-Platform);gob:gob3;2.9.0\scummvm.exe
+God of Thunder (DOS);got;2026.1.0\scummvm.exe
+Gold Bug (Macintosh);wage;2026.1.0\scummvm.exe
+Gold Rush (Multi-Platform);agi:goldrush;2.9.0\scummvm.exe
+Golden Voyage, The (IF);glk:goldenvoyage;scummvm.exe
+Golden Wake, A (Windows);ags:goldenwake;scummvm.exe
+GrailQuest (Macintosh);wage:grailquest;2026.1.0\scummvm.exe
+Gregory and the Hot Air Balloon (Multi-Platform);composer:gregory;2.9.0\scummvm.exe
+Grendel-Dazz (Macintosh);wage;2026.1.0\scummvm.exe
+Griffon Legend, The (Windows);griffon:griffon;scummvm.exe
+Grim Fandango (CD Windows);grim:grim;scummvm.exe
+Growing Pains of Adrian Mole, The (Multi-Platform);glk:adrianmole2;scummvm.exe
+Guild of Thieves, The (Floppy DOS);glk:guild;scummvm.exe
+Guttenburg Project, The (Windows);wintermute:guttenburg;2026.1.0\scummvm.exe
+Hades Challenge (Windows);hadesch:hadesch;scummvm.exe
+Haikook (Macintosh);wage;2026.1.0\scummvm.exe
+Halls of the Dead - Faery Tale Adventure II (CD Windows);saga2:fta2;scummvm.exe
+Hamlet (Windows);wintermute:hamlet;2026.1.0\scummvm.exe
+Haunted House (1988)(Macintosh);wage;2026.1.0\scummvm.exe
+Haunted House (1989)(Macintosh);wage;2026.1.0\scummvm.exe
+Haunted University (Macintosh);wage;2026.1.0\scummvm.exe
+Heart of China (DOS);china;2026.1.0\scummvm.exe
+Helga Deep In Trouble (Windows);wintermute:helga;2026.1.0\scummvm.exe
+Herby (Windows);ags:herby;scummvm.exe
+Heroine's Quest - The Herald of Ragnarok (Windows);ags:heroinesquest;scummvm.exe
+Hi-Res Adventure #0 - Mission Asteroid (Apple II);adl:hires0;2.9.0\scummvm.exe
+Hi-Res Adventure #1 - Mystery House (Apple II);adl:hires1;2.9.0\scummvm.exe
+Hi-Res Adventure #2 - Wizard and the Princess (Apple II);adl:hires2;2.9.0\scummvm.exe
+Hi-Res Adventure #3 - Cranston Manor (Apple II);adl:hires3;2.9.0\scummvm.exe
+Hi-Res Adventure #4 - Ulysses and the Golden Fleece (Apple II);adl:hires4;2.9.0\scummvm.exe
+Hi-Res Adventure #5 - Time Zone (Apple II);adl:hires5;2.9.0\scummvm.exe
+Hi-Res Adventure #6 - The Dark Crystal (Apple II);adl:hires6;2.9.0\scummvm.exe
+Hitchhiker's Guide to the Galaxy, The (DOS);glk:hhgttg;scummvm.exe
+Hodj 'n' Podj (Multi-Platform);bagel:hodjnpodj;2026.1.0\scummvm.exe
+Hollywood Hijinx (DOS);glk:hollywoodhijinx;scummvm.exe
+Hollywood Starbound (Macintosh);wage;2026.1.0\scummvm.exe
+Hopkins FBI (Multi-Platform);hopkins:hopkins;2.9.0\scummvm.exe
+Hor (Windows);wintermute:hor;2026.1.0\scummvm.exe
+Hotel Caper, The (Macintosh);wage;2026.1.0\scummvm.exe
+Hoyle Bridge (CD Windows);sci:hoyle5bridge;2.9.0\scummvm.exe
+Hoyle Children's Collection (CD Windows);sci:hoyle5children;2.9.0\scummvm.exe
+Hoyle Classic Card Games (Multi-Platform);sci:hoyle4;2.9.0\scummvm.exe
+Hoyle Classic Games (CD Windows);sci:hoyle5;2.9.0\scummvm.exe
+Hoyle Official Book Of Games Volume 1 (Multi-Platform);sci:hoyle1;2.9.0\scummvm.exe
+Hoyle Official Book Of Games Volume 2 (Multi-Platform);sci:hoyle2;2.9.0\scummvm.exe
+Hoyle Official Book Of Games Volume 3 (Multi-Platform);sci:hoyle3;2.9.0\scummvm.exe
+Hoyle Solitaire (CD Windows);sci:hoyle5solitaire;2.9.0\scummvm.exe
+Hugo 2 - Whodunit (Multi-Platform);hugo:hugo2;2.9.0\scummvm.exe
+Hugo 3 - Jungle of Doom (Multi-Platform);hugo:hugo3;2.9.0\scummvm.exe
+Hugo's House of Horrors (Multi-Platform);hugo:hugo1;2.9.0\scummvm.exe
+Hyperspace Delivery Boy (Windows);hdb:hdb;scummvm.exe
+I Have No Mouth and I Must Scream (Multi-Platform);saga:ihnm;2.9.0\scummvm.exe
+If On A Winter's Night, Four Travelers (Windows);ags:ioawn4t;2.9.0\scummvm.exe
+In Cold Blood (Windows);icb:icb;svn3.0.0git19492\scummvm.exe
+Inca II - Nations of Immortality (DOS);gob:inca2;2.9.0\scummvm.exe
+Indiana Jones and the Call of Thunder (ScummGEN);scumm:tentacle;2.9.0\scummvm.exe
+Indiana Jones and the Fate of Atlantis (Mac CD Power PC);scumm:atlantis;scummvm.exe
+Indiana Jones and the Fate of Atlantis (Mac CD);scumm:atlantis;scummvm.exe
+Indiana Jones and the Fate of Atlantis (Mac Floppy);scumm:atlantis;scummvm.exe
+Indiana Jones and the Fate of Atlantis (Multi-Platform);scumm:atlantis;2.9.0\scummvm.exe
+Indiana Jones and the Last Crusade (Multi-Platform);scumm:indy3;2.9.0\scummvm.exe
+Indiana Rodent (Windows);ags:indianarodent;2.9.0\scummvm.exe
+Infidel (DOS);glk:infidel;scummvm.exe
+Ingrid's Back (Multi-Platform);glk:ingridsback;scummvm.exe
+Inherit the Earth - Quest for the Orb (Multi-Platform);saga:ite;2.9.0\scummvm.exe
+Inside the Chest (DOS);sci:chest;2.9.0\scummvm.exe
+Interview, The (Windows);sludge;2026.1.0\scummvm.exe
+Intro to Gothic (Macintosh);wage;2026.1.0\scummvm.exe
+Intruder (Macintosh);wage;2026.1.0\scummvm.exe
+Intruder II (Macintosh);wage;2026.1.0\scummvm.exe
+Island of Dr. Brain (Floppy DOS);sci:islandbrain;2.9.0\scummvm.exe
+It Takes Two to Tangle (Windows);ags:takes2tangle;2.9.0\scummvm.exe
+J.U.L.I.A. (Windows);wintermute:julia;2026.1.0\scummvm.exe
+J.U.L.I.A. Among the Stars (Windows);wintermute:juliastars;2026.1.0\scummvm.exe
+J.U.L.I.A. Untold (Windows);wintermute:juliauntold;2026.1.0\scummvm.exe
+Jack and the Beanstalk (Macintosh);wage;2026.1.0\scummvm.exe
+James Peris - No License Nor Control (Windows);wintermute:jamesperis;2026.1.0\scummvm.exe
+Jamie the Demon Slayer (Macintosh);wage;2026.1.0\scummvm.exe
+Jewels of Darkness Part 1 - Colossal Adventure (IF);glk:colossaladvjod;scummvm.exe
+Jewels of Darkness Part 2 - Adventure Quest (IF);glk:adventurequest;scummvm.exe
+Jewels of Darkness Part 3 - Dungeon Adventure (IF);glk:dungeonadvjod;scummvm.exe
+Jinxter (Floppy DOS);glk:jinxter;scummvm.exe
+Joe Wu Tse's Dungeon (Macintosh);wage;2026.1.0\scummvm.exe
+Jones In The Fast Lane (Multi-Platform);sci:jones;2.9.0\scummvm.exe
+Journey, The (Macintosh);wage;2026.1.0\scummvm.exe
+Journeyman Project 2, The - Buried in Time (CD Windows);buried:buried;scummvm.exe
+Journeyman Project, The (Multi-Platform);director:jman;2026.1.0\scummvm.exe
+Journeyman Project, The (Windows CD);director:jman;2026.1.0\scummvm.exe
+Journeyman Project, The - Pegasus Prime (Macintosh);pegasus:pegasus;2026.1.0\scummvm.exe
+Journeyman Project, The - Pegasus Prime (Windows DVD);pegasus:pegasus;2026.1.0\scummvm.exe
+Jumble (Macintosh);wage;2026.1.0\scummvm.exe
+Just Ignore Them (Windows);ags:justignorethem;scummvm.exe
+Just Ignore Them - Breas Story Tape 1 (Windows);ags:justignorethembrea1;scummvm.exe
+K'NOSSOS (Windows);wintermute:knossos;2026.1.0\scummvm.exe
+Karth of the Jungle (Macintosh);wage;2026.1.0\scummvm.exe
+Karth of the Jungle II (Macintosh);wage;2026.1.0\scummvm.exe
+Kathy Rain (Windows);ags:kathyrain;scummvm.exe
+Key to Time, The (IF);glk:keytotime;scummvm.exe
+King's Quest 1 - Quest for the Crown (2001 Remake);ags:kq1agdi;2.9.0\scummvm.exe
+King's Quest 1 - Quest for the Crown (DOS 1991 Remake);sci:kq1sci;2.9.0\scummvm.exe
+King's Quest 1 - Quest for the Crown (Multi-Platform);agi:kq1;2.9.0\scummvm.exe
+King's Quest 2 - Romancing the Throne (2002 Remake);ags:kq2agdi;2.9.0\scummvm.exe
+King's Quest 2 - Romancing the Throne (Multi-Platform);agi:kq2;2.9.0\scummvm.exe
+King's Quest 3 - To Heir is Human (Multi-Platform);agi:kq3;2.9.0\scummvm.exe
+King's Quest 3 - To Heir is Human AGD Interactive 2011 remake;ags:kq3agdi;2.9.0\scummvm.exe
+King's Quest 3 - To Heir is Human Infamous Adventures 2006 remake;ags:kq3vga;2.9.0\scummvm.exe
+King's Quest 4 - The Perils of Rosella (Amiga);sci:kq4sci;2.9.0\scummvm.exe
+King's Quest 4 - The Perils of Rosella (Atari ST);sci:kq4sci;2.9.0\scummvm.exe
+King's Quest 4 - The Perils of Rosella (DOS SCI);sci:kq4sci;2.9.0\scummvm.exe
+King's Quest 4 - The Perils of Rosella (Multi-Platform);agi:kq4;2.9.0\scummvm.exe
+King's Quest 4 Retold (AGS Remake);ags:kq4retold;2.9.0\scummvm.exe
+King's Quest 5 - Absence Makes the Heart Go Yonder (Multi-Platform);sci:kq5;2.9.0\scummvm.exe
+King's Quest 6 - Heir Today, Gone Tomorrow (DOS CD);kq6-cd;2.9.0\scummvm.exe
+King's Quest 6 - Heir Today, Gone Tomorrow (Multi-Platform);sci:kq6;2.9.0\scummvm.exe
+King's Quest 6 - Heir Today, Gone Tomorrow (Windows);kq6-cd-win;2.9.0\scummvm.exe
+King's Quest 7 - The Princeless Bride (CD DOS, Windows);sci:kq7;2.9.0\scummvm.exe
+King's Questions (DOS);sci:kquestions;2.9.0\scummvm.exe
+Kingdom - The Far Reaches (CD DOS);kingdom:kingdom;2.9.0\scummvm.exe
+Kite, The (Windows);wintermute:thekite;2026.1.0\scummvm.exe
+Klaymen Episodes (Windows);wintermute:klaymen1;2026.1.0\scummvm.exe
+Knight Orc (Multi-Platform);glk:knightorc;scummvm.exe
+L-ZONE (Macintosh);director:lzone;scummvm.exe
+Labyrinth of Destiny (Macintosh);wage;2026.1.0\scummvm.exe
+Labyrinth of Time (CD DOS);lab:lab;scummvm.exe
+Lancelot (Multi-Platform);glk:lancelot;scummvm.exe
+Lands of Lore - The Throne of Chaos (DOS CD);lol-cd;scummvm.exe
+Lands of Lore - The Throne of Chaos (DOS Floppy);lol-dos;scummvm.exe
+Lands of Lore - The Throne of Chaos (Multi-Platform);kyra:lol;scummvm.exe
+Lands of Lore - The Throne of Chaos (PC-98);lol-pc98-ja;scummvm.exe
+Larry Lotter (Windows);ags:larrylotter;scummvm.exe
+Last Crown, The - Midnight Horror (Windows);wintermute:thelastcrownmh;2026.1.0\scummvm.exe
+Last Dynasty, The (Windows);gob:dynasty;2.9.0\scummvm.exe
+Last Express, The (CD Windows);lastexpress:lastexpress;2026.1.0\scummvm.exe
+Laura Bow 1 - The Colonels Bequest (Multi-Platform);sci:laurabow;2.9.0\scummvm.exe
+Laura Bow 2 - The Dagger of Amon-Ra (Multi-Platform);sci:laurabow2;2.9.0\scummvm.exe
+Leather Goddesses of Phobos (DOS);glk:lgop;scummvm.exe
+Leather Goddesses of Phobos 2 (Floppy DOS);made:lgop2;2.9.0\scummvm.exe
+Legend of Hand (Windows);ags:legendofhand;scummvm.exe
+Legend of Kyrandia 2, The - The Hand of Fate (Multi-Platform);kyra:kyra2;scummvm.exe
+Legend of Kyrandia 3, The - Malcolm's Revenge (Macintosh);kyra:kyra3;2.5\scummvm.exe
+Legend of Kyrandia 3, The - Malcolm's Revenge (Multi-Platform, Multilanguage);kyra:kyra3;scummvm.exe
+Legend of Kyrandia, The (Multi-Platform);kyra:kyra1;scummvm.exe
+Leisure Suit Larry 2 - 2004 AGS Remake with Point and Click;ags:leisuresuitlarry2;2.9.0\scummvm.exe
+Leisure Suit Larry 2 - Goes looking for Love (In Several Wrong Places) (Multi-Platform);sci:lsl2;2.9.0\scummvm.exe
+Leisure Suit Larry 3 - Passionate Patti in Pursuit of the Pulsating Pectorals (Multi-Platform);sci:lsl3;2.9.0\scummvm.exe
+Leisure Suit Larry 5 - Passionate Patty Does a Little Undercover Work (Multi-Platform);sci:lsl5;2.9.0\scummvm.exe
+Leisure Suit Larry 6 - Shape Up or Slip Out (Macintosh CD);sci:lsl6hires;2.9.0\scummvm.exe
+Leisure Suit Larry 6 - Shape Up or Slip Out (Macintosh Floppy);sci:lsl6;2.9.0\scummvm.exe
+Leisure Suit Larry 6 - Shape Up or Slip Out (Multi-Platform);sci:lsl6;2.9.0\scummvm.exe
+Leisure Suit Larry 6 - Shape Up or Slip Out (Windows CD High Res);sci:lsl6hires;2.9.0\scummvm.exe
+Leisure Suit Larry 7 - Love for Sail (CD DOS);sci:lsl7;2.9.0\scummvm.exe
+Leisure Suit Larry in the Land of the Lounge Lizards (Amiga Remake);sci:lsl1sci;2.9.0\scummvm.exe
+Leisure Suit Larry in the Land of the Lounge Lizards (DOS Remake EGA);sci:lsl1sci;2.9.0\scummvm.exe
+Leisure Suit Larry in the Land of the Lounge Lizards (DOS Remake VGA);sci:lsl1sci;2.9.0\scummvm.exe
+Leisure Suit Larry in the Land of the Lounge Lizards (Macintosh Remake);sci:lsl1sci;2.9.0\scummvm.exe
+Leisure Suit Larry in the Land of the Lounge Lizards (Multi-Platform);agi:lsl1;2.9.0\scummvm.exe
+Leptons Quest (Multi-Platform);sludge:leptonsquest;2026.1.0\scummvm.exe
+Let's Explore the Airport with Buzzy (Multi-Platform);scumm:airport;2026.1.0\scummvm.exe
+Let's Explore the Farm with Buzzy (Macintosh);scumm:farm;2.5\scummvm.exe
+Let's Explore the Farm with Buzzy (Multi-Platform);scumm:farm;2026.1.0\scummvm.exe
+Let's Explore the Jungle with Buzzy (Multi-Platform);scumm:jungle;2026.1.0\scummvm.exe
+Life Flashes By (Windows);sludge:life;2026.1.0\scummvm.exe
+Life In 3 Minutes (Windows);wintermute:lifein3minutes;2026.1.0\scummvm.exe
+Lighthouse (Multi-Platform);sci:lighthouse;2.9.0\scummvm.exe
+Limbo of the Lost (Windows);wintermute:lotl;2026.1.0\scummvm.exe
+Little Big Adventure (CD DOS);twine:lba;2.9.0\scummvm.exe
+Little Longnose (Windows);karliknos;2026.1.0\scummvm.exe
+Little Pythagoras (Macintosh);wage;2026.1.0\scummvm.exe
+Living Books - Aesop's Fables - The Tortoise And The Hare (CD Windows);mohawk:tortoise;2.9.0\scummvm.exe
+Living Books - Arthur's Birthday (CD Windows);mohawk:arthurbday;scummvm.exe
+Living Books - Arthur's Computer Adventure (CD Windows);mohawk:arthurcomp;2.9.0\scummvm.exe
+Living Books - Arthur's Reading Race (CD Windows);mohawk:arthurrace;2.9.0\scummvm.exe
+Living Books - Arthur's Teacher Trouble (CD Windows);mohawk:arthur;scummvm.exe
+Living Books - Cat in the Hat (CD Windows);mohawk:catinthehat;2.9.0\scummvm.exe
+Living Books - Dr. Seuss ABC (CD Windows);mohawk:seussabc;scummvm.exe
+Living Books - Green Eggs and Ham (CD Windows);mohawk:greeneggs;scummvm.exe
+Living Books - Harry and the Haunted House (CD Windows);mohawk:harryhh;scummvm.exe
+Living Books - Just Grandma and Me (CD Windows);mohawk:grandma;2.9.0\scummvm.exe
+Living Books - Just Grandma and Me (Windows V2);mohawk:grandma;2.9.0\scummvm.exe
+Living Books - Little Monster at School (CD Windows);mohawk:lilmonster;scummvm.exe
+Living Books - Maggies Farmyard Adventure (CD Windows);mohawk:maggiesfa;2.9.0\scummvm.exe
+Living Books - Ruff's Bone (CD Windows);mohawk:ruff;scummvm.exe
+Living Books - Sheila Rae, The Brave (CD Windows);mohawk:sheila;scummvm.exe
+Living Books - Stellaluna (CD Windows);mohawk:stellaluna;scummvm.exe
+Living Books - The Berenstain Bears Get In The Fight (CD Windows);mohawk:bearfight;scummvm.exe
+Living Books - The Berenstain Bears in the Dark (CD Windows);mohawk:beardark;scummvm.exe
+Living Books - The New Kid on the Block (CD Windows);mohawk:newkid;scummvm.exe
+Long Drink, A (IF);glk:pc15_alongdrink;scummvm.exe
+Longest Journey, The (CD Windows);stark:tlj;2.9.0\scummvm.exe
+Looky (Windows);wintermute:looky;2026.1.0\scummvm.exe
+Loom (Multi-Platform);scumm:loom;2.9.0\scummvm.exe
+Lord Avalot d'Argent (Floppy DOS);avalanche;svn3.0.0git19492\scummvm.exe
+Lost Crown, The - A Ghost-Hunting Adventure (Windows);wintermute:thelostcrowngha;2026.1.0\scummvm.exe
+Lost Crystal (Macintosh);wage;2026.1.0\scummvm.exe
+Lost Eden (CD DOS);losteden;svn3.0.0git19492\scummvm.exe
+Lost Files of Sherlock Holmes, The - The Case of the Rose Tattoo (CD DOS);sherlock:rosetattoo;scummvm.exe
+Lost Files of Sherlock Holmes, The - The Case of the Serrated Scalpel (3DO);sherlock:scalpel;2.9.0\scummvm.exe
+Lost Files of Sherlock Holmes, The - The Case of the Serrated Scalpel (Multi-Platform);sherlock:scalpel;2.9.0\scummvm.exe
+Lost in Kookyville (Macintosh);wage;2026.1.0\scummvm.exe
+Lost in Time (Multi-Platform);gob:lit;2.9.0\scummvm.exe
+Lost Princess (Macintosh);wage;2026.1.0\scummvm.exe
+Lost Skater, The (Macintosh);wage;2026.1.0\scummvm.exe
+Lost Weekend (Macintosh);wage;2026.1.0\scummvm.exe
+Lure of the Temptress (Multi-Platform);lure:lure;2.9.0\scummvm.exe
+Lurking Horror, The (DOS);glk:lurkinghorror;scummvm.exe
+M'Lord's Warrior (Macintosh);wage;2026.1.0\scummvm.exe
+Mac Spudd (Macintosh);wage;2026.1.0\scummvm.exe
+Mage's Initiation (Windows);ags:mage;scummvm.exe
+Magic Rings (Macintosh);wage;2026.1.0\scummvm.exe
+Magic Tales - Baba Yaga and the Magic Geese (CD Windows);composer:babayaga;2.9.0\scummvm.exe
+Magic Tales - Imo and the King (CD Windows);composer:imoking;2.9.0\scummvm.exe
+Magic Tales - Liam Finds a Story (CD Windows);composer:liam;2.9.0\scummvm.exe
+Magic Tales - Sleeping Cub's Test of Courage (CD Windows);composer:sleepingcub;2.9.0\scummvm.exe
+Magic Tales - The Little Samurai (CD Windows);composer:littlesamurai;2.9.0\scummvm.exe
+Magic Tales - The Princess and the Crab (CD Windows);composer:princess;2.9.0\scummvm.exe
+Majestic - Part 1 (Windows);director:majestic;scummvm.exe
+Mandy Christmas Adventure (Windows);sludge:mandy;2026.1.0\scummvm.exe
+Manhole, The (Floppy DOS);made:manhole;2.9.0\scummvm.exe
+Manhole, The - Enhanced (CD Windows);made:manhole;2.9.0\scummvm.exe
+Manhunter 1 - New York (Atari ST);agi:agi-fanmade;2.9.0\scummvm.exe
+Manhunter 1 - New York (Multi-Platform);agi:mh1;2.9.0\scummvm.exe
+Manhunter 2 - San Francisco (Atari ST);agi:agi-fanmade;2.9.0\scummvm.exe
+Manhunter 2 - San Francisco (Multi-Platform);agi:mh2;2.9.0\scummvm.exe
+Maniac Mansion (Multi-Platform);scumm:maniac;2.9.0\scummvm.exe
+Maniac Mansion Deluxe (Windows);ags:maniacmansiondeluxe;2.9.0\scummvm.exe
+Mansion (Macintosh);wage;2026.1.0\scummvm.exe
+Marvel Comics Spider-Man - The Sinister Six (DOS);hypno:sinistersix;2.9.0\scummvm.exe
+Marvellous Mice Adventures - Meeting Sea Rat (Windows);qdengine:3mice1;2.9.0\scummvm.exe
+Marvellous Mice Adventures - Sea Rat's Birthday (Windows);qdengine:3mice2;2.9.0\scummvm.exe
+Mask Show (Windows);qdengine:maski;2.9.0\scummvm.exe
+Maze of the Questing Beast (Macintosh);wage;2026.1.0\scummvm.exe
+Mental Repairs Inc (Windows);wintermute:mentalrepairs;2026.1.0\scummvm.exe
+Mess O'Trouble, A (Macintosh);wage:amot;2026.1.0\scummvm.exe
+Messy House (Macintosh);wage;2026.1.0\scummvm.exe
+Meta (Windows);ags:meta;scummvm.exe
+Mickey's Space Adventure (Floppy DOS);agi:mickey;2.9.0\scummvm.exe
+Midnight Snack (Macintosh);wage;2026.1.0\scummvm.exe
+Might and Magic - Swords of Xeen (DOS);mm:swordsofxeen;2.9.0\scummvm.exe
+Might and Magic - World of Xeen (Multi-Platform);mm:worldofxeen;2.9.0\scummvm.exe
+Might and Magic Book One - The Secret of the Inner Sanctum (DOS Enhanced);mm:mm1_enh;2.9.0\scummvm.exe
+Might and Magic Book One - The Secret of the Inner Sanctum (DOS);mm:mm1;2.9.0\scummvm.exe
+Might and Magic IV - Clouds of Xeen (Floppy DOS);mm:cloudsofxeen;2.9.0\scummvm.exe
+Might and Magic V - Darkside of Xeen (Floppy DOS);mm:darksideofxeen;2.9.0\scummvm.exe
+Mike's House (Macintosh);wage;2026.1.0\scummvm.exe
+Milliways (IF);glk:restaurant;scummvm.exe
+Mind Forever Voyaging, A (DOS);glk:amfv;scummvm.exe
+Mindy - The Quest for Home (Macintosh);wage;2026.1.0\scummvm.exe
+Minitorian (Macintosh);wage;2026.1.0\scummvm.exe
+Mirage (Windows);wintermute:mirage;2026.1.0\scummvm.exe
+Mission Supernova Part 1 (Floppy DOS);supernova:msn1;scummvm.exe
+Mission Supernova Part 2 (Floppy DOS);supernova:msn2;scummvm.exe
+Mixed Up Fairy Tales (Multi-Platform);sci:fairytales;2.9.0\scummvm.exe
+Mixed Up Mother Goose (Amiga SCI, 1990);sci:mothergoose;2.9.0\scummvm.exe
+Mixed Up Mother Goose (Atari ST AGI, 1987);agi:agi-fanmade;2.9.0\scummvm.exe
+Mixed Up Mother Goose (DOS SCI, 1990);sci:mothergoose;2.9.0\scummvm.exe
+Mixed Up Mother Goose (Multi-Platform);agi:mixedup;2.9.0\scummvm.exe
+Mixed Up Mother Goose Deluxe (DOS CD, 1995);sci:mothergoosehires;2.9.0\scummvm.exe
+Mom Don't Worry (Windows);mng;2026.1.0\scummvm.exe
+Monkey Island 2 LeChuck's Revenge (Macintosh);scumm:monkey2;scummvm.exe
+Monkey Island 2 LeChuck's Revenge (Multi-Platform);scumm:monkey2;2.9.0\scummvm.exe
+Monkeys to the Moon (Windows);ags:monkeystothemoon;scummvm.exe
+Moonbase Commander (Windows);scumm:moonbase;2.9.0\scummvm.exe
+Moonmist (DOS);glk:moonmist;scummvm.exe
+Mormonoids (Macintosh);wage;2026.1.0\scummvm.exe
+Mortadelo y Filemon - Aventura de Cine Edicion (Windows);alcachofa:aventuradecine;2026.1.0\scummvm.exe
+Mortville Manor (Floppy DOS);mortevielle:mortevielle;scummvm.exe
+Mountain of Mayhem (Macintosh);wage;2026.1.0\scummvm.exe
+Ms Astro Chicken (Floppy DOS);sci:msastrochicken;2.9.0\scummvm.exe
+Mudlarks (Windows);ags:mudlarks;scummvm.exe
+Muppet Treasure Island (CD Windows);mtropolis:mti;scummvm.exe
+My Big Sister (Windows);ags:mybigsister;scummvm.exe
+My Big Sister Remastered (Windows);ags:mybigsisterrm;scummvm.exe
+Myst (Multi-Platform);mohawk:myst;scummvm.exe
+Myst 3 - Exile (Multi-Platform);myst3:myst3;2026.1.0\scummvm.exe
+Myst 3 - Exile (XBox);myst3:myst3;2026.1.0\scummvm.exe
+Mystery Fun House (IF);glk:mysteryfunhouse;scummvm.exe
+Mystery of the Moors (Macintosh);wage;2026.1.0\scummvm.exe
+Myth (Floppy DOS);glk:myth;scummvm.exe
+Myth - A Guffs Tale (Windows);wintermute:mythguff;svn3.0.0git19492\scummvm.exe
+Nancy Drew - Ghost Dogs of Moon Lake (CD Windows);nancy7;2026.1.0\scummvm.exe
+Nancy Drew - Message in a Haunted Mansion (CD Windows);nancy:nancy3;2.9.0\scummvm.exe
+Nancy Drew - Secret of the Scarlet Hand (CD Windows);nancy:nancy6;2026.1.0\scummvm.exe
+Nancy Drew - Secrets Can Kill (CD Windows);nancy:nancy1;2.9.0\scummvm.exe
+Nancy Drew - Stay Tuned for Danger (CD Windows);nancy:nancy2;2.9.0\scummvm.exe
+Nancy Drew - The Final Scene (CD Windows);nancy:nancy5;2.9.0\scummvm.exe
+Nancy Drew - Treasure in the Royal Tower (CD Windows);nancy:nancy4;2.9.0\scummvm.exe
+Nancy The Happy Whore and The Perfidious Petrol Station (Windows);ags:perfidiouspetrolstation;scummvm.exe
+Nathans Second Chance (Windows);sludge:nsc;2026.1.0\scummvm.exe
+Necropolis (Macintosh);wage;2026.1.0\scummvm.exe
+Neverhood, The (CD Windows);neverhood:neverhood;scummvm.exe
+Nightcrawler Ned (Macintosh);wage;2026.1.0\scummvm.exe
+Nightlong - Union City Conspiracy (CD Windows);trecision:nl;2.9.0\scummvm.exe
+Nippon Safes Inc (Multi-Platform);parallaction:nippon;scummvm.exe
+Nord and Bert Couldn't Make Head or Tail of It (DOS);glk:nordbert;scummvm.exe
+Nosebound (Windows);wintermute:nosebound1;2026.1.0\scummvm.exe
+Obsidian (Multi-Platform);mtropolis:obsidian;scummvm.exe
+Oceanspirit Danish (Windows);ags:osdanish;scummvm.exe
+Octave (Windows);wintermute:octave;2026.1.0\scummvm.exe
+Odyssey (Macintosh);wage;2026.1.0\scummvm.exe
+Oknytt (Windows);wintermute:oknytt;2026.1.0\scummvm.exe
+Once Upon A Time - Abracadabra (Multi-Platform);gob:abracadabra;2.9.0\scummvm.exe
+Once Upon A Time - Baba Yaga (Multi-Platform);gob:babayaga;2.9.0\scummvm.exe
+Once Upon A Time - Little Red Riding Hood (Multi-Platform);gob:littlered;2.9.0\scummvm.exe
+Oo-Topos (DOS);glk:ootopos;2.9.0\scummvm.exe
+Open Quest (Multi-Platform);ags:openquest;2026.1.0\scummvm.exe
+Open Quest (Wintermute);openquest-win;2026.1.0\scummvm.exe
+Operation Stealth (Multi-Platform);cine:os;2.9.0\scummvm.exe
+Orion Burger (DOS);m4:burger;2.9.0\scummvm.exe
+Out Of Order (Multi-Platform);sludge:outoforder;2026.1.0\scummvm.exe
+Out of this World (Multi-Platform);anotherworld;2026.1.0\scummvm.exe
+P-W Adventure (Macintosh);wage;2026.1.0\scummvm.exe
+Paintaria (Windows);wintermute:paintaria;2026.1.0\scummvm.exe
+Pajama Sam - Games to Play on Any Day (CD Windows);scumm:pjgames;2.9.0\scummvm.exe
+Pajama Sam 1 - No Need to Hide When it's Dark Outside (Multi-Platform);scumm:pajama;2.9.0\scummvm.exe
+Pajama Sam 2 - Thunder and Lightning Aren't so Frightening (Multi-Platform);scumm:pajama2;2.9.0\scummvm.exe
+Pajama Sam 3 - You Are What You Eat From Your Head to Your Feet (Multi-Platform);scumm:pajama3;2.9.0\scummvm.exe
+Pajama Sam's Lost And Found (Multi-Platform);scumm:lost;2.9.0\scummvm.exe
+Pajama Sam's One-Stop Fun Shop (Windows);scumm:SamsFunShop;2.9.0\scummvm.exe
+Pajama Sam's Sock Works (Multi-Platform);scumm:socks;2.9.0\scummvm.exe
+Parrot Talk (Macintosh);wage;2026.1.0\scummvm.exe
+Passport to Adventure (CD DOS);scumm:pass;2.9.0\scummvm.exe
+Pavilion (Macintosh);wage;2026.1.0\scummvm.exe
+Pawn, The (Floppy DOS);glk:pawn;scummvm.exe
+Penumbra - Overture (Windows);penumbraoverture;2026.1.0\scummvm.exe
+Peppers Adventures In Time (Floppy DOS);sci:pepper;2.9.0\scummvm.exe
+Perfect Tides (Windows);ags:perfecttides;scummvm.exe
+Periapt (Macintosh);wage;2026.1.0\scummvm.exe
+Personal Nightmare (Multi-Platform);agos:pn;2.9.0\scummvm.exe
+Phantasmagoria (CD Windows);sci:phantasmagoria;2.9.0\scummvm.exe
+Phantasmagoria 2 (CD Windows);sci:phantasmagoria2;2.9.0\scummvm.exe
+Phantom Fellows, The (Windows);ags:phantomfellows;2.9.0\scummvm.exe
+Philip Marlowe - Private Eye (CD Windows);private:private-eye;scummvm.exe
+Phoenix, The (Macintosh);wage;2026.1.0\scummvm.exe
+Pigeons in the Park (Windows);wintermute:pigeons;2026.1.0\scummvm.exe
+Pilot Brothers - In the Footsteps of the Striped Elephant (Windows);pilots3;2026.1.0\scummvm.exe
+Pilot Brothers 3 - Back Side of the Earth (Windows);pilots3;2026.1.0\scummvm.exe
+Pilot Brothers 3D - The Case of Garden Pests (Windows);pilots3d;2026.1.0\scummvm.exe
+Pilot Brothers 3D-2 - Kennel Club Secrets (Windows);pilots3d-2;2026.1.0\scummvm.exe
+Pink Panther, The - Hokus Pokus Pink (CD Windows);pink:pokus;scummvm.exe
+Pink Panther, The - Passport to Peril (CD Windows);pink:peril;scummvm.exe
+Pirate Adventure (IF);glk:pirateadventure;scummvm.exe
+Pirate Attack (Macintosh);wage;2026.1.0\scummvm.exe
+Pirating (IF);glk:pirating;2.9.0\scummvm.exe
+Planetfall (DOS);glk:planetfall;scummvm.exe
+Playtoons 1 - Uncle Archibald (CD Windows);gob:playtoons1;2.9.0\scummvm.exe
+Playtoons 2 - Case of the Counterfeit Collaborator (CD Windows);gob:playtoons2;2.9.0\scummvm.exe
+Playtoons 3 - Secret of the Castle (CD Windows);gob:playtoons3;2.9.0\scummvm.exe
+Playtoons 4 - The Mandarine Prince (CD Windows);gob:playtoons4;2.9.0\scummvm.exe
+Plumbers Don't Wear Ties (Multi-Platform);plumbers:plumbers;2.9.0\scummvm.exe
+Plundered Hearts (DOS);glk:plunderedhearts;scummvm.exe
+Police Quest 1 - In Pursuit of the Death Angel (Atari ST);agi:agi-fanmade;2.9.0\scummvm.exe
+Police Quest 1 - In Pursuit of the Death Angel (DOS SCI Remake);sci:pq1sci;2.9.0\scummvm.exe
+Police Quest 1 - In Pursuit of the Death Angel (Multi-Platform);agi:pq1;2.9.0\scummvm.exe
+Police Quest 2 - The Vengeance (Multi-Platform);sci:pq2;2.9.0\scummvm.exe
+Police Quest 3 - The Kindred (Multi-Platform);sci:pq3;2.9.0\scummvm.exe
+Police Quest 4 - Open Season (Multi-Platform);sci:pq4;2.9.0\scummvm.exe
+Police Quest SWAT (CD DOS);sci:pqswat;2.9.0\scummvm.exe
+Precious Pills, Blasting Bacon and Mowing Minds (Windows);wintermute:preciouspills;2026.1.0\scummvm.exe
+Primordia (Windows);ags:primordia;scummvm.exe
+Prince and the Coward, The (CD Windows);prince:prince;scummvm.exe
+Project - Doom (Windows);wintermute:projectdoom;2026.1.0\scummvm.exe
+Psychotic (Macintosh);wage;2026.1.0\scummvm.exe
+Putt-Putt and Fatty Bear's Activity Pack (Multi-Platform);scumm:activity;2.9.0\scummvm.exe
+Putt-Putt and Pep's Balloon-O-Rama (Multi-Platform);scumm:balloon;2.9.0\scummvm.exe
+Putt-Putt and Pep's Dog on a Stick (Multi-Platform);scumm:dog;2.9.0\scummvm.exe
+Putt-Putt Enters the Race (Multi-Platform);scumm:puttrace;2.9.0\scummvm.exe
+Putt-Putt Goes to the Moon (Multi-Platform);scumm:puttmoon;2.9.0\scummvm.exe
+Putt-Putt Joins the Circus (Multi-Platform);scumm:puttcircus;2.9.0\scummvm.exe
+Putt-Putt Joins the Parade (Multi-Platform);scumm:puttputt;2.9.0\scummvm.exe
+Putt-Putt Saves the Zoo (Multi-Platform);scumm:puttzoo;2.9.0\scummvm.exe
+Putt-Putt Travels Through Time (Multi-Platform);scumm:putttime;2.9.0\scummvm.exe
+Putt-Putt's Fun Pack (Multi-Platform);scumm:funpack;2.9.0\scummvm.exe
+Putt-Putt's One-Stop Fun Shop (Multi-Platform);scumm:PuttsFunShop;2.9.0\scummvm.exe
+Puzzle Bots (Windows);ags:puzzlebots;scummvm.exe
+Puzzle Piece Search (Macintosh);wage;2026.1.0\scummvm.exe
+Pyramid of Doom (IF);glk:pyramidofdoom;scummvm.exe
+Pyramid of Ert (Macintosh);wage;2026.1.0\scummvm.exe
+Pyramid of No Return (Macintosh);wage;2026.1.0\scummvm.exe
+Qajary Cat (Windows);wintermute:qajarycat;2026.1.0\scummvm.exe
+Queen Quest (Macintosh);wage;2026.1.0\scummvm.exe
+Quest for Glory 1 - So You Want to be a Hero (DOS SCI Remake);sci:qfg1vga;2.9.0\scummvm.exe
+Quest for Glory 1 - So You Want to be a Hero (Macintosh SCI Remake);sci:qfg1vga;2.9.0\scummvm.exe
+Quest for Glory 1 - So You Want to be a Hero (Multi-Platform);sci:qfg1;2.9.0\scummvm.exe
+Quest for Glory 2 - Trial by Fire (AGD 2011 Remake);ags:qfg2agdi;2.9.0\scummvm.exe
+Quest for Glory 2 - Trial by Fire (Multi-Platform);sci:qfg2;2.9.0\scummvm.exe
+Quest for Glory 3 - The Wages of War (Multi-Platform);sci:qfg3;2.9.0\scummvm.exe
+Quest for Glory 4 - Shadows Of Darkness (Multi-Platform);sci:qfg4;2.9.0\scummvm.exe
+Quest for Infamy (Windows);ags:qfi;2.9.0\scummvm.exe
+Quest for T-Rex (Macintosh);wage;2026.1.0\scummvm.exe
+Quest for the Dark Sword (Macintosh);wage;2026.1.0\scummvm.exe
+Quest for Yrolg (Windows);ags:questforyrolg;2.9.0\scummvm.exe
+Quester (Macintosh);wage;2026.1.0\scummvm.exe
+Questprobe - Spider-Man (IF);glk:questprobe2i5;scummvm.exe
+Questprobe - The Hulk (IF);glk:marveladventure;scummvm.exe
+Radical Castle (Macintosh);wage;2026.1.0\scummvm.exe
+RAMA (CD Windows);sci:rama;2.9.0\scummvm.exe
+Rays Maze (Macintosh);wage:raysmaze;2026.1.0\scummvm.exe
+Reah - Face the Unknown (DVD Windows);vcruise:reah;scummvm.exe
+Realms and Reality (Macintosh);wage;2026.1.0\scummvm.exe
+Red Bow (Windows);ags:redbow;scummvm.exe
+Red Comrades 2 - For the Great Justice (Windows);petka:petka2;scummvm.exe
+Red Comrades Save the Galaxy (Windows);petka:petka1;scummvm.exe
+Resonance (Windows);ags:resonance;scummvm.exe
+Return to Eden (Multi-Platform);glk:returntoeden;scummvm.exe
+Return to Pirate's Isle (IF);glk:pirateisle;scummvm.exe
+Return to Ringworld (CD DOS);tsage:ringworld2;2.9.0\scummvm.exe
+Return to Zork (Multi-Platform);made:rtz;2.9.0\scummvm.exe
+Reversion - Chapter 1 - The Escape (Windows);wintermute:reversion1;2026.1.0\scummvm.exe
+Reversion - Chapter 2 - The Meeting (Windows);wintermute:reversion2;2026.1.0\scummvm.exe
+Reversion - Chapter 3 - The Return (Windows);wintermute:reversion3;2026.1.0\scummvm.exe
+Rex Nebular And The Cosmic Gender Bender (Floppy DOS);mads:nebular;scummvm.exe
+Rhiannon - Curse of the four Branches (Windows);wintermute:rhiannon;2026.1.0\scummvm.exe
+Ringworld - Revenge of the Patriarch (Multi-Platform);tsage:ringworld;2.9.0\scummvm.exe
+Ripley's Believe It Or Not - The Riddle of Master Lu (CD DOS);riddle;2026.1.0\scummvm.exe
+Rise of the Dragon (DOS);dgds:rise;2.9.0\scummvm.exe
+Riven (Multi-Platform);mohawk:riven;scummvm.exe
+Road ScummC Demo (ScummC);scumm:tentacle;2.9.0\scummvm.exe
+Roberta William's Mixed-Up Mother Goose (DOS CD);sci:mothergoose256;2.9.0\scummvm.exe
+Roberta William's Mixed-Up Mother Goose (DOS Floppy);sci:mothergoose256;2.9.0\scummvm.exe
+Roberta William's Mixed-Up Mother Goose (FM-Towns);sci:mothergoose256;2.9.0\scummvm.exe
+Robins Rescue (Windows);sludge:robinsrescue;2026.1.0\scummvm.exe
+Robot Planet (Macintosh);wage;2026.1.0\scummvm.exe
+Rodney's Fun Screen (Floppy DOS);made:rodney;2.9.0\scummvm.exe
+Romulan Adventure (IF);glk:romulanadv;scummvm.exe
+Rosemary (Windows);wintermute:rosemary;2026.1.0\scummvm.exe
+Royal Malaise (Macintosh);wage;2026.1.0\scummvm.exe
+Saga of Erik the Viking, The (Multi-Platform);glk:eriktheviking;scummvm.exe
+Sam and Max Hit the Road (Multi-Platform);scumm:samnmax;2.9.0\scummvm.exe
+Sands of Time (Macintosh);wage;2026.1.0\scummvm.exe
+Sanitarium (Windows);asylum:asylum;2.9.0\scummvm.exe
+Savage Island, Part 2 (IF);glk:savageisland2;scummvm.exe
+Savage Island, Part I (IF);glk:savageisland1;scummvm.exe
+Scapeghost (Multi-Platform);glk:scapeghost;scummvm.exe
+Schizm - Mysterious Journey (CD Windows);vcruise:schizm;scummvm.exe
+Schmoozer (Macintosh);wage;2026.1.0\scummvm.exe
+Seastalker (DOS);glk:seastalker;scummvm.exe
+Secret Diary of Adrian Mole, The (Multi-Platform);glk:adrianmole1;scummvm.exe
+Secret Mission (IF);glk:missionimpossible;scummvm.exe
+Secret of Monkey Island, The (Multi-Platform);scumm:monkey;2.9.0\scummvm.exe
+Secret of Tremendous Corporation, The (Windows);sludge:tsotc;2026.1.0\scummvm.exe
+Serguei's Destiny (DOS);agi:serguei1;2.9.0\scummvm.exe
+Serguei's Destiny 2 Demo;agi:serguei2;2.9.0\scummvm.exe
+Sfinx (CD DOS);cge2:sfinx;scummvm.exe
+Shaban (Windows);wintermute:shaban;2026.1.0\scummvm.exe
+Shadowgate (Floppy Macintosh);macventure:shadowgate;svn3.0.0git19492\scummvm.exe
+Shadows on the Vatican - Act I - Greed (Windows);wintermute:sotv1;2026.1.0\scummvm.exe
+Shadows on the Vatican - Act II - Wrath (Windows);wintermute:sotv2;2026.1.0\scummvm.exe
+Shardlight (Windows);ags:shardlight;scummvm.exe
+Sherlock Holmes - The Riddle of the Crown Jewels (DOS);glk:sherlockriddle;scummvm.exe
+Shivah, The (Multi-Platform);ags:shivahkosher;scummvm.exe
+Shivers (Multi-Platform);sci:shivers;2.9.0\scummvm.exe
+Silent Footsteps (Windows);wintermute:wintermute;2026.1.0\scummvm.exe
+Simon the Sorcerer 1 (DOS CD);simo1;2.9.0\scummvm.exe
+Simon the Sorcerer 1 (DOS Floppy);simo1;2.9.0\scummvm.exe
+Simon the Sorcerer 1 (Multi-Platform);agos:simon1;2.9.0\scummvm.exe
+Simon the Sorcerer 2 (Multi-Platform);agos:simon2;2.9.0\scummvm.exe
+Simon the Sorcerer Puzzle Pack (CD Windows);agos;2.9.0\scummvm.exe
+Simon the Sorcerers - Demon in my Pocket;agos:dimp;2.9.0\scummvm.exe
+Simon the Sorcerers - Jumble;agos:jumble;2.9.0\scummvm.exe
+Simon the Sorcerers - NoPatience;agos:puzzle;2.9.0\scummvm.exe
+Simon the Sorcerers - Swampy Adventures;agos:swampy;2.9.0\scummvm.exe
+Slater and Charlie Go Camping (Multi-Platform);sci:slater;2.9.0\scummvm.exe
+sMythWorld (Macintosh);wage;2026.1.0\scummvm.exe
+Snowball (Multi-Platform);glk:snowballsd;scummvm.exe
+Sofias Debt (Windows);wintermute:sofiasdebt;2026.1.0\scummvm.exe
+Softporn Adventure (IF);glk:softporn;scummvm.exe
+Soldier Boyz (DOS);hypno:soldierboyz;2.9.0\scummvm.exe
+Soltys (DOS);cge:soltys;scummvm.exe
+Sorcerer (DOS);glk:sorcerer;scummvm.exe
+Sorcerer of Claymorgue Castle (IF);glk:claymorguesorcerer;scummvm.exe
+Sorceror Quest (Macintosh);wage;2026.1.0\scummvm.exe
+Sound of One Hand Clapping, The (IF);glk:onehand;scummvm.exe
+Space Adventure (Macintosh);wage;2026.1.0\scummvm.exe
+Space Bar, The (Multi-Platform);bagel:spacebar;2.9.0\scummvm.exe
+Space Madness (Windows);wintermute:spacemadness;2026.1.0\scummvm.exe
+Space Quest - Vohaul Strikes Back (Windows);ags:sqvsb;2.9.0\scummvm.exe
+Space Quest 0 - Replicated (DOS);agi:sq0;2.9.0\scummvm.exe
+Space Quest 1 - The Sarien Encounter (Multi-Platform);agi:sq1;2.9.0\scummvm.exe
+Space Quest 1 - The Sarien Encounter SCI Remake;sci:sq1sci;2.9.0\scummvm.exe
+Space Quest 2 - Vohaul's Revenge (Atari ST);agi:agi-fanmade;2.9.0\scummvm.exe
+Space Quest 2 - Vohaul's Revenge (Multi-Platform);agi:sq2;2.9.0\scummvm.exe
+Space Quest 2 - Vohaul's Revenge 2012 remake;ags:sq2vga;2.9.0\scummvm.exe
+Space Quest 3 - The Pirates of Pestulon (Multi-Platform);sci:sq3;2.9.0\scummvm.exe
+Space Quest 4 - Roger Wilco and the Time Rippers (Multi-Platform);sci:sq4;2.9.0\scummvm.exe
+Space Quest 5 - The Next Mutation (Floppy DOS);sci:sq5;2.9.0\scummvm.exe
+Space Quest 6 - The Spinal Frontier (CD DOS);sci:sq6;2.9.0\scummvm.exe
+Space Quest X - The Lost Chapter (DOS);agi:sqx;2.9.0\scummvm.exe
+Spaceship Warlock (Windows);director:warlock;scummvm.exe
+SparGate (Macintosh);wage;2026.1.0\scummvm.exe
+Spear of Destiny (Macintosh);wage;2026.1.0\scummvm.exe
+Spellbreaker (DOS);glk:spellbreaker;scummvm.exe
+Sphinx of Time, The (Windows);ags:sphinxtime;2.9.0\scummvm.exe
+Spy Fox 1 Dry Cereal (Multi-Platform);scumm:spyfox;2.9.0\scummvm.exe
+Spy Fox 2 Some Assembly Required (Multi-Platform);scumm:spyfox2;2.9.0\scummvm.exe
+Spy Fox 3 Operation Ozone (Multi-Platform);scumm:spyozon;2.9.0\scummvm.exe
+Spy Fox In Cheese Chase (Multi-Platform);scumm:chase;2.9.0\scummvm.exe
+Spy Fox In Hold The Mustard (Multi-Platform);scumm:mustard;2.9.0\scummvm.exe
+Star Trek (Macintosh);wage;2026.1.0\scummvm.exe
+Star Trek 25th Anniversary (Multi-Platform);startrek:st25;svn3.0.0git19492\scummvm.exe
+Starcross (DOS);glk:starcross;scummvm.exe
+Starport (Macintosh);wage;2026.1.0\scummvm.exe
+Starship Columbus (IF);glk:starshipcolumbus;2.9.0\scummvm.exe
+Starship Quasar (Windows);ags:starshipquasar;2.9.0\scummvm.exe
+Starship Titanic (CD Windows);titanic:titanic;2.9.0\scummvm.exe
+Stationfall (DOS);glk:stationfall;scummvm.exe
+Strange Disappearance (Macintosh);wage;2026.1.0\scummvm.exe
+Strange Odyssey (IF);glk:strangeodyssey;scummvm.exe
+Strangeland (Windows);ags:strangeland;scummvm.exe
+Stranger in Utopia (Windows);ags:strangerutopia;2.9.0\scummvm.exe
+Success (Macintosh);wage;2026.1.0\scummvm.exe
+Sultan's Palace, The (Macintosh);wage;2026.1.0\scummvm.exe
+Sumatra - Fate of Yandi (Windows);ags:sumatra;scummvm.exe
+Super Star Trek (IF);glk:ztrek;scummvm.exe
+Suspect (DOS);glk:suspect;scummvm.exe
+Suspended (DOS);glk:suspended;scummvm.exe
+Swamp Witch (Macintosh);wage;2026.1.0\scummvm.exe
+Sweetspace Now (Macintosh);wage;2026.1.0\scummvm.exe
+Sword of Ages (Macintosh);wage;2026.1.0\scummvm.exe
+Sword of Siegfried (Macintosh);wage;2026.1.0\scummvm.exe
+Syberia (Macintosh);tetraedge:syberia;scummvm.exe
+Syberia II (Macintosh);tetraedge:syberia2;scummvm.exe
+Tale of Two Kingdoms, A (Windows);ags:atotk;scummvm.exe
+Technobabylon (Windows);ags:technobabylon;scummvm.exe
+TeenAgent (Floppy DOS);teenagent:teenagent;scummvm.exe
+Tender Loving Care (CD Windows);groovie:tlc;2.9.0\scummvm.exe
+Terrible Old Man, The (Windows);ags:theterribleoldman;scummvm.exe
+TeTriks (Windows);wintermute:tetriks;2026.1.0\scummvm.exe
+Tex Murphy 2 - Martian Memorandum (DOS);access:martian;2026.1.0\scummvm.exe
+The Longest Journey (Windows);tlj-win;2.9.0\scummvm.exe
+The Longest Journey HD Mod;tlj-hd;2.9.0\scummvm.exe
+The Secret of Monkey Island (Macintosh);scumm:monkey;scummvm.exe
+The Shivah 1.2 (Windows);ags:shivah;scummvm.exe
+The Worm in Paradise (C64);glk:worminparadisesd;scummvm.exe
+The Worm in Paradise (CPC);glk:worminparadisesd;scummvm.exe
+The Worm in Paradise (DOS);glk:worminparadisesd;scummvm.exe
+The Worm in Paradise (Spectrum);glk:worminparadisesd;scummvm.exe
+Thimbleweed Park (Windows);twp:twp;2.9.0\scummvm.exe
+Time and Magik Trilogy (Multi-Platform);glk:lordsoftimetm;scummvm.exe
+Time Bomb (Macintosh);wage;2026.1.0\scummvm.exe
+Time Gal (Macintosh);director:timegal;scummvm.exe
+Time Squisher (Macintosh);wage;2026.1.0\scummvm.exe
+Time Star (Macintosh);wage;2026.1.0\scummvm.exe
+Time Streak (Macintosh);wage;2026.1.0\scummvm.exe
+TombWorld (Macintosh);wage;2026.1.0\scummvm.exe
+Tony Tough and the Night of the Roasted Moths (CD Windows);tony:tony;scummvm.exe
+Toonstruck (CD DOS);toon:toon;2.9.0\scummvm.exe
+Top Secret Adventure (IF);glk:topsecretadv;scummvm.exe
+Torins Passage (CD Windows);sci:torin;2.9.0\scummvm.exe
+Total Eclipse (Multi-Platform);freescape:totaleclipse;2.9.0\scummvm.exe
+Total Eclipse II - The Sphinx Jinx (Multi-Platform);freescape:totaleclipse2;2.9.0\scummvm.exe
+Touche - The Adventures of the Fifth Musketeer (CD DOS);touche:touche;2.9.0\scummvm.exe
+Tower, The (Macintosh);wage;2026.1.0\scummvm.exe
+Transylvania (DOS);glk:transylvania;2.9.0\scummvm.exe
+Transylvania 2 - The Crimson Crown (DOS);glk:crimsoncrown;2.9.0\scummvm.exe
+Tri-3D-Trial (Mac);director:tri3dtrial;scummvm.exe
+Trick or Treat (CD DOS);tot;2026.1.0\scummvm.exe
+Trinity (DOS);glk:trinity;scummvm.exe
+Troll's Tale (Floppy DOS);agi:troll;2.9.0\scummvm.exe
+Tunnel Vision (Windows);ags:tunnelvision;2.9.0\scummvm.exe
+Twisted (Macintosh);wage:twisted;2026.1.0\scummvm.exe
+UFOs (CD Windows);gnap:gnap;scummvm.exe
+Ultima I - The First Age of Darkness (Floppy DOS);ultima:ultima1;svn2.8_9335\scummvm.exe
+Ultima IV - Quest of the Avatar (DOS);u4-orig;2.9.0\scummvm.exe
+Ultima IV - Quest of the Avatar (Floppy DOS);ultima:ultima4;2.9.0\scummvm.exe
+Ultima IV - Quest of the Avatar Enhanced (DOS);u4_enha;2.9.0\scummvm.exe
+Ultima VI - The False Prophet (Floppy DOS);ultima:ultima6;2.9.0\scummvm.exe
+Ultima VI - The False Prophet Enhanced;ultima:ultima6_enh;2.9.0\scummvm.exe
+Ultima VI - The False Prophet Original;ultima:ultima6;2.9.0\scummvm.exe
+Ultima VIII - Pagan (CD DOS);ultima:ultima8;2.9.0\scummvm.exe
+Unavowed (Windows);ags:unavowed;scummvm.exe
+Uncle Henry's Playhouse (Windows);groovie:unclehenry;2.9.0\scummvm.exe
+Unrest (Windows);crab:unrest;2.9.0\scummvm.exe
+Until I Have You (Windows);ags:untilihaveyou;scummvm.exe
+Urban Runner (CD Windows);gob:urban;2.9.0\scummvm.exe
+Vampire Diaries, The (CD Windows);nancy:vampirediaries;2.9.0\scummvm.exe
+Vector Vendetta (Windows);ags:vectorvendetta;scummvm.exe
+Versailles 1685 (Multi-Platform);cryomni3d:versailles;scummvm.exe
+Village (Macintosh);wage;2026.1.0\scummvm.exe
+Volcano (Macintosh);wage;2026.1.0\scummvm.exe
+Voodoo Castle (IF);glk:voodoocastle;scummvm.exe
+Voyeur (CD DOS);voyeur:voyeur;2.9.0\scummvm.exe
+Wait for it Issue 3 - Song for a Hare (Windows);qdengine:nupogodi3;2.9.0\scummvm.exe
+War (Windows);wintermute:war;2026.1.0\scummvm.exe
+Waxworks (DOS);waxwork;2.9.0\scummvm.exe
+Waxworks (Multi-Platform);agos:waxworks;2.9.0\scummvm.exe
+Ween The Prophecy (Multi-Platform);gob:ween;2.9.0\scummvm.exe
+Wetlands (DOS);hypno:wetlands;2.9.0\scummvm.exe
+Where in Time is Carmen Sandiego (Windows);mohawk:cstime;svn3.0.0git19492\scummvm.exe
+Whispers of a Machine (Windows);ags:whispersofamachine;scummvm.exe
+White Chamber, The (Windows);wintermute:twc;2026.1.0\scummvm.exe
+Who Shot Brownie (Macintosh);wage;2026.1.0\scummvm.exe
+Widow's Sons (Macintosh);wage;2026.1.0\scummvm.exe
+Wilma Tetris (Windows);wintermute:wtetris;2026.1.0\scummvm.exe
+Winnie the Pooh in the Hundred Acre Wood (Multi-Platform);agi:winnie;2.9.0\scummvm.exe
+Wishbringer (DOS);glk:wishbringer;scummvm.exe
+Wishing Well (Macintosh);wage;2026.1.0\scummvm.exe
+Witness, The (DOS);glk:thewitness;scummvm.exe
+Wizard's Apprentice, The (Macintosh);wage;2026.1.0\scummvm.exe
+Wizard's Warehouse (Macintosh);wage;2026.1.0\scummvm.exe
+Wonderland (Floppy DOS);glk:wonderland;scummvm.exe
+Worlds of Ultima - The Savage Empire (DOS Enhanced);ultima:thesavageempire_enh;2.9.0\scummvm.exe
+Worlds of Ultima - The Savage Empire (Floppy DOS);ultima:thesavageempire;2.9.0\scummvm.exe
+Worlds of Ultima 2 - Martian Dreams (DOS Enhanced);ultima:martiandreams_enh;2.9.0\scummvm.exe
+Worlds of Ultima 2 - Martian Dreams (Floppy DOS);ultima:martiandreams;2.9.0\scummvm.exe
+Worm in Paradise, The (Multi-Platform);glk:worminparadise;scummvm.exe
+Wrath of the Gods (CD Macintosh);director:wrath;scummvm.exe
+Zak McKracken and the Alien Mindbenders (Multi-Platform);scumm:zak;2.9.0\scummvm.exe
+Zhore's Xers (Macintosh);wage;2026.1.0\scummvm.exe
+ZikTuria (Macintosh);wage;2026.1.0\scummvm.exe
+Zilm - A Game of Reflex (Windows);wintermute:zilm;2026.1.0\scummvm.exe
+Zoony (Macintosh);wage;2026.1.0\scummvm.exe
+Zork - Grand Inquisitor (Multi-Platform);zvision:zgi;2.9.0\scummvm.exe
+Zork - The Undiscovered Underground (DOS);glk:ztuu;scummvm.exe
+Zork I - The Great Underground Empire (DOS);glk:zork1;2.9.0\scummvm.exe
+Zork II - The Wizard of Frobozz (DOS);glk:zork2;scummvm.exe
+Zork III - The Dungeon Master (DOS);glk:zork3;scummvm.exe
+Zork Nemesis - The Forbidden Lands (DVD DOS);zvision:znemesis;2.9.0\scummvm.exe
+Zork Zero - The Revenge of Megaboz (DOS);glk:zork0;svn2.8_9335\scummvm.exe

@@ -9,9 +9,11 @@ import { FieldIcon, IconSoundOn, IconSoundOff, IconZoom, type FieldIconName } fr
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Button } from "./Button";
 import type { Game, GameMetadata } from "../api/tauri";
-import { launchGame, gameEngineInfo, gamePrintingUnavailable, win9xEngineAvailable, win9xMultiplayerInfo, dismissWin9xNetworkPrompt, enableWin9xNetwork, getWin9xSupportStatus, mediaUrl } from "../api/tauri";
-import type { GameEngineInfo, Win9xMultiplayerInfo, Win9xSupportStatus } from "../api/tauri";
+import { launchGame, gameEngineInfo, gamePrintingUnavailable, scummvmEngineInfo, win9xMultiplayerInfo, dismissWin9xNetworkPrompt, enableWin9xNetwork, mediaUrl } from "../api/tauri";
+import type { GameEngineInfo, ScummVmEngineInfo } from "../api/tauri";
+import { createWin9xStatus } from "./win9xStatus";
 import { formatBytes, parseLangEntries, langBadgeClass, performUninstall, performReset } from "../util";
+import { launchNote, emulatorName as describeEmulator, emulatorPackId, isScummVm, type PanelNote } from "../launchNotes";
 import { showToast } from "../stores/toasts";
 import { bestThumbnailPath, thumbnailCandidates } from "../stores/thumbnails";
 import { downloads, startGameDownload, getDownloadState, cancelGameDownload, watchExtrasIfPending } from "../stores/downloads";
@@ -21,7 +23,7 @@ import { loadVariants } from "../stores/variants";
 import { toggleFavorite, updateGameFavorited } from "../stores/games";
 import { videos, requestVideo, releaseVideo, setForegroundVideo, getVideoState, videoPlaybackUnsupported, PHASE_QUEUED, PHASE_PROBING } from "../stores/videos";
 import { ensureDismissedNotesLoaded, isNoteDismissed, dismissedNotesLoaded, dismissNote } from "../stores/notes";
-import { packsByCollection, activeJobs, installedPacks, startContentPackInstall } from "../stores/contentPacks";
+import { packsByCollection, activeJobs, startContentPackInstall } from "../stores/contentPacks";
 import { ensurePreviewMutedLoaded, previewMuted, setPreviewMuted } from "../stores/playback";
 import { musicJobs, getMusicState, requestTheme, playTheme, pauseFor, resumeFrom, pauseForGame, resumeFromGame, togglePlay, currentTrack, wantedTrack, musicPlaying, musicAutoplay, ensureMusicAutoplayLoaded, musicUnsupported, MUSIC_QUEUED } from "../stores/music";
 
@@ -38,20 +40,6 @@ const VIDEO_START_DELAY_MS = 2000;
  *  when the event cannot arrive - prefers-reduced-motion, a hidden window -
  *  so it may sit a little past the animation without costing anything. */
 const SETTLE_FALLBACK_MS = 350;
-
-/** A note, plus the two things the UI needs to decide about it: a stable key
- *  to remember a dismissal under, and whether it may be dismissed at all.
- *  `blocking` notes describe a launch that cannot work; hiding those would
- *  leave the Play button failing with no explanation on screen. */
-interface PanelNote {
-  key: string;
-  text: string;
-  blocking?: boolean;
-  /** Optional remedy rendered as a button in the note - a blocking note that
-   *  names a fix the app can perform (download the emulator pack) should
-   *  offer it right there instead of sending the user to Settings. */
-  action?: { label: string; onClick: () => void };
-}
 
 /** A credit line under the title: pictogram, then the value. The pictogram
  *  replaces the label, so `title` carries it for anyone who needs it spelled
@@ -130,19 +118,6 @@ export function GameDetailPanel(props: Props) {
   // emulation yet, so those get a heads-up note. The backend owns the whole
   // answer (conf + engine selection), so no platform logic lives here.
   const [printingUnavailable, setPrintingUnavailable] = createSignal(false);
-  // Win9x games run in DOSBox-X/86Box, not Staging. The variant slugs only
-  // exist in the eXoWin9x catalogue, so they double as the collection test.
-  const isWin9x = (g: Game | null) => {
-    const v = g?.dosbox_variant;
-    return v === "x98" || v === "pcbox" || (v?.startsWith("86box") ?? false);
-  };
-  const [win9xEngineMissing, setWin9xEngineMissing] = createSignal(false);
-  /** Shared Win9x support payload (OS images + eXo's emulators): null until
-   *  probed. Drives the download-progress note and the one-time-size hint. */
-  const [supportStatus, setSupportStatus] = createSignal<Win9xSupportStatus | null>(null);
-  /** Online-play state of the open game: drives both the panel note and the
-   *  question on Play. Null until probed, so nothing flashes. */
-  const [mpInfo, setMpInfo] = createSignal<Win9xMultiplayerInfo | null>(null);
   /** Game id awaiting the multiplayer question, or null. */
   const [netPromptFor, setNetPromptFor] = createSignal<number | null>(null);
   /** Set by the dialog's confirm path, which starts its own launch - so the
@@ -157,213 +132,39 @@ export function GameDetailPanel(props: Props) {
   /** Null until the backend answers. Guessing "Staging" in the meantime made
    *  every ECE game on Windows flash the wrong engine and the wrong note. */
   const runsUnderEce = () => engineInfo()?.uses_ece ?? isWindows;
-  /** Which emulator will actually run the selected game. */
-  const emulatorName = () => {
-    const v = selected()?.dosbox_variant ?? props.game?.dosbox_variant;
-    if (v === "x98") { return "DOSBox-X"; }
-    if (v === "pcbox") { return "PCBox (not shipped)"; }
-    if (v?.startsWith("86box")) { return "86Box"; }
-    if (v?.startsWith("ece")) { return runsUnderEce() ? "DOSBox ECE" : "DOSBox Staging"; }
-    return "DOSBox Staging";
+  const [svmEngine, setSvmEngine] = createSignal<ScummVmEngineInfo | null>(null);
+  const emulatorName = () => describeEmulator(selected() ?? props.game, svmEngine(), runsUnderEce());
+  const packCollection = () => selected()?.torrent_source ?? props.game?.torrent_source ?? "eXoWin9x";
+  /** The content pack that could supply the missing Win9x emulator. */
+  const emulatorPack = () => {
+    const packId = emulatorPackId(selected()?.dosbox_variant ?? props.game?.dosbox_variant);
+    if (!packId) { return null; }
+    return (packsByCollection()[packCollection()] ?? [])
+      .find((p) => p.id === packId && p.available && !p.installed) ?? null;
   };
-  /** Blocking progress for the shared support payload; `withEmulators` says
-   *  whether the payload is also this platform's emulator source (Windows). */
-  const supportProgressNote = (s: Win9xSupportStatus, withEmulators: boolean): PanelNote => {
-    const what = withEmulators ? "OS images + emulators" : "OS images";
-    const pct = Math.round(s.progress * 100);
-    return {
-      key: "win9x-support-progress",
-      blocking: true,
-      text: pct >= 100
-        ? `Setting up the Windows 9x support files (${what})…`
-        : `Downloading the Windows 9x support files (${what})… ${pct}%`,
-    };
-  };
-  const supportFailedNote = (): PanelNote => ({
-    key: "win9x-support-failed",
-    blocking: true,
-    text: "Setting up the Windows 9x support files failed - make sure the library drive has "
-      + "enough free space, then restart Exodium to retry.",
-  });
-  /** The single note shown above the action bar, most actionable first:
-   *  a launch that cannot work, then a feature that is missing, then what
-   *  merely differs from a DOS game. Null when there is nothing to say. */
   const rawNote = (): PanelNote | null => {
-    const v = selected()?.dosbox_variant ?? props.game?.dosbox_variant;
-    if (v === "pcbox") {
-      return {
-        key: "pcbox",
-        blocking: true,
-        text: "This game needs PCBox, a Windows-only emulator Exodium does not ship yet - "
-          + "launching it will fail for now.",
-      };
-    }
-    if (win9xEngineMissing()) {
-      // Same variant → pack mapping as the backend's emulator_pack_for_variant.
-      const packId = v?.startsWith("86box") ? "86box" : v === "pcbox" ? null : "dosbox-x";
-      const col = selected()?.torrent_source ?? props.game?.torrent_source ?? "eXoWin9x";
-      const pack = packId
-        ? (packsByCollection()[col] ?? []).find((p) => p.id === packId && p.available && !p.installed)
-        : undefined;
-      if (pack) {
-        const job = activeJobs()[`${col}:${pack.id}`];
-        if (job && !job.finished) {
-          const pct = job.total_bytes > 0
-            ? Math.round((job.downloaded_bytes / job.total_bytes) * 100)
-            : 0;
-          return {
-            key: "engine-missing",
-            blocking: true,
-            text: job.phase === "extracting"
-              ? `Installing ${pack.display_name}…`
-              : `Downloading ${pack.display_name}… ${pct}%`,
-          };
-        }
-        if (isOffline()) {
-          return {
-            key: "engine-missing",
-            blocking: true,
-            text: `This game needs ${emulatorName()}, which is not downloaded yet. `
-              + "Go online (Settings → Network) to download it.",
-          };
-        }
-        return {
-          key: "engine-missing",
-          blocking: true,
-          text: `This game needs ${emulatorName()}, which is not downloaded yet.`,
-          action: {
-            label: `Download emulator (${formatBytes(pack.size_bytes)})`,
-            onClick: () => {
-              startContentPackInstall(col, pack.id, pack.display_name).catch((e) => {
-                showToast(`Couldn't start the ${pack.display_name} download`, "error", {
-                  detail: String(e),
-                });
-              });
-            },
-          },
-        };
-      }
-      // No pack to offer. On Windows the engine comes out of the shared
-      // support payload, so report THAT state instead of a bare "not found"
-      // while the 2.5 GB is still on its way; elsewhere the advice below is
-      // actionable right now and outranks watching a download that cannot
-      // provide the emulator.
-      const support = supportStatus();
-      if (isWindows) {
-        if (!support) { return null; } // still probing - don't flash "not found"
-        if (support.phase === "failed") { return supportFailedNote(); }
-        if (support.phase === "downloading") { return supportProgressNote(support, true); }
-        if (support.phase === "missing" && !selectedInstalled()) {
-          return {
-            key: "win9x-support-size",
-            text: `${emulatorName()} and the shared Windows 9x OS images download automatically `
-              + `with this game${support.total_bytes ? ` (one-time ${formatBytes(support.total_bytes)})` : ""}.`,
-          };
-        }
-        // "ready" with the emulator gone, or "missing" for an installed
-        // game: a real fault, not a pending download.
-        return {
-          key: "engine-missing",
-          blocking: true,
-          text: "The emulator this game needs was not found in the Windows 9x support files "
-            + "(eXo\\emulators inside your library folder). Restore that folder, or delete it "
-            + "and download any Windows 9x game to fetch it again.",
-        };
-      }
-      return {
-        key: "engine-missing",
-        blocking: true,
-        text: v === "x98"
-          ? "The emulator this game needs was not found on this system. Install DOSBox-X via "
-            + "your package manager or Flatpak (com.dosbox_x.DOSBox-X)."
-          : "The emulator this game needs was not found on this system. Re-run the installer "
-            + "or place 86Box on your PATH.",
-      };
-    }
-    // Engine resolves, but the shared payload may still be on its way (the
-    // parent OS images are data every platform needs): without this, a game
-    // that installed before the 2.5 GB finished shows Play and fails bare.
-    const support = supportStatus();
-    if (support?.phase === "failed") { return supportFailedNote(); }
-    if (support?.phase === "downloading") { return supportProgressNote(support, false); }
-    // The download button quotes the game's own size, but the FIRST Win9x
-    // game also pulls the shared support payload - say so before the click,
-    // or 520 MB quietly becomes 3 GB.
-    if (support?.phase === "missing" && !selectedInstalled() && !selectedDownloading()) {
-      return {
-        key: "win9x-support-size",
-        text: "Downloading this game also fetches the shared Windows 9x support files"
-          + `${support.total_bytes ? ` (one-time ${formatBytes(support.total_bytes)})` : ""} - `
-          + "every Windows 9x game uses them.",
-      };
-    }
-    if (printingUnavailable()) {
-      return {
-        key: "printing",
-        text: "This game can print to a (virtual) printer, which the bundled DOSBox Staging "
-          + "does not support yet. The game runs, but its printing features are unavailable "
-          + "for now.",
-      };
-    }
-    const mp = mpInfo();
-    if (mp?.multiplayer && mp.state === "needs_wired") {
-      return {
-        key: "mp-wired",
-        text: "This game can play online, but that needs a wired network connection - a Wi-Fi "
-          + "link cannot carry the emulated network card's own hardware address, on any "
-          + "system. Single player works either way.",
-      };
-    }
-    if (mp?.multiplayer && mp.state === "needs_permission") {
-      return {
-        key: "mp-permission",
-        text: "This game can play online once you allow it in Settings → Network. Single "
-          + "player works either way.",
-      };
-    }
-    if (v?.startsWith("ece") && engineInfo() && !runsUnderEce()) {
-      // Three ways to end up on Staging, and they are not the user's fault in
-      // equal measure: an override they chose, a build that has not been
-      // extracted yet (Windows), or a platform ECE was never built for.
-      const chosen = engineInfo()?.ece_available === true;
-      return {
-        key: "ece",
-        text: chosen
-          ? "This game is tuned for DOSBox ECE, but you set it to run under DOSBox Staging - "
-            + "the experience may vary slightly."
-          : isWindows
-            ? "This game is tuned for DOSBox ECE, which Exodium has not unpacked yet. It runs "
-              + "under DOSBox Staging until then - the experience may vary slightly."
-            : "This game is tuned for DOSBox ECE, which only exists on Windows. Exodium runs "
-              + "it with DOSBox Staging - the experience may vary slightly.",
-      };
-    }
-    if (v === "x98") {
-      return {
-        key: "x98-boot",
-        text: "This game boots Windows 98 inside DOSBox-X - the first start takes noticeably "
-          + "longer than a DOS game.",
-      };
-    }
-    if (v?.startsWith("86box")) {
-      return {
-        key: "86box-perf",
-        text: "This game runs under 86Box, a full PC hardware emulator - startup is slower and "
-          + "the system requirements are higher than for other games.",
-      };
-    }
-    // Last, because it is the least about THIS game: without a working
-    // GStreamer audio sink the webview freezes the moment a video mounts, so
-    // previews are disabled wholesale and this says why.
-    if (videoPlaybackUnsupported()) {
-      return {
-        key: "no-gstreamer",
-        text: "Preview videos are turned off: this system is missing GStreamer plugins. "
-          + "Install gstreamer1.0-plugins-good and gstreamer1.0-libav (names vary by "
-          + "distribution), then restart Exodium.",
-      };
-    }
-    return null;
+    const pack = emulatorPack();
+    return launchNote({
+      game: selected() ?? props.game,
+      isWindows,
+      offline: isOffline(),
+      installed: selectedInstalled(),
+      downloading: selectedDownloading(),
+      svmEngine: svmEngine(),
+      engineInfo: engineInfo(),
+      win9xEngineMissing: win9x.engineMissing(),
+      support: win9x.support(),
+      mp: win9x.mp(),
+      printingUnavailable: printingUnavailable(),
+      videoUnsupported: videoPlaybackUnsupported(),
+      emulatorPack: pack,
+      packJob: pack ? (activeJobs()[`${packCollection()}:${pack.id}`] ?? null) : null,
+      installPack: (p) => {
+        startContentPackInstall(packCollection(), p.id, p.display_name).catch((e) => {
+          showToast(`Couldn't start the ${p.display_name} download`, "error", { detail: String(e) });
+        });
+      },
+    });
   };
 
   /** The note actually rendered. Dismissal is remembered per note KIND, so
@@ -515,6 +316,7 @@ export function GameDetailPanel(props: Props) {
     if (open) { settleTimer = setTimeout(markSettled, SETTLE_FALLBACK_MS); }
   });
   onCleanup(() => clearTimeout(settleTimer));
+  const win9x = createWin9xStatus(() => props.game, panelSettled);
 
   // Reset media state only when the DISPLAYED GAME changes - background
   // library refreshes (install/uninstall completing) replace the game object
@@ -552,18 +354,12 @@ export function GameDetailPanel(props: Props) {
         .then((e) => { if (props.game?.id === id) { setEngineInfo(e); } })
         .catch(() => {});
     }
-    setWin9xEngineMissing(false);
-    setMpInfo(null);
-    if (isWin9x(g)) {
+    setSvmEngine(null);
+    if (isScummVm(g) && g.id != null) {
       const id = g.id;
-      win9xEngineAvailable(g.dosbox_variant ?? null)
-        .then((ok) => { if (props.game?.id === id) { setWin9xEngineMissing(!ok); } })
+      scummvmEngineInfo(id)
+        .then((e) => { if (props.game?.id === id) { setSvmEngine(e); } })
         .catch(() => {});
-      if (id != null) {
-        win9xMultiplayerInfo(id)
-          .then((info) => { if (props.game?.id === id) { setMpInfo(info); } })
-          .catch(() => {});
-      }
     }
     // Force a metadata refetch: the cache key below would otherwise match the
     // previous visit to this same game and leave the panel with the null
@@ -578,68 +374,6 @@ export function GameDetailPanel(props: Props) {
         setSelectedId(defaultVariant(v)?.id ?? g.id ?? null);
       }).catch(() => {});
     }
-  });
-
-  // Re-probe the engine when a pack install lands (installedPacks changes):
-  // the "downloading emulator" note must clear itself without the panel being
-  // closed and reopened.
-  createEffect(() => {
-    installedPacks();
-    if (!panelSettled()) { return; }
-    const g = props.game;
-    if (!isWin9x(g)) { return; }
-    const id = g?.id;
-    win9xEngineAvailable(g?.dosbox_variant ?? null)
-      .then((ok) => { if (props.game?.id === id) { setWin9xEngineMissing(!ok); } })
-      .catch(() => {});
-  });
-
-  // Watch the shared support payload for every open Win9x game: an
-  // uninstalled one shows what the one-time download costs, a fetching one
-  // shows live progress (on Windows the emulators ARE the support files).
-  // Deliberately NOT gated on win9xEngineMissing()/selectedInstalled() -
-  // the progress matters most when the game installed first and Play would
-  // otherwise fail bare, and reading selectedInstalled() here would couple
-  // the poller to the downloads store, which replaces its record every
-  // second during any download. Once "ready" arrives the engine is
-  // re-probed so a pending note clears without the panel being reopened;
-  // "failed" is terminal until a restart re-arms the watcher.
-  createEffect(() => {
-    const g = props.game;
-    if (!isWin9x(g) || isOffline()) { setSupportStatus(null); return; }
-    // Polling can wait for the slide-in - the note it feeds is secondary.
-    if (!panelSettled()) { return; }
-    const variant = g?.dosbox_variant ?? null;
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const probe = () => {
-      getWin9xSupportStatus(variant)
-        .then((s) => {
-          if (cancelled) { return; }
-          setSupportStatus(s);
-          if (s.phase === "failed") { return; }
-          if (s.phase === "ready") {
-            if (win9xEngineMissing()) {
-              const id = props.game?.id;
-              win9xEngineAvailable(variant)
-                .then((ok) => {
-                  if (!cancelled && props.game?.id === id) { setWin9xEngineMissing(!ok); }
-                })
-                .catch(() => {});
-            }
-            return;
-          }
-          // Active download wants a live bar; a steady "missing" only needs
-          // to notice a download started elsewhere eventually.
-          timer = setTimeout(probe, s.phase === "downloading" ? 3000 : 10000);
-        })
-        .catch(() => {});
-    };
-    probe();
-    onCleanup(() => {
-      cancelled = true;
-      if (timer != null) { clearTimeout(timer); }
-    });
   });
 
   // Metadata (screenshots + manual) belongs to the SELECTED variant, not to
@@ -989,7 +723,7 @@ export function GameDetailPanel(props: Props) {
     if (launchingId() != null) { return; }
     try {
       const info = await win9xMultiplayerInfo(gameId);
-      setMpInfo(info);
+      win9x.setMp(info);
       if (info.prompt) {
         setNetPromptFor(gameId);
         return;

@@ -32,13 +32,6 @@ export function posterDirForCollection(collectionId: string | null | undefined):
   return dirForCollection(posterDirs(), collectionId);
 }
 
-// ── Backward compat alias (used by existing callers during migration) ────────
-
-/** @deprecated Use previewDirForCollection or bestThumbnailPath instead. */
-export function thumbnailDirForCollection(collectionId: string | null | undefined): string | null {
-  return posterDirForCollection(collectionId) ?? previewDirForCollection(collectionId);
-}
-
 // ── Best-available-tier resolution ───────────────────────────────────────────
 
 /**

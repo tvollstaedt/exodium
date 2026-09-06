@@ -1,35 +1,14 @@
-//! eXoWin9x support-file pipeline.
-//!
-//! Win9x games boot Windows 95/98 from VHD images: the shared parent OS
-//! images and the emulators that read them (eXo's DOSBox-X "x98" build,
-//! 86Box + ROMs) ship in the torrent's `eXo/util/utilWin9x.zip` (2.5 GB),
-//! nested inside its `EXTWin9x.zip` (2.47 GB) - the same matryoshka shape as
-//! eXoDOS's util.zip. The payload is required on EVERY platform (the parent
-//! VHDs are data, not binaries), so unlike the ECE build this is not
-//! Windows-gated. `emulators/PCBox/` (Windows-only fork, unsupported) and
-//! `emulators/audio/` (foobar2000) are never extracted.
+//! eXoWin9x: launch pipeline for games that boot Windows 95/98 from VHDs.
+//! The support payload (parent OS images + emulators) is `WIN9X_SUPPORT`
+//! in `support_files.rs`.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use tauri::{AppHandle, Manager, State};
 
 use super::TorrentState;
 use crate::models::Game;
-
-static WIN9X_EXTRACTION_RUNNING: AtomicBool = AtomicBool::new(false);
-
-/// Latched when the watcher gives up (3 failed attempts, e.g. disk full):
-/// lets `get_win9x_support_status` answer "failed" instead of leaving the
-/// panel on an eternal "Setting up…". Cleared when a watcher is (re-)armed.
-static WIN9X_EXTRACTION_FAILED: AtomicBool = AtomicBool::new(false);
-
-/// The subtrees extracted from EXTWin9x.zip into `<torrent_root>/eXo/`.
-/// `emulators/dosbox/` holds the x98 tree (parent VHDs, differencing
-/// children, base conf) plus options9x.conf/config9x.bat at its root;
-/// `emulators/86Box98/` holds 86Box, its ROMs and its parents.
-const EXTRACT_PREFIXES: [&str; 2] = ["emulators/dosbox/", "emulators/86box98/"];
 
 /// Support files a game of the given dosbox_variant needs before launch.
 /// x98 (DOSBox-X) games read the x98 tree; every 86Box flavor reads 86Box98.
@@ -43,91 +22,12 @@ pub(crate) fn win9x_support_ready(torrent_root: &Path, variant: Option<&str>) ->
     }
 }
 
-/// Extract the Win9x support payload from utilWin9x.zip (blocking).
-fn extract_win9x_support(util_zip: &Path, torrent_root: &Path) -> Result<usize, String> {
-    if WIN9X_EXTRACTION_RUNNING.swap(true, Ordering::SeqCst) {
-        return Err("extraction already running".to_string());
-    }
-    let result = do_extract_win9x_support(util_zip, torrent_root);
-    WIN9X_EXTRACTION_RUNNING.store(false, Ordering::SeqCst);
-    result
-}
-
-fn do_extract_win9x_support(util_zip: &Path, torrent_root: &Path) -> Result<usize, String> {
-    // Unique temp names so a leftover from a killed run can't collide.
-    let pid = std::process::id();
-    let tmp_path = util_zip.with_extension(format!("extwin9x_tmp_{pid}"));
-    let staging_root = torrent_root.join("eXo").join(format!(".win9x_staging_{pid}"));
-
-    let result = (|| {
-        let file = std::fs::File::open(util_zip).map_err(|e| e.to_string())?;
-        let mut outer = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
-        {
-            let mut inner_entry = outer
-                .by_name("EXTWin9x.zip")
-                .map_err(|e| format!("EXTWin9x.zip not found inside utilWin9x.zip: {}", e))?;
-            let mut tmp = std::fs::File::create(&tmp_path).map_err(|e| e.to_string())?;
-            std::io::copy(&mut inner_entry, &mut tmp).map_err(|e| e.to_string())?;
-        }
-
-        let tmp = std::fs::File::open(&tmp_path).map_err(|e| e.to_string())?;
-        let mut inner = zip::ZipArchive::new(tmp).map_err(|e| e.to_string())?;
-        let mut extracted = 0usize;
-        for i in 0..inner.len() {
-            let mut entry = inner.by_index(i).map_err(|e| e.to_string())?;
-            let name = entry.name().replace('\\', "/");
-            let lower = name.to_ascii_lowercase();
-            if !EXTRACT_PREFIXES.iter().any(|p| lower.starts_with(p))
-                || name.contains("..")
-                || entry.is_dir()
-            {
-                continue;
-            }
-            let out_path = staging_root.join(&name);
-            if let Some(parent) = out_path.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-            }
-            let mut out = std::fs::File::create(&out_path).map_err(|e| e.to_string())?;
-            std::io::copy(&mut entry, &mut out).map_err(|e| e.to_string())?;
-            extracted += 1;
-        }
-        if extracted == 0 {
-            return Err("no emulator entries found in EXTWin9x.zip".to_string());
-        }
-
-        // Move each fully-staged subtree into place with atomic renames -
-        // the readiness gates test directory EXISTENCE, so a half-written
-        // parent-VHD tree from a mid-extraction kill must never land.
-        let dest_root = torrent_root.join("eXo");
-        let staged_emulators = staging_root.join("emulators");
-        let entries = std::fs::read_dir(&staged_emulators).map_err(|e| e.to_string())?;
-        for entry in entries.filter_map(|e| e.ok()) {
-            let rel = PathBuf::from("emulators").join(entry.file_name());
-            let dst = dest_root.join(&rel);
-            if let Some(parent) = dst.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-            }
-            if dst.exists() {
-                std::fs::remove_dir_all(&dst).map_err(|e| e.to_string())?;
-            }
-            std::fs::rename(entry.path(), &dst)
-                .map_err(|e| format!("moving {} into place: {}", rel.display(), e))?;
-        }
-        add_parent_case_aliases(&dest_root);
-        Ok(extracted)
-    })();
-
-    let _ = std::fs::remove_file(&tmp_path);
-    let _ = std::fs::remove_dir_all(&staging_root);
-    result
-}
-
 /// The pack's play.confs reference the x98 parent VHDs in inconsistent case
 /// (`win98jap` / `Win98Jap`, `Win95dx8` / `win95Dx8` / `Win95DX8`), which is
 /// invisible on Windows/macOS but breaks ~24 games on Linux's case-sensitive
 /// filesystems. Symlink every observed conf spelling to the real file. No-op
 /// for aliases that already exist and on non-Unix platforms.
-fn add_parent_case_aliases(dest_root: &Path) {
+pub(crate) fn add_parent_case_aliases(dest_root: &Path) {
     #[cfg(unix)]
     {
         let parent_dir = dest_root.join("emulators/dosbox/x98/parent");
@@ -153,133 +53,18 @@ fn add_parent_case_aliases(dest_root: &Path) {
     }
 }
 
-/// Watch utilWin9x.zip until it finishes downloading, then extract the
-/// support payload. Own task for the same reason as the MT-32 watcher: the
-/// frontend only polls while a game download is active, and the 2.5 GB util
-/// zip routinely finishes long after the game that triggered it.
-pub(crate) fn spawn_win9x_support_watcher(
-    mgr: std::sync::Arc<crate::torrent::manager::DownloadManager>,
-    util_index: usize,
-) {
-    tauri::async_runtime::spawn(async move {
-        WIN9X_EXTRACTION_FAILED.store(false, Ordering::SeqCst);
-        let torrent_root = mgr.torrent_root();
-        let expected_size = mgr.index().files.get(util_index).map(|f| f.size).unwrap_or(0);
-        let mut failures = 0u32;
-        // Generous ceiling: 6 h at 10 s per check for slow swarms.
-        for _ in 0..2160 {
-            if win9x_support_ready(&torrent_root, None)
-                && win9x_support_ready(&torrent_root, Some("86box"))
-            {
-                return; // someone else finished the job
-            }
-            let Some(zip_path) = mgr.file_output_path(util_index) else {
-                return;
-            };
-            // Stats-based completion PLUS a disk-size fallback (librqbit's
-            // per-file stat can stall short of total; after a restart the
-            // handle may be gone entirely) - see the MT-32 watcher.
-            let stats_complete = mgr.is_file_complete(util_index).await;
-            let disk_complete = expected_size > 0
-                && std::fs::metadata(&zip_path).is_ok_and(|m| m.len() >= expected_size);
-            if stats_complete || disk_complete {
-                let root = torrent_root.clone();
-                let zp = zip_path.clone();
-                let outcome = tauri::async_runtime::spawn_blocking(move || {
-                    extract_win9x_support(&zp, &root)
-                })
-                .await;
-                match outcome {
-                    Ok(Ok(n)) => {
-                        log::info!("Extracted {} Win9x support files from utilWin9x.zip", n);
-                        return;
-                    }
-                    Ok(Err(e)) if e == "extraction already running" => return,
-                    Ok(Err(e)) => {
-                        failures += 1;
-                        log::error!(
-                            "Failed to extract Win9x support files (attempt {}): {}",
-                            failures, e
-                        );
-                        if failures >= 3 {
-                            WIN9X_EXTRACTION_FAILED.store(true, Ordering::SeqCst);
-                            return;
-                        }
-                    }
-                    Err(e) => {
-                        log::error!("Win9x extraction task panicked: {}", e);
-                        WIN9X_EXTRACTION_FAILED.store(true, Ordering::SeqCst);
-                        return;
-                    }
-                }
-            }
-            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-        }
-    });
-}
-
-/// Queue utilWin9x.zip on the collection's manager (if not already selected)
-/// and (re)arm the extraction watcher. Called from download_game when a
-/// Win9x game is requested and the support tree is not on disk yet.
-pub(crate) async fn ensure_win9x_support_queued(
-    mgr: &std::sync::Arc<crate::torrent::manager::DownloadManager>,
-) {
-    let Some(util) = mgr.index().find_by_suffix("util/utilWin9x.zip") else {
-        log::warn!("utilWin9x.zip not found in the eXoWin9x torrent index");
-        return;
-    };
-    let util_index = util.index;
-    if !mgr.is_file_selected(util_index).await {
-        let _ = mgr.download_files(vec![util_index]).await;
-        log::info!(
-            "Also downloading utilWin9x.zip ({:.1} GB, one-time: Windows 9x OS images + emulators)",
-            util.size as f64 / 1e9
-        );
-    }
-    spawn_win9x_support_watcher(std::sync::Arc::clone(mgr), util_index);
-}
-
-/// Re-arm the extraction watcher after an app restart, so a utilWin9x.zip
-/// that finishes downloading in a later session still gets extracted.
-/// Called from init_download_manager once the eXoWin9x manager is hydrated.
-pub(crate) async fn rearm_win9x_support(
-    mgr: &std::sync::Arc<crate::torrent::manager::DownloadManager>,
-) {
-    let root = mgr.torrent_root();
-    if win9x_support_ready(&root, None) && win9x_support_ready(&root, Some("86box")) {
-        return;
-    }
-    let Some(util) = mgr.index().find_by_suffix("util/utilWin9x.zip") else {
-        return;
-    };
-    let util_index = util.index;
-    let selected = mgr.is_file_selected(util_index).await;
-    let on_disk = mgr
-        .file_output_path(util_index)
-        .and_then(|p| std::fs::metadata(p).ok())
-        .is_some_and(|m| m.len() > 0);
-    if !selected && !on_disk {
-        return; // support files were never requested - nothing to resume
-    }
-    log::info!(
-        "Re-arming Win9x support extraction watcher (utilWin9x.zip {})",
-        if selected { "still selected" } else { "present on disk" }
-    );
-    spawn_win9x_support_watcher(std::sync::Arc::clone(mgr), util_index);
-}
-
 // ── Launch ───────────────────────────────────────────────────────────────────
 
 /// How a resolved engine is invoked: a binary on disk, or DOSBox-X's Flatpak
 /// on Linux (no official Linux binaries exist for DOSBox-X).
-enum EngineCmd {
+pub(crate) enum EngineCmd {
     Direct(PathBuf),
     Flatpak(&'static str),
 }
 
 impl EngineCmd {
     /// Build a Command; `grant` is a directory the Flatpak sandbox must see.
-    fn command(&self, grant: &Path) -> (Command, PathBuf) {
+    pub(crate) fn command(&self, grant: &Path) -> (Command, PathBuf) {
         match self {
             EngineCmd::Direct(bin) => (Command::new(bin), bin.clone()),
             EngineCmd::Flatpak(id) => {
@@ -297,7 +82,7 @@ impl EngineCmd {
 /// is a GUI-subsystem exe on Windows, so without CREATE_NO_WINDOW every such
 /// child gets its own console - the panel's engine probe flashed two CMD
 /// windows per open.
-fn hidden_command(program: &str) -> Command {
+pub(crate) fn hidden_command(program: &str) -> Command {
     #[allow(unused_mut)]
     let mut cmd = Command::new(program);
     #[cfg(windows)]
@@ -309,7 +94,7 @@ fn hidden_command(program: &str) -> Command {
     cmd
 }
 
-fn binary_exists_on_path(name: &str) -> bool {
+pub(crate) fn binary_exists_on_path(name: &str) -> bool {
     let checker = if cfg!(windows) { "where" } else { "which" };
     hidden_command(checker)
         .arg(name)
@@ -343,7 +128,7 @@ fn resource_candidate(app: &AppHandle, sub: &str) -> Option<PathBuf> {
 /// kept game data wipes the config table (and with it the content_packs
 /// ledger) while `content/` survives - launching must keep working before
 /// the next `list_content_packs` re-adopts the pack.
-fn pack_candidate(data_dir: &str, sub: &str) -> Option<PathBuf> {
+pub(crate) fn pack_candidate(data_dir: &str, sub: &str) -> Option<PathBuf> {
     if data_dir.is_empty() {
         return None;
     }
@@ -858,7 +643,7 @@ pub async fn win9x_multiplayer_info(
         prompt: false,
     };
     let (game, data_dir, asked) = {
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let conn = db_state.lock()?;
         let game = crate::db::queries::fetch_game_by_id(&conn, id)
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("Game {id} not found"))?;
@@ -870,7 +655,9 @@ pub async fn win9x_multiplayer_info(
         (game, data_dir, asked)
     };
     let source = game.torrent_source.as_deref().unwrap_or("eXoDOS");
-    if !crate::commands::setup::collection_def(source).is_some_and(|c| c.year_subdirs) {
+    if !crate::commands::setup::collection_def(source)
+        .is_some_and(|c| c.launcher == crate::commands::setup::Launcher::Win9x)
+    {
         return Ok(not_multiplayer);
     }
     let Some(app_path) = game.application_path.as_deref() else {
@@ -924,7 +711,7 @@ pub async fn win9x_multiplayer_info(
 pub async fn dismiss_win9x_network_prompt(
     db_state: State<'_, super::DbState>,
 ) -> Result<(), String> {
-    let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+    let conn = db_state.lock()?;
     crate::db::queries::set_config(&conn, "win9x_network_prompt", "off").map_err(|e| e.to_string())
 }
 
@@ -1274,64 +1061,8 @@ pub(crate) async fn launch_win9x_game(
         ));
     }
 
-    // Auto-extract the game ZIP on first launch (imported installs may still
-    // be zipped - mirrors the Staging path's behavior).
-    let shortcode = game.shortcode.as_deref().unwrap_or("");
-    if !shortcode.is_empty() {
-        let game_dir = torrent_root.join(super::games::collection_rel_game_dir(
-            source,
-            shortcode,
-            Some(app_path),
-        ));
-        if !game_dir.exists() {
-            let game_name = Some(app_path)
-                .and_then(crate::commands::setup::game_name_from_app_path)
-                .unwrap_or_else(|| game.title.clone());
-            let zip = torrent_root.join(super::games::collection_rel_zip(
-                source,
-                &game_name,
-                Some(app_path),
-            ));
-            if zip.exists() {
-                log::info!("Auto-extracting {} before launch", zip.display());
-                let dest = zip.parent().map(PathBuf::from).unwrap_or_else(|| torrent_root.clone());
-                let extract = tauri::async_runtime::spawn_blocking(move || {
-                    super::games::extract_game_zip(&zip, &dest)
-                })
-                .await
-                .map_err(|e| format!("extraction task failed: {e}"))?;
-                if let Err(e) = extract {
-                    // `zip.exists()` is true for almost the whole collection:
-                    // librqbit allocates a 0-byte placeholder per torrent file,
-                    // and a neighbouring download leaves piece-sized fragments
-                    // (measured on this pack: 620 placeholders + 29 fragments
-                    // of 664). So the "files not found" arm below is nearly
-                    // unreachable and an undownloaded game arrives HERE, as a
-                    // zip that won't open. Say so, and clear `installed` so the
-                    // next click offers a download instead of repeating this.
-                    let msg = e.to_string();
-                    if msg.contains("EOCD")
-                        || msg.contains("invalid Zip")
-                        || msg.contains("Invalid archive")
-                    {
-                        if let Ok(conn) = app.state::<super::DbState>().0.lock() {
-                            let _ = crate::db::queries::set_game_installed(&conn, id, false);
-                        }
-                        return Err(format!(
-                            "Game ZIP for '{}' is incomplete or corrupted (torrent placeholder). \
-                             Please re-download the game.",
-                            game.title
-                        ));
-                    }
-                    return Err(format!("Failed to extract game before launch: {msg}"));
-                }
-            } else {
-                return Err(format!(
-                    "Game files not found for '{}'. The game may need to be re-downloaded.",
-                    game.title
-                ));
-            }
-        }
+    if game.shortcode.as_deref().is_some_and(|s| !s.is_empty()) {
+        super::games::extract_before_launch(app, &game, id, source, &torrent_root).await?;
     }
 
     // Working dir is <torrent_root>/eXo - every relative path in the confs
@@ -1647,7 +1378,7 @@ pub async fn win9x_engine_available(
         return Ok(false);
     }
     let data_dir = {
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let conn = db_state.lock()?;
         crate::db::queries::get_config(&conn, "data_dir")
             .map_err(|e| e.to_string())?
             .unwrap_or_default()
@@ -1686,7 +1417,7 @@ pub async fn get_win9x_support_status(
     let Some(util) = mgr.index().find_by_suffix("util/utilWin9x.zip") else {
         return Ok(Win9xSupportStatus { phase: "missing".into(), progress: 0.0, total_bytes: 0 });
     };
-    if WIN9X_EXTRACTION_FAILED.load(Ordering::SeqCst) {
+    if crate::support_files::WIN9X_SUPPORT.failed() {
         return Ok(Win9xSupportStatus {
             phase: "failed".into(),
             progress: 1.0,

@@ -2,13 +2,15 @@ mod commands;
 pub mod db;
 pub mod import;
 pub mod models;
+mod support_files;
 pub mod torrent;
 pub mod vhd;
 
 // Re-export utilities used by the generate_db binary and integration tests
 pub use commands::game_name_from_app_path;
 pub use commands::torrent_search_names;
-pub use commands::{collection_base_id, collection_data_dir, CollectionDef, COLLECTION_MAP};
+pub use commands::setup::game_root;
+pub use commands::{collection_base_id, CollectionDef, COLLECTION_MAP};
 
 use std::path::Path;
 use std::sync::Mutex;
@@ -26,7 +28,7 @@ use commands::{
     get_section_keys, set_game_settings,
     create_playlist, delete_playlist, get_game_playlists, get_playlists, rename_playlist,
     set_playlist_membership,
-    get_setup_status, get_thumbnail_dir, get_torrent_info, init_download_manager,
+    get_setup_status, get_torrent_info, init_download_manager,
     game_printing_unavailable, game_engine_info, init_log_dir, init_resource_dir, install_content_pack, launch_game,
     list_content_packs,
     get_transfer_stats, open_log_folder, open_manual, scan_installed_games, set_config, set_rate_limits,
@@ -810,7 +812,6 @@ pub fn run() {
             setup_import,
             setup_from_local,
             get_default_data_dir,
-            get_thumbnail_dir,
             get_available_collections,
             init_download_manager,
             commands::media::start_game_video,
@@ -839,6 +840,7 @@ pub fn run() {
             commands::setup::skip_layout_migration,
             commands::win9x::get_win9x_support_status,
             commands::win9x::win9x_engine_available,
+            commands::scummvm::scummvm_engine_info,
             commands::win9x::win9x_network_status,
             commands::win9x::enable_win9x_network,
             commands::win9x::disable_win9x_network,

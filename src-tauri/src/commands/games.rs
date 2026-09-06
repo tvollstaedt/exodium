@@ -3,6 +3,7 @@ use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 
 use tauri::AppHandle;
+use tauri::Manager;
 
 /// Per-game (last_retry_at, attempts) for stuck-download recovery in
 /// `get_download_progress`. Module-scoped so the success branch can clear
@@ -26,12 +27,6 @@ use crate::models::Game;
 use crate::torrent::manager::DownloadProgress;
 
 use super::TorrentState;
-
-/// Resolve the data directory for a collection.
-/// All collections share the same data directory (overlay model - no collection subdirectories).
-pub fn collection_data_dir(data_dir: &str, _source: &str) -> PathBuf {
-    std::path::Path::new(data_dir).to_path_buf()
-}
 
 /// Get the game directory prefix for a collection (path from inner_folder to game dirs).
 fn collection_game_prefix(source: &str) -> &'static str {
@@ -88,10 +83,21 @@ pub(crate) fn collection_rel_zip(source: &str, game_name: &str, app_path: Option
     }
 }
 
-/// Language subdirectories used in the eXoDOS file structure.
-const LANG_DIRS: &[&str] = &["!german", "!polish", "!czech", "!slovak", "!spanish"];
-
 pub struct DbState(pub Mutex<Connection>);
+
+impl DbState {
+    /// The connection guard; a poisoned mutex surfaces as a command error.
+    pub fn lock(&self) -> Result<std::sync::MutexGuard<'_, Connection>, String> {
+        self.0.lock().map_err(|e| e.to_string())
+    }
+}
+
+/// The configured data dir; setup has not run when it is missing.
+pub(crate) fn configured_data_dir(conn: &Connection) -> Result<String, String> {
+    queries::get_config(conn, "data_dir")
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Data directory not configured. Run setup first.".to_string())
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct GameList {
@@ -113,7 +119,7 @@ pub async fn get_games(
     playlist_id: Option<i64>,
     with_music: Option<bool>,
 ) -> Result<GameList, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock()?;
     let page = page.unwrap_or(1);
     let per_page = per_page.unwrap_or(50).min(10000);
     let query = query.unwrap_or_default();
@@ -139,7 +145,7 @@ pub async fn get_games(
 
 #[tauri::command]
 pub async fn get_genres(state: State<'_, DbState>, collection: Option<String>) -> Result<Vec<String>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock()?;
     let collection = collection.unwrap_or_default();
     queries::get_genres(&conn, &collection).map_err(|e| e.to_string())
 }
@@ -156,7 +162,7 @@ pub async fn get_section_keys(
     playlist_id: Option<i64>,
     with_music: Option<bool>,
 ) -> Result<Vec<String>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock()?;
     let sort_by = sort_by.unwrap_or_default();
     let query = query.unwrap_or_default();
     let genre = genre.unwrap_or_default();
@@ -181,32 +187,32 @@ pub async fn get_game_variants(
     shortcode: String,
     collection: String,
 ) -> Result<Vec<Game>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock()?;
     queries::fetch_game_variants(&conn, &shortcode, &collection).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn get_installed_games(state: State<'_, DbState>) -> Result<Vec<Game>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock()?;
     queries::fetch_installed_games(&conn).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn toggle_favorite(state: State<'_, DbState>, id: i64) -> Result<bool, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock()?;
     queries::toggle_favorite(&conn, id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn get_game(state: State<'_, DbState>, id: i64) -> Result<Option<Game>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock()?;
     queries::fetch_game_by_id(&conn, id).map_err(|e| e.to_string())
 }
 
 
 #[tauri::command]
 pub async fn get_config(state: State<'_, DbState>, key: String) -> Result<Option<String>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock()?;
     queries::get_config(&conn, &key).map_err(|e| e.to_string())
 }
 
@@ -218,7 +224,7 @@ pub async fn set_config(
     value: String,
 ) -> Result<(), String> {
     {
-        let conn = state.0.lock().map_err(|e| e.to_string())?;
+        let conn = state.lock()?;
         queries::set_config(&conn, &key, &value).map_err(|e| e.to_string())?;
     }
     // The static asset-protocol scope only covers $RESOURCE/$APPDATA; the
@@ -242,10 +248,8 @@ pub async fn open_manual(
     path: String,
 ) -> Result<(), String> {
     let data_dir = {
-        let conn = state.0.lock().map_err(|e| e.to_string())?;
-        queries::get_config(&conn, "data_dir")
-            .map_err(|e| e.to_string())?
-            .ok_or("Data directory not configured")?
+        let conn = state.lock()?;
+        configured_data_dir(&conn)?
     };
     let canonical = std::fs::canonicalize(&path)
         .map_err(|e| format!("Cannot open '{}': {}", path, e))?;
@@ -280,7 +284,7 @@ pub async fn set_seeding_enabled(
     enabled: bool,
 ) -> Result<(), String> {
     {
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let conn = db_state.lock()?;
         queries::set_config(&conn, "seeding_enabled", if enabled { "1" } else { "0" })
             .map_err(|e| e.to_string())?;
     }
@@ -298,7 +302,7 @@ pub async fn set_rate_limits(
     down_kbps: Option<u32>,
 ) -> Result<(), String> {
     {
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let conn = db_state.lock()?;
         // Store "" for unlimited rather than deleting the row: the reader
         // treats unparseable and absent alike, and a present key documents
         // that the user has been here.
@@ -381,7 +385,7 @@ pub async fn download_game(
     id: i64,
 ) -> Result<String, String> {
     let game = {
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let conn = db_state.lock()?;
         queries::fetch_game_by_id(&conn, id)
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("Game {} not found", id))?
@@ -421,7 +425,7 @@ pub async fn download_game(
     };
 
     let is_win9x_collection = crate::commands::setup::collection_def(source)
-        .is_some_and(|c| c.year_subdirs);
+        .is_some_and(|c| c.launcher == crate::commands::setup::Launcher::Win9x);
 
     // Win9x games need the shared support payload (parent OS VHDs +
     // emulators) from utilWin9x.zip before they can launch; queued further
@@ -434,7 +438,7 @@ pub async fn download_game(
         );
 
     let data_dir = {
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let conn = db_state.lock()?;
         queries::get_config(&conn, "data_dir").ok().flatten()
     };
 
@@ -509,7 +513,7 @@ pub async fn download_game(
     // Queue the Win9x support payload with the first Win9x game download and
     // arm the extraction watcher (budgeted in the preflight above).
     if win9x_support_missing {
-        crate::commands::win9x::ensure_win9x_support_queued(&manager).await;
+        crate::support_files::ensure_queued(&crate::support_files::WIN9X_SUPPORT, &manager).await;
     }
 
     // Queue the emulator pack alongside (see win9x_emulator_pack above).
@@ -557,21 +561,7 @@ pub async fn download_game(
                 .join("eXo/emulators/dosbox/ece4230")
                 .exists();
         if needs_midi_assets || needs_ece {
-            if let Some(util) = main_mgr.index().find_by_suffix("util/util.zip") {
-                let util_index = util.index;
-                let util_size = util.size;
-                if !main_mgr.is_file_selected(util_index).await {
-                    let _ = main_mgr.download_files(vec![util_index]).await;
-                    log::info!(
-                        "Also downloading util.zip ({:.0} MB, one-time: MT-32 ROMs + SoundCanvas soundfont for MIDI music)",
-                        util_size as f64 / 1e6
-                    );
-                }
-                // Always (re)arm the watcher - it also covers the case where
-                // util.zip finished in a previous run but extraction never
-                // happened (nobody was polling when it completed).
-                spawn_mt32_extraction_watcher(std::sync::Arc::clone(main_mgr), util_index);
-            }
+            crate::support_files::ensure_queued(&crate::support_files::DOS_SUPPORT, main_mgr).await;
         }
     }
 
@@ -583,7 +573,7 @@ pub async fn download_game(
     // Mark as in library only after the download is actually queued - doing
     // it earlier left a phantom "My Games" card when queueing failed.
     {
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let conn = db_state.lock()?;
         queries::set_in_library(&conn, id).map_err(|e| e.to_string())?;
     }
 
@@ -598,7 +588,7 @@ pub async fn get_download_progress(
     id: i64,
 ) -> Result<Option<DownloadProgress>, String> {
     let (game_idx, gamedata_idx, title, already_installed, source) = {
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let conn = db_state.lock()?;
         let game = queries::fetch_game_by_id(&conn, id)
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("Game {} not found", id))?;
@@ -757,7 +747,7 @@ pub async fn get_download_progress(
                         let extract_dir = zip_path.parent().unwrap().to_path_buf();
                         let game_id = id;
                         let db_path = {
-                            let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+                            let conn = db_state.lock()?;
                             conn.path().map(PathBuf::from)
                                 .ok_or_else(|| "Cannot determine database path".to_string())?
                         };
@@ -795,11 +785,9 @@ pub async fn get_download_progress(
                                 },
                                 Ok(Err(e)) => {
                                     log::error!("Failed to extract {}: {}", title, e);
-                                    // Corrupt/stub ZIP (same detection as the launch
-                                    // path): delete it and clear in_library so the
-                                    // 1 Hz poll stops re-extracting the same broken
-                                    // bytes forever and the user can re-download.
-                                    if e.contains("EOCD") || e.contains("invalid Zip") || e.contains("Invalid archive") {
+                                    // Placeholder/fragment: drop it and clear in_library
+                                    // so the 1 Hz poll stops re-extracting it forever.
+                                    if e.is_not_an_archive() {
                                         log::warn!(
                                             "ZIP for {} is corrupt/incomplete - removing it so a re-download starts clean",
                                             title
@@ -903,7 +891,7 @@ pub async fn cancel_download(
     id: i64,
 ) -> Result<(), String> {
     let (game_idx, gamedata_idx, source) = {
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let conn = db_state.lock()?;
         let game = queries::fetch_game_by_id(&conn, id)
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("Game {} not found", id))?;
@@ -971,7 +959,7 @@ pub async fn cancel_download(
 
     // Clear DB flag after torrent deselection.
     {
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let conn = db_state.lock()?;
         queries::clear_in_library(&conn, id).map_err(|e| e.to_string())?;
     }
 
@@ -986,13 +974,11 @@ pub async fn uninstall_game(
     id: i64,
 ) -> Result<String, String> {
     let (game, data_dir) = {
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let conn = db_state.lock()?;
         let game = queries::fetch_game_by_id(&conn, id)
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("Game {} not found", id))?;
-        let data_dir = queries::get_config(&conn, "data_dir")
-            .map_err(|e| e.to_string())?
-            .ok_or("Data directory not configured")?;
+        let data_dir = configured_data_dir(&conn)?;
         (game, data_dir)
     };
 
@@ -1052,7 +1038,7 @@ pub async fn uninstall_game(
     let rel_zip = collection_rel_zip(source, &game_name, game.application_path.as_deref());
 
     let db_path = {
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let conn = db_state.lock()?;
         conn.path().map(PathBuf::from)
             .ok_or_else(|| "Cannot determine database path".to_string())?
     };
@@ -1134,7 +1120,7 @@ pub async fn uninstall_game(
     // wants it (mirrors cancel_download).
     let gamedata_drop: Option<usize> = match game.gamedata_torrent_index {
         Some(gd) => {
-            let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+            let conn = db_state.lock()?;
             let still_needed: i64 = conn
                 .query_row(
                     "SELECT COUNT(*) FROM games \
@@ -1215,13 +1201,11 @@ pub async fn uninstall_game(
 #[tauri::command]
 pub async fn reset_game_data(db_state: State<'_, DbState>, id: i64) -> Result<String, String> {
     let (game, data_dir) = {
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let conn = db_state.lock()?;
         let game = queries::fetch_game_by_id(&conn, id)
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("Game {} not found", id))?;
-        let data_dir = queries::get_config(&conn, "data_dir")
-            .map_err(|e| e.to_string())?
-            .ok_or("Data directory not configured")?;
+        let data_dir = configured_data_dir(&conn)?;
         (game, data_dir)
     };
 
@@ -1293,13 +1277,13 @@ pub async fn reset_game_data(db_state: State<'_, DbState>, id: i64) -> Result<St
         }
 
         let dest = game_dir.parent().map(PathBuf::from).unwrap_or_else(|| torrent_root.clone());
-        extract_game_zip(&zip, &dest)
+        extract_game_zip(&zip, &dest).map_err(String::from)
     })
     .await
     .map_err(|e| format!("reset task failed: {e}"))??;
 
     {
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let conn = db_state.lock()?;
         let _ = queries::set_game_installed(&conn, id, true);
     }
 
@@ -1412,63 +1396,31 @@ fn conf_requests_printer(text: &str) -> bool {
         })
 }
 
-/// Locate a game's dosbox.conf on disk - the canonical resolution, shared by
-/// `launch_game` and `game_printing_unavailable` so they cannot drift. Probes,
-/// in order: the game's own collection root, the main eXoDOS root (LP rows
-/// inherit the EN conf), and the lang-scoped alternate locations. Returns the
-/// conf path plus the torrent root it was found under (`launch_game` derives
-/// the working dir from that root).
-fn resolve_game_conf(
-    data_dir: &str,
-    source: &str,
-    dosbox_conf: &str,
-) -> Option<(PathBuf, PathBuf)> {
-    // Normalize Windows backslashes - DB paths mix separators.
+/// Locate a game's dosbox.conf under the game root: the catalogue path
+/// first, then the lang-scoped variants (LP rows inherit the EN path).
+/// Shared by `launch_game` and `game_printing_unavailable`; the returned
+/// root is `launch_game`'s working-dir base.
+fn resolve_game_conf(data_dir: &str, dosbox_conf: &str) -> Option<(PathBuf, PathBuf)> {
     let rel = dosbox_conf.replace('\\', "/");
-    let main_root =
-        crate::commands::setup::game_root(data_dir);
-    let torrent_root = main_root.clone();
+    let root = crate::commands::setup::game_root(data_dir);
 
-    let direct = torrent_root.join(&rel);
+    let direct = root.join(&rel);
     if direct.exists() {
-        return Some((direct, torrent_root));
+        return Some((direct, root));
     }
 
-    // For LP games, the dosbox_conf was inherited from the EN game. The config
-    // lives in the main eXoDOS data dir, but game files are in the LP dir - the
-    // returned root stays the LP one so mounts resolve there.
-    if source != "eXoDOS" {
-        let main_conf = main_root.join(&rel);
-        if main_conf.exists() {
-            return Some((main_conf, torrent_root));
-        }
-    }
-
-    // The config might be under a language-specific subdirectory.
-    let main_game_prefix = collection_game_prefix("eXoDOS");
-    let main_segment = crate::commands::setup::collection_def("eXoDOS")
+    let prefix = collection_game_prefix("eXoDOS");
+    let segment = crate::commands::setup::collection_def("eXoDOS")
         .map(|c| c.shortcode_segment)
         .unwrap_or("!dos");
-    if let Some(shortcode) = rel
+    let shortcode = rel
         .strip_suffix("/dosbox.conf")
         .and_then(|p| p.rsplit('/').next())
-        .filter(|s| !s.is_empty())
-    {
-        let roots = if source != "eXoDOS" {
-            vec![torrent_root, main_root]
-        } else {
-            vec![torrent_root]
-        };
-        for root in roots {
-            for lang_dir in LANG_DIRS {
-                let alt = root.join(format!(
-                    "{}/{}/{}/{}/dosbox.conf",
-                    main_game_prefix, main_segment, lang_dir, shortcode
-                ));
-                if alt.exists() {
-                    return Some((alt, root));
-                }
-            }
+        .filter(|s| !s.is_empty())?;
+    for lang_dir in crate::commands::setup::COLLECTION_MAP.iter().filter_map(|c| c.lang_dir) {
+        let alt = root.join(format!("{prefix}/{segment}/{lang_dir}/{shortcode}/dosbox.conf"));
+        if alt.exists() {
+            return Some((alt, root));
         }
     }
     None
@@ -1547,7 +1499,7 @@ pub async fn game_engine_info(
     id: i64,
 ) -> Result<GameEngineInfo, String> {
     let (dosbox_variant, data_dir, per_game_config) = {
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let conn = db_state.lock()?;
         let game = queries::fetch_game_by_id(&conn, id)
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("Game with id {} not found", id))?;
@@ -1579,20 +1531,19 @@ pub async fn game_printing_unavailable(
     db_state: State<'_, DbState>,
     id: i64,
 ) -> Result<bool, String> {
-    let (dosbox_conf, dosbox_variant, source, data_dir, per_game_config) = {
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+    let (dosbox_conf, dosbox_variant, data_dir, per_game_config) = {
+        let conn = db_state.lock()?;
         let game = queries::fetch_game_by_id(&conn, id)
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("Game with id {} not found", id))?;
         let data_dir = queries::get_config(&conn, "data_dir").map_err(|e| e.to_string())?;
         let cfg = queries::get_all_game_config(&conn, id).unwrap_or_default();
-        (game.dosbox_conf, game.dosbox_variant, game.torrent_source, data_dir, cfg)
+        (game.dosbox_conf, game.dosbox_variant, data_dir, cfg)
     };
     let (Some(conf), Some(data_dir)) = (dosbox_conf, data_dir) else {
         return Ok(false);
     };
-    let source = source.unwrap_or_else(|| "eXoDOS".to_string());
-    let Some((conf_path, _)) = resolve_game_conf(&data_dir, &source, &conf) else {
+    let Some((conf_path, _)) = resolve_game_conf(&data_dir, &conf) else {
         return Ok(false);
     };
     let Ok(text) = std::fs::read_to_string(conf_path) else {
@@ -1604,218 +1555,6 @@ pub async fn game_printing_unavailable(
     let main_root =
         crate::commands::setup::game_root(&data_dir);
     Ok(resolve_engine(dosbox_variant.as_deref(), &main_root, &per_game_config).is_none())
-}
-
-/// Serializes support-file extraction process-wide. A plain lock FILE was
-/// racy: the startup rearm and a download-click watcher could both pass the
-/// exists() check before either wrote it.
-static EXTRACTION_RUNNING: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
-
-/// Extract the mt32 subtree (MT-32/CM32L ROMs incl. rev0, SoundCanvas +
-/// AWE64 soundfonts, ~54 MB) from util.zip into `<torrent_root>/eXo/mt32/`.
-///
-/// util.zip is a matryoshka: the payload sits in a nested EXTDOS.zip whose
-/// top-level `mt32/` dir is what the game configs reference as `.\mt32\`.
-/// The inner zip (467 MB uncompressed) is staged to a temp file rather than
-/// RAM; the rest of it (Windows emulator builds) is never extracted.
-///
-/// Everything is written to a staging dir first and moved into place with
-/// atomic renames - the completion gates test directory EXISTENCE, so a
-/// half-written eXo/mt32 from a mid-extraction kill would otherwise read as
-/// "done" forever (silent no-music).
-fn extract_mt32_from_util_zip(
-    util_zip: &std::path::Path,
-    torrent_root: &std::path::Path,
-) -> Result<usize, String> {
-    if EXTRACTION_RUNNING.swap(true, std::sync::atomic::Ordering::SeqCst) {
-        return Err("extraction already running".to_string());
-    }
-    let result = do_extract_support_files(util_zip, torrent_root);
-    EXTRACTION_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
-    result
-}
-
-fn do_extract_support_files(
-    util_zip: &std::path::Path,
-    torrent_root: &std::path::Path,
-) -> Result<usize, String> {
-    // Unique temp names so a leftover from a killed run can't collide.
-    let pid = std::process::id();
-    let tmp_path = util_zip.with_extension(format!("extdos_tmp_{pid}"));
-    let staging_root = torrent_root.join("eXo").join(format!(".support_staging_{pid}"));
-
-    let result = (|| {
-        let file = std::fs::File::open(util_zip).map_err(|e| e.to_string())?;
-        let mut outer = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
-        {
-            let mut inner_entry = outer
-                .by_name("EXTDOS.zip")
-                .map_err(|e| format!("EXTDOS.zip not found inside util.zip: {}", e))?;
-            let mut tmp = std::fs::File::create(&tmp_path).map_err(|e| e.to_string())?;
-            std::io::copy(&mut inner_entry, &mut tmp).map_err(|e| e.to_string())?;
-        }
-
-        let tmp = std::fs::File::open(&tmp_path).map_err(|e| e.to_string())?;
-        let mut inner = zip::ZipArchive::new(tmp).map_err(|e| e.to_string())?;
-        // mt32/ everywhere; on Windows also eXo's DOSBox ECE builds so
-        // ECE-variant games run their intended emulator.
-        let mut prefixes: Vec<&str> = vec!["mt32/"];
-        if cfg!(windows) {
-            prefixes.push("emulators/dosbox/ece4230/");
-            prefixes.push("emulators/dosbox/ece4460/");
-        }
-        let mut extracted = 0usize;
-        for i in 0..inner.len() {
-            let mut entry = inner.by_index(i).map_err(|e| e.to_string())?;
-            let name = entry.name().replace('\\', "/");
-            let lower = name.to_ascii_lowercase();
-            if !prefixes.iter().any(|p| lower.starts_with(p))
-                || name.contains("..")
-                || entry.is_dir()
-            {
-                continue;
-            }
-            let out_path = staging_root.join(&name);
-            if let Some(parent) = out_path.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-            }
-            let mut out = std::fs::File::create(&out_path).map_err(|e| e.to_string())?;
-            std::io::copy(&mut entry, &mut out).map_err(|e| e.to_string())?;
-            extracted += 1;
-        }
-        if extracted == 0 {
-            return Err("no mt32/ entries found in EXTDOS.zip".to_string());
-        }
-
-        // Move each fully-staged subtree into place. rename is atomic on the
-        // same filesystem; a pre-existing (possibly partial, from an older
-        // build) destination is replaced.
-        let dest_root = torrent_root.join("eXo");
-        let mut targets = vec!["mt32".to_string()];
-        if cfg!(windows) {
-            for v in ["ece4230", "ece4460"] {
-                if staging_root.join("emulators/dosbox").join(v).exists() {
-                    targets.push(format!("emulators/dosbox/{v}"));
-                }
-            }
-        }
-        for rel in targets {
-            let src = staging_root.join(&rel);
-            if !src.exists() {
-                continue;
-            }
-            let dst = dest_root.join(&rel);
-            if let Some(parent) = dst.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-            }
-            if dst.exists() {
-                std::fs::remove_dir_all(&dst).map_err(|e| e.to_string())?;
-            }
-            std::fs::rename(&src, &dst)
-                .map_err(|e| format!("moving {} into place: {}", rel, e))?;
-        }
-        Ok(extracted)
-    })();
-
-    let _ = std::fs::remove_file(&tmp_path);
-    let _ = std::fs::remove_dir_all(&staging_root);
-    result
-}
-
-/// Re-arm the util.zip extraction watcher after an app restart. A watcher
-/// armed by a download click dies with the app; util.zip finishing in a
-/// later session would otherwise never extract (observed on Windows: 736 MB
-/// downloaded, ROMs never landed). Called from init_download_manager once
-/// the eXoDOS manager is hydrated.
-pub(crate) async fn rearm_support_extraction(
-    mgr: &std::sync::Arc<crate::torrent::manager::DownloadManager>,
-) {
-    let root = mgr.torrent_root();
-    let mt32_missing = !root.join("eXo/mt32").exists();
-    let ece_missing = cfg!(windows) && !root.join("eXo/emulators/dosbox/ece4230").exists();
-    if !mt32_missing && !ece_missing {
-        return;
-    }
-    let Some(util) = mgr.index().find_by_suffix("util/util.zip") else {
-        return;
-    };
-    let util_index = util.index;
-    let selected = mgr.is_file_selected(util_index).await;
-    let on_disk = mgr
-        .file_output_path(util_index)
-        .and_then(|p| std::fs::metadata(p).ok())
-        .is_some_and(|m| m.len() > 0);
-    if !selected && !on_disk {
-        return; // support files were never requested - nothing to resume
-    }
-    log::info!(
-        "Re-arming support-file extraction watcher (util.zip {})",
-        if selected { "still selected" } else { "present on disk" }
-    );
-    spawn_mt32_extraction_watcher(std::sync::Arc::clone(mgr), util_index);
-}
-
-/// Watch util.zip until it finishes downloading, then extract the mt32
-/// payload. Runs as its own task because the frontend only polls progress
-/// while a GAME download is active - util.zip (~630 MB) routinely finishes
-/// long after the 8 MB game that triggered it, with nobody left polling.
-fn spawn_mt32_extraction_watcher(mgr: std::sync::Arc<crate::torrent::manager::DownloadManager>, util_index: usize) {
-    tauri::async_runtime::spawn(async move {
-        let torrent_root = mgr.torrent_root();
-        let mt32_dir = torrent_root.join("eXo/mt32");
-        let ece_dir = torrent_root.join("eXo/emulators/dosbox/ece4230");
-        let expected_size = mgr.index().files.get(util_index).map(|f| f.size).unwrap_or(0);
-        let mut failures = 0u32;
-        // Generous ceiling: 6 h at 10 s per check for slow swarms.
-        for _ in 0..2160 {
-            if mt32_dir.exists() && (!cfg!(windows) || ece_dir.exists()) {
-                return; // someone else finished the job
-            }
-            let Some(zip_path) = mgr.file_output_path(util_index) else {
-                return;
-            };
-            // Stats-based completion PLUS a disk-size fallback: librqbit's
-            // per-file stat is known to stall short of total for files fully
-            // on disk (see the identical fallback in get_download_progress),
-            // and after a restart without session state the handle is None
-            // and stats-based completion would never fire at all.
-            let stats_complete = mgr.is_file_complete(util_index).await;
-            let disk_complete = expected_size > 0
-                && std::fs::metadata(&zip_path).is_ok_and(|m| m.len() >= expected_size);
-            if stats_complete || disk_complete {
-                let root = torrent_root.clone();
-                let zp = zip_path.clone();
-                let outcome = tauri::async_runtime::spawn_blocking(move || {
-                    extract_mt32_from_util_zip(&zp, &root)
-                })
-                .await;
-                match outcome {
-                    Ok(Ok(n)) => {
-                        log::info!("Extracted {} MT-32/soundfont files from util.zip", n);
-                        return;
-                    }
-                    Ok(Err(e)) if e == "extraction already running" => return,
-                    Ok(Err(e)) => {
-                        failures += 1;
-                        log::error!(
-                            "Failed to extract support files from util.zip (attempt {}): {}",
-                            failures, e
-                        );
-                        if failures >= 3 {
-                            return;
-                        }
-                    }
-                    Err(e) => {
-                        log::error!("Extraction task panicked: {}", e);
-                        return;
-                    }
-                }
-            }
-            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-        }
-        log::warn!("mt32 extraction watcher timed out waiting for util.zip");
-    });
 }
 
 /// Create a directory link (symlink on Unix, junction on Windows - junctions
@@ -2719,10 +2458,155 @@ fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> Result<()
     Ok(())
 }
 
-/// Extract a game ZIP in place, then restore saves from !save/ if available.
-pub(crate) fn extract_game_zip(zip_path: &std::path::Path, dest: &std::path::Path) -> Result<(), String> {
-    let file = std::fs::File::open(zip_path).map_err(|e| e.to_string())?;
-    let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+/// Why a zip did not unpack. `NotAnArchive` is what a librqbit placeholder
+/// or a piece fragment looks like (§16) - the one case callers act on.
+#[derive(Debug)]
+pub(crate) enum ExtractError {
+    NotAnArchive(String),
+    Other(String),
+}
+
+impl ExtractError {
+    pub(crate) fn is_not_an_archive(&self) -> bool {
+        matches!(self, Self::NotAnArchive(_))
+    }
+}
+
+impl From<zip::result::ZipError> for ExtractError {
+    fn from(e: zip::result::ZipError) -> Self {
+        use zip::result::ZipError::{InvalidArchive, UnsupportedArchive};
+        match e {
+            InvalidArchive(_) | UnsupportedArchive(_) => Self::NotAnArchive(e.to_string()),
+            _ => Self::Other(e.to_string()),
+        }
+    }
+}
+
+impl From<std::io::Error> for ExtractError {
+    fn from(e: std::io::Error) -> Self {
+        Self::Other(e.to_string())
+    }
+}
+
+impl std::fmt::Display for ExtractError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotAnArchive(m) | Self::Other(m) => f.write_str(m),
+        }
+    }
+}
+
+impl From<ExtractError> for String {
+    fn from(e: ExtractError) -> String {
+        e.to_string()
+    }
+}
+
+/// Why `extract_before_launch` delivered no game directory.
+#[derive(Debug)]
+pub(crate) enum LaunchError {
+    /// Torrent placeholder or fragment; `installed` has been cleared.
+    Placeholder { title: String },
+    NoShortcode { title: String },
+    FilesMissing { title: String },
+    /// Unpacked, but the folder is not where the catalogue expects it.
+    Misplaced { title: String, expected: PathBuf },
+    Extract(ExtractError),
+    Task(String),
+}
+
+impl From<LaunchError> for String {
+    fn from(e: LaunchError) -> String {
+        match e {
+            LaunchError::Placeholder { title } => format!(
+                "Game ZIP for '{title}' is incomplete or corrupted (torrent placeholder). \
+                 Please re-download the game."
+            ),
+            LaunchError::NoShortcode { title } => {
+                format!("'{title}' has no game directory in the catalogue")
+            }
+            LaunchError::FilesMissing { title } => format!(
+                "Game files not found for '{title}'. The game may need to be re-downloaded."
+            ),
+            LaunchError::Misplaced { title, expected } => format!(
+                "'{title}' unpacked, but its folder is not where the catalogue expects it: {}",
+                expected.display()
+            ),
+            LaunchError::Extract(e) => format!("Failed to extract game before launch: {e}"),
+            LaunchError::Task(e) => format!("extraction task failed: {e}"),
+        }
+    }
+}
+
+/// Where a game's zip may sit: the collection layout first (lang dir for LP,
+/// year dir for Win9x), then the prefix root.
+fn launch_zip_candidates(torrent_root: &Path, source: &str, game_name: &str, app_path: Option<&str>) -> Vec<PathBuf> {
+    let mut out = vec![torrent_root.join(collection_rel_zip(source, game_name, app_path))];
+    let root_zip = torrent_root.join(format!("{}/{}.zip", collection_game_prefix(source), game_name));
+    if root_zip != out[0] {
+        out.push(root_zip);
+    }
+    out
+}
+
+/// Unpack a game's zip when its directory is missing - imports and rescans
+/// leave games zipped, and LaunchBox unpacks on demand too. The one launch
+/// pre-step for every collection. `zip.exists()` is true for almost every
+/// uninstalled game (placeholders, fragments - §16), so a zip that will not
+/// open is reported as such and `installed` is cleared.
+pub(crate) async fn extract_before_launch(
+    app: &AppHandle,
+    game: &Game,
+    id: i64,
+    source: &str,
+    torrent_root: &Path,
+) -> Result<PathBuf, LaunchError> {
+    let title = || game.title.clone();
+    let shortcode = game
+        .shortcode
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| LaunchError::NoShortcode { title: title() })?;
+    let app_path = game.application_path.as_deref();
+    let game_dir = torrent_root.join(collection_rel_game_dir(source, shortcode, app_path));
+    if game_dir.exists() {
+        return Ok(game_dir);
+    }
+    let game_name = app_path
+        .and_then(crate::commands::setup::game_name_from_app_path)
+        .unwrap_or_else(|| game.title.clone());
+    let zip = launch_zip_candidates(torrent_root, source, &game_name, app_path)
+        .into_iter()
+        .find(|z| z.exists())
+        .ok_or_else(|| LaunchError::FilesMissing { title: title() })?;
+    log::info!("Auto-extracting {} before launch", zip.display());
+    // Next to the zip, so the dir lands where the probe above looks.
+    let dest = zip.parent().map(PathBuf::from).unwrap_or_else(|| torrent_root.to_path_buf());
+    let extract = {
+        let (z, d) = (zip.clone(), dest.clone());
+        tauri::async_runtime::spawn_blocking(move || extract_game_zip(&z, &d))
+            .await
+            .map_err(|e| LaunchError::Task(e.to_string()))?
+    };
+    if let Err(e) = extract {
+        if e.is_not_an_archive() {
+            if let Ok(conn) = app.state::<DbState>().0.lock() {
+                let _ = queries::set_game_installed(&conn, id, false);
+            }
+            return Err(LaunchError::Placeholder { title: title() });
+        }
+        return Err(LaunchError::Extract(e));
+    }
+    if !game_dir.exists() {
+        return Err(LaunchError::Misplaced { title: title(), expected: game_dir });
+    }
+    Ok(game_dir)
+}
+
+/// Extract a game zip in place, then restore saves from `!save/` if present.
+pub(crate) fn extract_game_zip(zip_path: &std::path::Path, dest: &std::path::Path) -> Result<(), ExtractError> {
+    let file = std::fs::File::open(zip_path)?;
+    let mut archive = zip::ZipArchive::new(file)?;
 
     // Get the top-level directory name from the ZIP (the shortcode). Scan
     // for the first entry that actually has a directory component - entry 0
@@ -2735,7 +2619,7 @@ pub(crate) fn extract_game_zip(zip_path: &std::path::Path, dest: &std::path::Pat
         Some(first.to_string())
     });
 
-    archive.extract(dest).map_err(|e| e.to_string())?;
+    archive.extract(dest)?;
     log::info!("Extracted: {} -> {}", zip_path.display(), dest.display());
 
     // Restore saves if available
@@ -2930,7 +2814,7 @@ pub struct GameSettings {
 
 #[tauri::command]
 pub async fn get_game_settings(state: State<'_, DbState>, id: i64) -> Result<GameSettings, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock()?;
     let cfg = queries::get_all_game_config(&conn, id).map_err(|e| e.to_string())?;
     Ok(GameSettings {
         engine: cfg.get("engine").cloned(),
@@ -2951,7 +2835,7 @@ pub async fn set_game_settings(
     cycles: Option<String>,
     custom_conf: Option<String>,
 ) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock()?;
     // For each key: Some(value) = set, None = delete (inherit global)
     let pairs: &[(&str, &Option<String>)] = &[
         ("engine", &engine),
@@ -2975,7 +2859,7 @@ pub async fn set_game_settings(
 
 #[tauri::command]
 pub async fn get_recently_played(state: State<'_, DbState>, limit: Option<usize>) -> Result<Vec<Game>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock()?;
     queries::fetch_recently_played(&conn, limit.unwrap_or(12)).map_err(|e| e.to_string())
 }
 
@@ -3051,13 +2935,11 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
     // Read everything we need from the DB and drop the lock before the heavy
     // DOSBox path resolution + process spawning below.
     let (game, data_dir, crt_auto_enabled, fullscreen_enabled, per_game_config) = {
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+        let conn = db_state.lock()?;
         let game = queries::fetch_game_by_id(&conn, id)
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("Game with id {} not found", id))?;
-        let data_dir = queries::get_config(&conn, "data_dir")
-            .map_err(|e| e.to_string())?
-            .ok_or("Data directory not configured. Run setup first.")?;
+        let data_dir = configured_data_dir(&conn)?;
         let global_glshader = queries::get_config(&conn, "global_glshader")
             .map_err(|e| e.to_string())?
             .unwrap_or_else(|| "crt-auto".to_string());
@@ -3090,19 +2972,37 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
 
     // Win9x games boot Windows 95/98 from VHDs inside DOSBox-X or 86Box -
     // they have their own engine pipeline and none of the Staging conf
-    // machinery below applies (their confs run verbatim, §10a).
-    if crate::commands::setup::collection_def(game.torrent_source.as_deref().unwrap_or("eXoDOS"))
-        .is_some_and(|c| c.year_subdirs)
-    {
-        return crate::commands::win9x::launch_win9x_game(
-            &app,
-            game,
-            id,
-            &data_dir,
-            fullscreen_enabled,
-            &per_game_config,
-        )
-        .await;
+    // machinery below applies (their confs run verbatim, §10a). ScummVM
+    // games have no conf at all: one command line, see scummvm.rs.
+    let launcher = crate::commands::setup::collection_def(
+        game.torrent_source.as_deref().unwrap_or("eXoDOS"),
+    )
+    .map(|c| c.launcher)
+    .unwrap_or(crate::commands::setup::Launcher::DosBox);
+    match launcher {
+        crate::commands::setup::Launcher::Win9x => {
+            return crate::commands::win9x::launch_win9x_game(
+                &app,
+                game,
+                id,
+                &data_dir,
+                fullscreen_enabled,
+                &per_game_config,
+            )
+            .await;
+        }
+        crate::commands::setup::Launcher::ScummVm => {
+            return crate::commands::scummvm::launch_scummvm_game(
+                &app,
+                game,
+                id,
+                &data_dir,
+                fullscreen_enabled,
+                &per_game_config,
+            )
+            .await;
+        }
+        crate::commands::setup::Launcher::DosBox => {}
     }
 
     let dosbox_conf = game
@@ -3125,7 +3025,7 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
     let working_dir_name = src_game_prefix.split('/').next().unwrap_or("eXo");
     let options_conf = main_torrent_root.join("eXo/emulators/dosbox/options.conf");
 
-    let Some((game_conf, conf_root)) = resolve_game_conf(&data_dir, source, dosbox_conf) else {
+    let Some((game_conf, conf_root)) = resolve_game_conf(&data_dir, dosbox_conf) else {
         let msg = format!(
             "Game config not found: {}\nMake sure the game is fully downloaded and extracted.",
             torrent_root.join(dosbox_conf.replace('\\', "/")).display()
@@ -3144,70 +3044,8 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
     let shortcode = game.shortcode.as_deref().unwrap_or("");
     let game_folder = src_game_prefix.split('/').nth(1).unwrap_or("eXoDOS");
 
-    // Auto-extract ZIP on first launch if the game directory doesn't exist yet.
-    // This mirrors LaunchBox's on-demand extraction behavior and handles games that were
-    // imported from an existing installation where ZIPs haven't been extracted.
     if !shortcode.is_empty() {
-        let game_dir = torrent_root.join(collection_rel_game_dir(
-            source,
-            shortcode,
-            game.application_path.as_deref(),
-        ));
-        if !game_dir.exists() {
-            let game_name = game.application_path.as_deref()
-                .and_then(crate::commands::setup::game_name_from_app_path)
-                .unwrap_or_else(|| game.title.clone());
-            // LP ZIPs live under the collection's language dir
-            // ("eXo/eXoDOS/<lang>/<name>.zip"), eXoWin9x's under the year dir;
-            // EN under the prefix root as a fallback.
-            let mut zip_candidates: Vec<PathBuf> = vec![torrent_root.join(collection_rel_zip(
-                source,
-                &game_name,
-                game.application_path.as_deref(),
-            ))];
-            zip_candidates.push(torrent_root.join(format!("{}/{}.zip", src_game_prefix, game_name)));
-
-            if let Some(zip_path) = zip_candidates.iter().find(|z| z.exists()) {
-                log::info!("Auto-extracting {} before launch", zip_path.display());
-                // Extract next to the ZIP so the game dir lands where the
-                // game_dir probe above expects it (lang dir for LP, prefix
-                // root for EN).
-                let dest = zip_path
-                    .parent()
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|| torrent_root.join(src_game_prefix));
-                // spawn_blocking: a multi-GB unzip must not pin a tokio
-                // worker (matches the extraction pattern in
-                // get_download_progress / uninstall).
-                let extract_result = {
-                    let (z, d) = (zip_path.clone(), dest.clone());
-                    tauri::async_runtime::spawn_blocking(move || extract_game_zip(&z, &d))
-                        .await
-                        .map_err(|e| format!("extraction task failed: {e}"))?
-                };
-                if let Err(e) = extract_result {
-                    let msg = e.to_string();
-                    if msg.contains("EOCD") || msg.contains("invalid Zip") || msg.contains("Invalid archive") {
-                        // ZIP is a torrent stub or corrupted file - reset installed flag so the
-                        // user can re-download rather than hitting this error on every launch.
-                        if let Ok(conn) = db_state.0.lock() {
-                            let _ = queries::set_game_installed(&conn, id, false);
-                        }
-                        return Err(format!(
-                            "Game ZIP for '{}' is incomplete or corrupted (torrent placeholder). \
-                             Please re-download the game.",
-                            game.title
-                        ));
-                    }
-                    return Err(format!("Failed to extract game before launch: {}", msg));
-                }
-            } else {
-                return Err(format!(
-                    "Game files not found for '{}'. The game may need to be re-downloaded.",
-                    game.title
-                ));
-            }
-        }
+        extract_before_launch(&app, &game, id, source, &torrent_root).await?;
     }
     let lp_info = collection_lang_dir(source).map(|ld| {
         let dir = torrent_root.join(format!("{}/{}/{}", src_game_prefix, ld, shortcode));
@@ -3737,24 +3575,36 @@ mod tests {
         assert_eq!(translate_midi_for_staging(conf), conf);
     }
 
-    // ── collection_data_dir ──────────────────────────────────────────────────
+    // ── extract_game_zip / launch_zip_candidates ─────────────────────────────
 
     #[test]
-    fn collection_data_dir_exodos_is_root() {
-        let dir = collection_data_dir("/data", "eXoDOS");
-        assert_eq!(dir, std::path::PathBuf::from("/data"));
+    fn placeholder_and_fragment_read_as_not_an_archive() {
+        let tmp = tempfile::tempdir().unwrap();
+        let empty = tmp.path().join("empty.zip");
+        fs::write(&empty, b"").unwrap();
+        let fragment = tmp.path().join("fragment.zip");
+        fs::write(&fragment, vec![0u8; 4096]).unwrap();
+        for zip in [empty, fragment] {
+            let err = extract_game_zip(&zip, tmp.path()).unwrap_err();
+            assert!(err.is_not_an_archive(), "{}: {err}", zip.display());
+        }
+        let missing = extract_game_zip(&tmp.path().join("nope.zip"), tmp.path()).unwrap_err();
+        assert!(!missing.is_not_an_archive(), "a missing file is an I/O error, not a placeholder");
     }
 
     #[test]
-    fn collection_data_dir_glp_is_root() {
-        let dir = collection_data_dir("/data", "eXoDOS_GLP");
-        assert_eq!(dir, std::path::PathBuf::from("/data"));
-    }
-
-    #[test]
-    fn collection_data_dir_slp_is_root() {
-        let dir = collection_data_dir("/data", "eXoDOS_SLP");
-        assert_eq!(dir, std::path::PathBuf::from("/data"));
+    fn lp_zip_candidates_probe_lang_dir_then_root() {
+        let root = std::path::Path::new("/r");
+        let c = launch_zip_candidates(root, "eXoDOS_GLP", "Das Amt (1994)", None);
+        assert_eq!(
+            c,
+            vec![
+                root.join("eXo/eXoDOS/!german/Das Amt (1994).zip"),
+                root.join("eXo/eXoDOS/Das Amt (1994).zip"),
+            ]
+        );
+        let c = launch_zip_candidates(root, "eXoDOS", "Doom (1993)", None);
+        assert_eq!(c, vec![root.join("eXo/eXoDOS/Doom (1993).zip")], "no duplicate for EN");
     }
 
     // ── patch_dosbox_conf ────────────────────────────────────────────────────
@@ -3908,14 +3758,8 @@ mod tests {
         );
     }
 
-    /// The three-step conf probe launch_game and game_printing_unavailable
-    /// share: own collection root, main eXoDOS root, lang-scoped alternates -
-    /// in that order. eXoWin3x is the collection whose root actually differs
-    /// from the main one (inner_folder "eXoWin3x"); the eXoDOS-family packs
-    /// Every collection resolves inside the SINGLE root - eXo's merged
-    /// layout, where `eXo/eXoDOS`, `eXo/eXoWin3x` and `eXo/eXoWin9x` are
-    /// siblings. The old per-torrent roots (and the cross-root fallback that
-    /// went with them) are gone.
+    /// Every collection resolves inside the single root; LP rows fall back
+    /// to the lang-scoped conf when the EN path is absent.
     #[test]
     fn resolve_game_conf_probe_order() {
         let tmp = tempfile::tempdir().unwrap();
@@ -3924,13 +3768,13 @@ mod tests {
         let root = tmp.path().join(crate::commands::setup::DEFAULT_ROOT_FOLDER);
 
         // Nothing on disk: no result.
-        assert!(resolve_game_conf(&data_dir, "eXoWin3x", rel).is_none());
+        assert!(resolve_game_conf(&data_dir, rel).is_none());
 
         // A Win3x conf is found in the one root, not in a tree of its own.
         let conf_path = root.join(rel);
         fs::create_dir_all(conf_path.parent().unwrap()).unwrap();
         fs::write(&conf_path, "[autoexec]\n").unwrap();
-        let (conf, found_root) = resolve_game_conf(&data_dir, "eXoWin3x", rel).unwrap();
+        let (conf, found_root) = resolve_game_conf(&data_dir, rel).unwrap();
         assert_eq!(conf, conf_path);
         assert_eq!(found_root, root);
 
@@ -3939,7 +3783,7 @@ mod tests {
         fs::create_dir_all(lang_conf.parent().unwrap()).unwrap();
         fs::write(&lang_conf, "[autoexec]\n").unwrap();
         let (conf, found_root) =
-            resolve_game_conf(&data_dir, "eXoDOS_GLP", "eXo/eXoDOS/!dos/DasAmt/dosbox.conf")
+            resolve_game_conf(&data_dir, "eXo/eXoDOS/!dos/DasAmt/dosbox.conf")
                 .unwrap();
         assert_eq!(conf, lang_conf);
         assert_eq!(found_root, root);

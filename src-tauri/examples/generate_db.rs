@@ -903,6 +903,7 @@ fn main() {
         ("dosbox.txt", "eXoDOS"),
         ("dosbox3x.txt", "eXoWin3x"),
         ("dosbox9x.txt", "eXoWin9x"),
+        ("dosboxsvm.txt", "eXoScummVM"),
     ] {
         let dosbox_txt = root.join("metadata").join(index_file);
         if dosbox_txt.exists() {

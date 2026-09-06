@@ -44,25 +44,6 @@ pub fn create_tables(conn: &Connection) -> DbResult<()> {
             music_file            TEXT
         );
 
-        CREATE TABLE IF NOT EXISTS downloads (
-            id             INTEGER PRIMARY KEY,
-            game_id        INTEGER REFERENCES games(id) ON DELETE CASCADE,
-            torrent_index  INTEGER NOT NULL,
-            file_type      TEXT NOT NULL,
-            file_name      TEXT NOT NULL,
-            file_size      INTEGER NOT NULL,
-            status         TEXT NOT NULL DEFAULT 'pending',
-            progress       REAL NOT NULL DEFAULT 0,
-            error          TEXT
-        );
-
-        CREATE TABLE IF NOT EXISTS images (
-            id      INTEGER PRIMARY KEY,
-            game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
-            type    TEXT NOT NULL,
-            path    TEXT NOT NULL
-        );
-
         CREATE TABLE IF NOT EXISTS playlists (
             id          INTEGER PRIMARY KEY,
             name        TEXT NOT NULL,
@@ -99,9 +80,6 @@ pub fn create_tables(conn: &Connection) -> DbResult<()> {
             PRIMARY KEY (game_id, key)
         );
 
-        CREATE INDEX IF NOT EXISTS idx_images_game_id ON images(game_id);
-        CREATE INDEX IF NOT EXISTS idx_downloads_game_id ON downloads(game_id);
-        CREATE INDEX IF NOT EXISTS idx_downloads_status ON downloads(status);
         ",
     )?;
     Ok(())

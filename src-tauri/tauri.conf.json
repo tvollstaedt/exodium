@@ -62,6 +62,7 @@
       "resources/previews/eXoDOS": "previews/eXoDOS",
       "resources/previews/eXoWin3x": "previews/eXoWin3x",
       "resources/previews/eXoWin9x": "previews/eXoWin9x",
+      "resources/previews/eXoScummVM": "previews/eXoScummVM",
       "resources/dosbox-glshaders": "glshaders",
       "resources/dosbox-bin": "dosbox-bin"
     },

@@ -33,7 +33,7 @@ pub type DbResult<T> = Result<T, DbError>;
 /// 10 = Spanish/Polish rows carry eXo's own directory code and config path,
 /// which also merges them into their English game's card, 11 = music_file
 /// hint (theme track name from LaunchBox MusicPath/MissingMusic).
-pub const CATALOG_VERSION: i64 = 11;
+pub const CATALOG_VERSION: i64 = 12;
 
 /// Open (or create) the Exodium database at the given path.
 pub fn open(path: &Path) -> DbResult<Connection> {
@@ -71,8 +71,7 @@ fn table_columns(conn: &Connection, table: &str) -> DbResult<Vec<String>> {
 ///
 /// Rows are matched on `application_path` (unique in practice; the few rows
 /// with an empty path fall back to title+language). Matched rows are updated
-/// in place so `games.id` stays stable - `game_config` and `downloads` FKs
-/// remain valid. Rows new in the bundled catalog are inserted with clean
+/// in place so `games.id` stays stable and `game_config` FKs remain valid. Rows new in the bundled catalog are inserted with clean
 /// user state; installed rows that vanished from the catalog are kept and
 /// logged (their torrent indices may be stale).
 ///
@@ -263,6 +262,9 @@ pub fn catalog_version(conn: &Connection) -> i64 {
 
 /// Additive migrations for existing databases.
 fn migrate(conn: &Connection) -> DbResult<()> {
+    // Never populated since 0.1; dropped 0.14.
+    conn.execute_batch("DROP TABLE IF EXISTS downloads; DROP TABLE IF EXISTS images;")?;
+
     // Add dosbox_variant column if missing (added after initial release).
     let has_dosbox_variant: bool = conn
         .query_row(

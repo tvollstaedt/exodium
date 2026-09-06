@@ -71,9 +71,6 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 # Tar extraction (content pack archives)
 tar = "0.4"
 
-# Disk space queries (pre-flight check before large downloads)
-fs2 = "0.4"
-
 # Logging
 # We standardise on `tracing` because librqbit (our torrent crate) emits its
 # diagnostics through `tracing` rather than `log`. `tracing-log` bridges any

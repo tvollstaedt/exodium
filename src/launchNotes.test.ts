@@ -1,0 +1,152 @@
+import { describe, it, expect, vi } from "vitest";
+import { launchNote, emulatorName, emulatorPackId, type NoteContext } from "./launchNotes";
+import type { Game, ContentPackStatus } from "./api/tauri";
+
+const game = (over: Partial<Game> = {}): Game =>
+  ({ id: 1, title: "T", torrent_source: "eXoDOS", dosbox_variant: null, ...over }) as unknown as Game;
+
+const ctx = (over: Partial<NoteContext> = {}): NoteContext => ({
+  game: game(),
+  isWindows: false,
+  offline: false,
+  installed: false,
+  downloading: false,
+  svmEngine: null,
+  engineInfo: null,
+  win9xEngineMissing: false,
+  support: null,
+  mp: null,
+  printingUnavailable: false,
+  videoUnsupported: false,
+  emulatorPack: null,
+  packJob: null,
+  installPack: () => {},
+  ...over,
+});
+
+const pack: ContentPackStatus = {
+  id: "dosbox-x", display_name: "DOSBox-X", description: "", size_bytes: 50_000_000,
+  version: 1, supersedes: [], available: true, installed: false,
+};
+
+const key = (c: NoteContext) => launchNote(c)?.key ?? null;
+
+describe("launchNote", () => {
+  it("says nothing for a plain DOS game", () => {
+    expect(launchNote(ctx())).toBeNull();
+  });
+
+  describe("ScummVM", () => {
+    const svm = (over: Partial<NoteContext> = {}) =>
+      ctx({ game: game({ torrent_source: "eXoScummVM", dosbox_variant: "2.9.0" }), ...over });
+
+    it("stays quiet while the engine probe is open", () => {
+      expect(launchNote(svm())).toBeNull();
+    });
+    it("blocks when no ScummVM resolves, with the Flatpak hint off Windows", () => {
+      const n = launchNote(svm({ svmEngine: { available: false, pinned_version: "2.9.0", source: null } }));
+      expect(n?.key).toBe("engine-missing");
+      expect(n?.blocking).toBe(true);
+      expect(n?.text).toContain("ScummVM 2.9.0");
+      expect(n?.text).toContain("org.scummvm.ScummVM");
+      const win = launchNote(svm({ isWindows: true, svmEngine: { available: false, pinned_version: "2.9.0", source: null } }));
+      expect(win?.text).not.toContain("Flatpak");
+    });
+    it("warns when a system ScummVM ignores the pin, not for eXo's or the pack's build", () => {
+      expect(key(svm({ svmEngine: { available: true, pinned_version: "2.9.0", source: "path" } }))).toBe("scummvm-version");
+      expect(key(svm({ svmEngine: { available: true, pinned_version: "2.9.0", source: "flatpak" } }))).toBe("scummvm-version");
+      expect(key(svm({ svmEngine: { available: true, pinned_version: "2.9.0", source: "pack" } }))).toBeNull();
+      expect(key(svm({ svmEngine: { available: true, pinned_version: "2.9.0", source: "exo" } }))).toBeNull();
+    });
+  });
+
+  describe("Win9x engine missing", () => {
+    const x98 = (over: Partial<NoteContext> = {}) =>
+      ctx({ game: game({ torrent_source: "eXoWin9x", dosbox_variant: "x98" }), win9xEngineMissing: true, ...over });
+
+    it("pcbox blocks regardless of anything else", () => {
+      expect(key(ctx({ game: game({ dosbox_variant: "pcbox" }) }))).toBe("pcbox");
+    });
+    it("reports the running pack install with its phase", () => {
+      const job = { phase: "downloading", progress: 0.4, downloaded_bytes: 40, total_bytes: 100, finished: false, installed: false, error: null };
+      expect(launchNote(x98({ emulatorPack: pack, packJob: job }))?.text).toBe("Downloading DOSBox-X… 40%");
+      expect(launchNote(x98({ emulatorPack: pack, packJob: { ...job, phase: "extracting" } }))?.text).toBe("Installing DOSBox-X…");
+    });
+    it("offers the pack download online and points at Settings offline", () => {
+      const install = vi.fn();
+      const n = launchNote(x98({ emulatorPack: pack, installPack: install }));
+      expect(n?.blocking).toBe(true);
+      expect(n?.action?.label).toBe("Download emulator (50.0 MB)");
+      n?.action?.onClick();
+      expect(install).toHaveBeenCalledWith(pack);
+      const off = launchNote(x98({ emulatorPack: pack, offline: true }));
+      expect(off?.action).toBeUndefined();
+      expect(off?.text).toContain("Go online");
+    });
+    it("without a pack: Windows reports the support payload, Linux an install hint", () => {
+      expect(launchNote(x98({ isWindows: true }))).toBeNull();
+      expect(key(x98({ isWindows: true, support: { phase: "downloading", progress: 0.5, total_bytes: 1 } }))).toBe("win9x-support-progress");
+      expect(key(x98({ isWindows: true, support: { phase: "failed", progress: 1, total_bytes: 1 } }))).toBe("win9x-support-failed");
+      expect(key(x98({ isWindows: true, support: { phase: "missing", progress: 0, total_bytes: 1 } }))).toBe("win9x-support-size");
+      expect(launchNote(x98({ isWindows: true, installed: true, support: { phase: "missing", progress: 0, total_bytes: 1 } }))?.text).toContain("Restore that folder");
+      expect(launchNote(x98())?.text).toContain("com.dosbox_x.DOSBox-X");
+      expect(launchNote(x98({ game: game({ dosbox_variant: "86box" }) }))?.text).toContain("86Box on your PATH");
+    });
+  });
+
+  describe("Win9x engine present", () => {
+    const x98 = (over: Partial<NoteContext> = {}) =>
+      ctx({ game: game({ torrent_source: "eXoWin9x", dosbox_variant: "x98" }), ...over });
+
+    it("announces the one-time payload before the first download only", () => {
+      const missing = { phase: "missing" as const, progress: 0, total_bytes: 2_500_000_000 };
+      const n = launchNote(x98({ support: missing }));
+      expect(n?.key).toBe("win9x-support-size");
+      expect(n?.text).toContain("one-time 2.5 GB");
+      expect(key(x98({ support: missing, installed: true }))).toBe("x98-boot");
+      expect(key(x98({ support: missing, downloading: true }))).toBe("x98-boot");
+    });
+    it("multiplayer notes outrank the boot note", () => {
+      expect(key(x98({ mp: { multiplayer: true, state: "needs_wired", prompt: false } }))).toBe("mp-wired");
+      expect(key(x98({ mp: { multiplayer: true, state: "needs_permission", prompt: false } }))).toBe("mp-permission");
+      expect(key(x98({ mp: { multiplayer: true, state: "ready", prompt: false } }))).toBe("x98-boot");
+      expect(key(x98({ game: game({ dosbox_variant: "86box" }) }))).toBe("86box-perf");
+    });
+  });
+
+  describe("DOS", () => {
+    const ece = (over: Partial<NoteContext> = {}) => ctx({ game: game({ dosbox_variant: "ece4230" }), ...over });
+
+    it("printing outranks the ECE note", () => {
+      expect(key(ece({ printingUnavailable: true, engineInfo: { ece_available: false, uses_ece: false } }))).toBe("printing");
+    });
+    it("explains Staging on an ECE game by cause", () => {
+      expect(launchNote(ece())).toBeNull();
+      expect(launchNote(ece({ engineInfo: { ece_available: true, uses_ece: true } }))).toBeNull();
+      expect(launchNote(ece({ engineInfo: { ece_available: true, uses_ece: false } }))?.text).toContain("you set it");
+      expect(launchNote(ece({ isWindows: true, engineInfo: { ece_available: false, uses_ece: false } }))?.text).toContain("not unpacked yet");
+      expect(launchNote(ece({ engineInfo: { ece_available: false, uses_ece: false } }))?.text).toContain("only exists on Windows");
+    });
+    it("the GStreamer note comes last", () => {
+      expect(key(ctx({ videoUnsupported: true }))).toBe("no-gstreamer");
+      expect(key(ece({ videoUnsupported: true, engineInfo: { ece_available: false, uses_ece: false } }))).toBe("ece");
+    });
+  });
+});
+
+describe("emulatorName", () => {
+  it("names the engine from the variant, ScummVM from the pin", () => {
+    expect(emulatorName(game(), null, false)).toBe("DOSBox Staging");
+    expect(emulatorName(game({ dosbox_variant: "ece4230" }), null, true)).toBe("DOSBox ECE");
+    expect(emulatorName(game({ dosbox_variant: "ece4230" }), null, false)).toBe("DOSBox Staging");
+    expect(emulatorName(game({ dosbox_variant: "x98" }), null, false)).toBe("DOSBox-X");
+    expect(emulatorName(game({ dosbox_variant: "86boxME" }), null, false)).toBe("86Box");
+    expect(emulatorName(game({ torrent_source: "eXoScummVM" }), null, false)).toBe("ScummVM");
+    expect(emulatorName(game({ torrent_source: "eXoScummVM" }), { available: true, pinned_version: "2.8.0", source: "pack" }, false)).toBe("ScummVM 2.8.0");
+  });
+  it("maps variants to emulator packs like the backend", () => {
+    expect(emulatorPackId("x98")).toBe("dosbox-x");
+    expect(emulatorPackId("86boxME")).toBe("86box");
+    expect(emulatorPackId("pcbox")).toBeNull();
+  });
+});

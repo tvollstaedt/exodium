@@ -11,6 +11,7 @@ src-tauri/target/
 thumbnails/eXoDOS/
 thumbnails/eXoWin3x/
 thumbnails/eXoWin9x/
+thumbnails/eXoScummVM/
 thumbnails/*.tar.gz
 
 # Bundled emulator binaries (platform-specific, fetched via get-dosbox)

@@ -241,7 +241,7 @@ pub async fn list_content_packs(
         .get(&collection)
         .ok_or_else(|| format!("Unknown collection '{}'", collection))?;
 
-    let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+    let conn = db_state.lock()?;
     adopt_packs_on_disk(&conn, &collection, col);
     let installed = read_installed_packs(&conn);
     let col_installed = installed.get(&collection);
@@ -364,10 +364,8 @@ pub(crate) async fn start_pack_install(
 
     // Resolve data_dir (fast DB read, lock released immediately).
     let data_dir = {
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
-        queries::get_config(&conn, "data_dir")
-            .map_err(|e| e.to_string())?
-            .ok_or("Data directory not configured. Run setup first.")?
+        let conn = db_state.lock()?;
+        crate::commands::games::configured_data_dir(&conn)?
     };
 
     // Atomic check-and-insert under a single write lock to prevent TOCTOU race
@@ -573,7 +571,7 @@ async fn do_install_full(
 
     // ── Pre-flight: check disk space ─────────────────────────────────────────
     let required = (pack_info.size_bytes as f64 * 2.2) as u64;
-    let available = fs2::available_space(data_dir)
+    let available = fs4::available_space(data_dir)
         .map_err(|e| format!("Cannot query disk space: {}", e))?;
     if available < required {
         return Err(format!(
@@ -991,10 +989,8 @@ pub async fn uninstall_content_pack(
     }
 
     let (_data_dir, install_dir) = {
-        let conn = db_state.0.lock().map_err(|e| e.to_string())?;
-        let data_dir = queries::get_config(&conn, "data_dir")
-            .map_err(|e| e.to_string())?
-            .ok_or("Data directory not configured")?;
+        let conn = db_state.lock()?;
+        let data_dir = crate::commands::games::configured_data_dir(&conn)?;
 
         let install_dir = match load_manifest() {
             Ok(manifest) => {
@@ -1026,7 +1022,7 @@ pub async fn uninstall_content_pack(
         log::info!("Uninstalled content pack: {}/{}", collection, pack_id);
     }
 
-    let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+    let conn = db_state.lock()?;
     mark_pack_uninstalled(&conn, &collection, &pack_id)?;
     Ok(())
 }
@@ -1166,7 +1162,7 @@ fn safe_join(base: &Path, relative: &str) -> Result<PathBuf, String> {
     Ok(candidate)
 }
 
-fn format_bytes(bytes: u64) -> String {
+pub(crate) fn format_bytes(bytes: u64) -> String {
     if bytes >= 1_073_741_824 {
         format!("{:.1} GB", bytes as f64 / 1_073_741_824.0)
     } else if bytes >= 1_048_576 {

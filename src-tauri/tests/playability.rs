@@ -18,7 +18,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use exodium_lib::collection_data_dir;
+use exodium_lib::game_root;
 use rusqlite::Connection;
 use serde::Serialize;
 
@@ -29,7 +29,6 @@ struct InstalledGame {
     id: i64,
     title: String,
     shortcode: Option<String>,
-    torrent_source: String,
     dosbox_conf: Option<String>,
 }
 
@@ -57,7 +56,7 @@ fn get_installed_games(conn: &Connection) -> Vec<InstalledGame> {
         .unwrap_or(0);
 
     let mut stmt = match conn.prepare(
-        "SELECT id, title, shortcode, COALESCE(torrent_source,'eXoDOS'), dosbox_conf
+        "SELECT id, title, shortcode, dosbox_conf
          FROM games WHERE installed = 1 ORDER BY title",
     ) {
         Ok(s) => s,
@@ -70,8 +69,7 @@ fn get_installed_games(conn: &Connection) -> Vec<InstalledGame> {
                 id: row.get(0)?,
                 title: row.get(1)?,
                 shortcode: row.get(2)?,
-                torrent_source: row.get(3)?,
-                dosbox_conf: row.get(4)?,
+                dosbox_conf: row.get(3)?,
             })
         })
         .ok()
@@ -115,9 +113,7 @@ fn resolve_conf(game: &InstalledGame, data_dir: &Path) -> Option<PathBuf> {
     let conf_rel = game.dosbox_conf.as_deref()?.replace('\\', "/");
     let data_dir_str = data_dir.to_str().unwrap_or_default();
 
-    // Primary: collection-specific subdirectory + inner "eXoDOS" folder
-    let coll_root = collection_data_dir(data_dir_str, &game.torrent_source).join("eXoDOS");
-    let path = coll_root.join(&conf_rel);
+    let path = game_root(data_dir_str).join(&conf_rel);
     if path.exists() {
         return Some(path);
     }
