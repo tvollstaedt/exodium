@@ -48,8 +48,16 @@ exodium/
 │   ├── capabilities/default.json   ← Tauri permissions (drag/resize perms live here)
 │   └── src/
 │       ├── commands/
-│       │   ├── setup.rs       ← init_download_manager, setup flow, factory_reset, COLLECTION_MAP
-│       │   └── games.rs       ← get_games, launch_game, download_game, uninstall_game
+│       │   ├── collections.rs ← CollectionDef, COLLECTION_MAP, Launcher, per-collection path shapes
+│       │   ├── paths.rs       ← resource/log dirs, game_root, launch conf dir
+│       │   ├── setup.rs       ← init_download_manager, setup flow, factory_reset
+│       │   ├── layout.rs      ← folder-layout migration into the single root
+│       │   ├── library.rs     ← torrent matching, install scan, uninstall, reset
+│       │   ├── install.rs     ← download_game, progress watch, extraction
+│       │   ├── assets.rs      ← cover tiers, gallery cache, manuals
+│       │   ├── games.rs       ← get_games, settings, launch_game (DOSBox pipeline)
+│       │   ├── win9x.rs / scummvm.rs ← the other two launchers
+│       │   └── mod.rs         ← re-exports; lib.rs registers commands from here
 │       ├── db/
 │       │   ├── schema.rs      ← CREATE TABLE statements
 │       │   └── queries.rs     ← fetch_games_filtered (merged rows), attach_language_maps
@@ -96,7 +104,7 @@ The `application_path` in LaunchBox XML looks like `eXo\eXoDOS\!dos\SQ5\dosbox.c
 - Language variant merging (EN/DE/FR/PL/... rows with the same shortcode are one game)
 - Save backup directories: `!save/<shortcode>/`
 
-PLP (Polish) metadata uses `!polish/GameName.bat` instead and has no shortcode. We backfill shortcodes from matching EN titles via a SQL UPDATE in `setup.rs`.
+PLP (Polish) metadata uses `!polish/GameName.bat` instead and has no shortcode. We backfill shortcodes from matching EN titles via a SQL UPDATE in `setup.rs` (`setup_from_local`).
 
 **Unique per pack family, NOT globally.** eXoWin3x reuses ten eXoDOS shortcodes
 for entirely different games (`EarthQue` is *Earthquest* under DOS and
@@ -122,7 +130,7 @@ own `Setup`/`eXoMerge` bats produce:
   Content/
 ```
 
-`setup::game_root(data_dir)` is the single source of truth (`root_folder`
+`paths::game_root(data_dir)` is the single source of truth (`root_folder`
 config key, cached in a `RwLock` and loaded by `get_setup_status` /
 `init_download_manager`); `DownloadManager::torrent_root()` returns it too, so
 librqbit writes every torrent into the same tree. Do NOT reintroduce
@@ -199,7 +207,7 @@ All four eXoDOS torrents have the same internal name `eXoDOS`, which causes libr
 <data_dir>/eXoDOS_SLP/
 ```
 
-`COLLECTION_MAP` in `setup.rs` is ordered **LP first, eXoDOS last** so title-matching prefers LP entries when populating merged rows.
+`COLLECTION_MAP` in `collections.rs` is ordered **LP first, eXoDOS last** so title-matching prefers LP entries when populating merged rows.
 
 ### 3. Multi-language games are merged in `fetch_games_filtered`
 One row per shortcode returned to the frontend (`PRIMARY_ROW_CONDITION` in `queries.rs` picks the EN row, lowest id as tiebreak), with `available_languages` = a string like `"EN:0,DE:2"` attached by `attach_language_maps` for groups with >1 variant. State codes: `0=available`, `1=in_library/downloading`, `2=installed`. The frontend parses this in `util.ts::parseLangEntries()` (used by `GameCard.tsx::langEntries()`).
@@ -257,7 +265,7 @@ VHD from the ZIP instead; the durable answer is shutting Windows down from the
 Start menu.
 
 ### 6. LP games auto-download shared EN GameData
-Videos and animations for LP games live in the main eXoDOS torrent's GameData folder. `download_game` in `games.rs` auto-fetches the matching EN GameData entry when installing an LP variant. `get_game_variants` dynamically subtracts the EN GameData size from the displayed download size if it's already on disk.
+Videos and animations for LP games live in the main eXoDOS torrent's GameData folder. `download_game` in `install.rs` auto-fetches the matching EN GameData entry when installing an LP variant. `get_game_variants` dynamically subtracts the EN GameData size from the displayed download size if it's already on disk.
 
 ### 7. Bundled metadata instead of downloading
 The 4.9 GB of LaunchBox XML + images from the torrent is replaced with ~4.2 MB of gzipped XMLs in `metadata/` and a shortcode-keyed thumbnail set in `thumbnails/`. These ship with the app binary. The regenerate script parses XML per `<Game>` block (NOT across block boundaries - a previous bug mapped SQ5 to Bloxit's image).

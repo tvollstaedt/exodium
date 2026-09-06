@@ -68,3 +68,9 @@
 - Verworfen: Hinweise im Backend berechnen (Texte sind UI, die Buttons braeuchten die Signale trotzdem); ein globaler Store fuer den Win9x-Status (die Sonden gehoeren zum offenen Panel, nicht zur App).
 - Grund: 200 Zeilen if-Kette an zehn Signalen waren nicht testbar; jetzt 15 Tests ueber die Prioritaeten.
 - Gotcha: Der Kontext ist ein Snapshot pro Aufruf, Solid trackt die gelesenen Signale trotzdem, weil `rawNote` innerhalb eines Effekts/JSX aufgerufen wird. `installPack` bekommt die Collection aus dem Panel, weil der Pack-Job-Key `<collection>:<pack>` heisst.
+
+## 2026-09-06 - commands/ nach Verantwortung geschnitten statt nach Entstehungsgeschichte
+- Entscheidung: games.rs (4.3k) und setup.rs (4.3k) in `collections`, `paths`, `layout`, `library`, `install`, `assets` aufgeteilt; games.rs behaelt Getter, Settings und die DOSBox-Launch-Pipeline, setup.rs den Wizard, `init_download_manager` und `factory_reset`. Reines Verschieben, ein Commit pro Zielmodul, Tests wandern mit ihrer Funktion. `mod.rs` re-exportiert weiter, lib.rs und die Integrationstests sehen keine Aenderung.
+- Verworfen: `launch.rs` zusaetzlich herausloesen (games.rs waere dann ~1.100 Zeilen; kommt, wenn die Launch-Pipeline das naechste Mal angefasst wird); Re-Exports der alten Pfade in games.rs/setup.rs belassen (verdeckte Indirektion, genau das Muster, das den Split noetig machte).
+- Grund: Beide Dateien waren Sammelbecken ohne Modulgrenze; jede Aenderung an Download oder Scan brauchte eine Suche durch 4k Zeilen.
+- Gotcha: Vier Helfer wurden dafuer `pub(crate)` (`game_op_lock`, `running_games`, `running_game_key`, `copy_dir_recursive`, `extract_game_zip`); sie sind die geteilte Basis von Launch, Install und Library. `prune_gallery_cache_at_startup` ist der eine Einstieg in den Gallery-Cache von aussen.
