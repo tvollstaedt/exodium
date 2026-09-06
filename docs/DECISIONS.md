@@ -86,3 +86,9 @@
 - Verworfen: die `zip`-Crate fuer das Verzeichnis (synchron, liest ueber den Torrent-Stream ganze Pieces); den Tail groesser lesen statt ein zweites Mal zu seeken (der Record muss nicht im Tail liegen).
 - Grund: `DOSSoundtracks.zip` hat 36 GB und ist damit zwingend zip64; der Reader brach mit "zip64 archive not supported" ab.
 - Gotcha: Der Local Header wird weiter nur uebersprungen (Name + Extra per Laenge), dort braucht es kein zip64. Test-Fixtures sind handgebaut, weil der `zip`-Crate zip64 nur bei Bedarf schreibt.
+
+## 2026-09-06 - Media-Pack-Spike: DOSSoundtracks.zip ist eine LaunchBox-Plattform aus gespeicherten Album-Zips
+- Entscheidung: `zip_range::OffsetReader` (Fenster auf einen STORED-Eintrag) und `entry_data_offset` sind pub, damit ein Album-Zip im 39-GB-Archiv mit demselben Tail-first-Parser gelesen wird. `examples/media_pack_spike.rs` ist das Werkzeug dafuer (Torrent mit leerer Auswahl, gestreamtes Verzeichnis, optional EXTRACT/NESTED). Die Media-Pack-`.torrent` bleibt vorerst ausserhalb des Repos.
+- Verworfen: die Album-Zips als Ganzes laden (Median ~150 MB, bis 3 GB - genau der Bulk-Download, den #14 ausschliesst).
+- Grund: Gemessen: 584 Eintraege, 126 Album-Zips unter `eXo/Soundtracks/`, alle STORED; 453 Bilder unter `Images/Soundtracks/<Kategorie>/`; `Data/Platforms/Soundtracks.xml` (0,55 MB) beschreibt die Alben als LaunchBox-"Games" (Titel, Komponist als Developer, Notes, CommandLine = Album-Zip). Aeusseres Verzeichnis in 3-4 s, Album-Verzeichnis in 11 s, erster Track dann in 0,1 s; ein Album kostet ~56 MB auf der Platte. Titel-Match Album -> eXoDOS-Spiel 54 von 126 exakt, der Rest braucht einen Index von Hand (Compilations, OST-Suffixe, Serien).
+- Gotcha: Ohne den leeren Fastresume-Bitv hash-checkt librqbit 220 GB Platzhalter, bevor `stream_file` moeglich ist ("invalid state: initializing"); das Beispiel seedet ihn wie die App. Die XML hat keine Verknuepfung zum Spiel - das Mapping muss in `generate_db` entstehen.

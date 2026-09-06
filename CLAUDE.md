@@ -676,6 +676,10 @@ seeks become piece requests - measured: 27 MB fetched from a 1163 MB archive.
 `stream_file` adds the torrent with an EMPTY selection when needed; selecting
 the file would download all of it.
 
+`zip_range` reads zip64 (the media pack's 36 GB archives) and, through
+`OffsetReader`, a STORED zip inside a zip - the shape of that pack's album
+archives; `examples/media_pack_spike.rs` measures it against the live torrent.
+
 Three things are easy to get wrong here:
 - **Every localized row has a NULL `gamedata_torrent_index`** (DE 484/484, ES
   413/413, PL 56/56) - extras live in the English archive only, so

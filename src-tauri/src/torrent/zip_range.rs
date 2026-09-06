@@ -231,6 +231,83 @@ where
     decompress(entry, raw)
 }
 
+/// A window onto `inner` starting at `base`, `len` bytes long, so a STORED
+/// zip inside a zip (the media pack's album archives) can be read with the
+/// same tail-first parser. Seeks are translated, nothing is buffered.
+pub struct OffsetReader<R> {
+    inner: R,
+    base: u64,
+    len: u64,
+    pos: u64,
+    pending_seek: bool,
+}
+
+impl<R: AsyncRead + AsyncSeek + Unpin> OffsetReader<R> {
+    pub fn new(inner: R, base: u64, len: u64) -> Self {
+        Self { inner, base, len, pos: 0, pending_seek: true }
+    }
+
+    pub fn into_inner(self) -> R {
+        self.inner
+    }
+}
+
+impl<R: AsyncRead + AsyncSeek + Unpin> AsyncRead for OffsetReader<R> {
+    fn poll_read(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        use std::task::Poll;
+        let this = self.get_mut();
+        if this.pending_seek {
+            let target = this.base + this.pos;
+            std::pin::Pin::new(&mut this.inner).start_seek(std::io::SeekFrom::Start(target))?;
+            match std::pin::Pin::new(&mut this.inner).poll_complete(cx) {
+                Poll::Ready(Ok(_)) => this.pending_seek = false,
+                Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+                Poll::Pending => return Poll::Pending,
+            }
+        }
+        let remaining = this.len.saturating_sub(this.pos);
+        if remaining == 0 {
+            return Poll::Ready(Ok(()));
+        }
+        let want = (buf.remaining() as u64).min(remaining) as usize;
+        let got = {
+            let mut limited = tokio::io::ReadBuf::new(buf.initialize_unfilled_to(want));
+            match std::pin::Pin::new(&mut this.inner).poll_read(cx, &mut limited) {
+                Poll::Ready(Ok(())) => limited.filled().len(),
+                Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+                Poll::Pending => return Poll::Pending,
+            }
+        };
+        buf.advance(got);
+        this.pos += got as u64;
+        Poll::Ready(Ok(()))
+    }
+}
+
+impl<R: AsyncRead + AsyncSeek + Unpin> AsyncSeek for OffsetReader<R> {
+    fn start_seek(mut self: std::pin::Pin<&mut Self>, position: std::io::SeekFrom) -> std::io::Result<()> {
+        let new_pos = match position {
+            std::io::SeekFrom::Start(p) => p as i64,
+            std::io::SeekFrom::End(d) => self.len as i64 + d,
+            std::io::SeekFrom::Current(d) => self.pos as i64 + d,
+        };
+        if new_pos < 0 {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "seek before start"));
+        }
+        self.pos = new_pos as u64;
+        self.pending_seek = true;
+        Ok(())
+    }
+
+    fn poll_complete(self: std::pin::Pin<&mut Self>, _cx: &mut std::task::Context<'_>) -> std::task::Poll<std::io::Result<u64>> {
+        std::task::Poll::Ready(Ok(self.pos))
+    }
+}
+
 fn decompress(entry: &ZipEntry, raw: Vec<u8>) -> anyhow::Result<Vec<u8>> {
     match entry.method {
         METHOD_STORE => Ok(raw),
@@ -251,7 +328,7 @@ fn decompress(entry: &ZipEntry, raw: Vec<u8>) -> anyhow::Result<Vec<u8>> {
 
 /// The central directory's name/extra lengths do NOT have to match the local
 /// header's, so the data offset has to come from the local header itself.
-async fn entry_data_offset<R>(reader: &mut R, entry: &ZipEntry) -> anyhow::Result<u64>
+pub async fn entry_data_offset<R>(reader: &mut R, entry: &ZipEntry) -> anyhow::Result<u64>
 where
     R: AsyncRead + AsyncSeek + Unpin,
 {
@@ -801,5 +878,41 @@ mod tests {
         let mut cursor = std::io::Cursor::new(zip.clone());
         let err = read_central_directory(&mut cursor, zip.len() as u64).await.unwrap_err();
         assert!(err.to_string().contains("zip64"), "{err}");
+    }
+
+    /// The media pack stores whole album zips inside its 36 GB archive; a
+    /// window onto the stored entry makes the inner directory readable with
+    /// the same parser, and a track comes out without touching the rest.
+    #[tokio::test]
+    async fn nested_stored_zip_is_readable_through_a_window() {
+        let body: Vec<u8> = (0..40_000u32).map(|i| (i % 233) as u8).collect();
+        let inner_zip = make_zip(&body, true);
+        let mut buf = std::io::Cursor::new(Vec::new());
+        {
+            let mut zip = zip::ZipWriter::new(&mut buf);
+            let stored: zip::write::FileOptions<'_, ()> =
+                zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+            zip.start_file("Images/cover.jpg", stored).unwrap();
+            zip.write_all(&[0xFFu8; 5_000]).unwrap();
+            zip.start_file("eXo/Soundtracks/Some Game.zip", stored).unwrap();
+            zip.write_all(&inner_zip).unwrap();
+            zip.finish().unwrap();
+        }
+        let outer = buf.into_inner();
+        let mut cursor = std::io::Cursor::new(outer.clone());
+        let entries = read_central_directory(&mut cursor, outer.len() as u64).await.unwrap();
+        let album = entries.iter().find(|e| e.name.ends_with(".zip")).unwrap();
+        assert_eq!(album.method, METHOD_STORE);
+        let base = entry_data_offset(&mut cursor, album).await.unwrap();
+        let mut window = OffsetReader::new(cursor, base, album.uncompressed_size);
+        let tracks = read_central_directory(&mut window, album.uncompressed_size).await.unwrap();
+        assert_eq!(tracks.len(), 3);
+        let video = find_video(&tracks).unwrap();
+        assert_eq!(read_entry(&mut window, video).await.unwrap(), body);
+        // A window never reads past its end.
+        window.seek(std::io::SeekFrom::Start(album.uncompressed_size - 4)).await.unwrap();
+        let mut tail = Vec::new();
+        window.read_to_end(&mut tail).await.unwrap();
+        assert_eq!(tail.len(), 4);
     }
 }
