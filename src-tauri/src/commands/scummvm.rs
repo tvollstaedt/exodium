@@ -467,7 +467,7 @@ async fn launch_inner(
 ) -> Result<String, String> {
     let source = game.torrent_source.as_deref().unwrap_or("eXoScummVM");
     let torrent_root = crate::commands::paths::game_root(data_dir);
-    let game_dir = super::games::extract_before_launch(app, &game, id, source, &torrent_root).await?;
+    let game_dir = super::install::extract_before_launch(app, &game, id, source, &torrent_root).await?;
     let variant = select_variant(&game_dir, &torrent_root, per_game_config)?;
     if let Some(note) = &variant.note {
         log::info!("eXo note for {}: {}", game.title, note);

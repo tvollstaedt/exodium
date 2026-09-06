@@ -274,6 +274,7 @@ pub(crate) fn collection_rel_zip(source: &str, game_name: &str, app_path: Option
     }
 }
 
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -291,6 +292,23 @@ mod tests {
         assert_eq!(
             super::collection_rel_game_dir("eXoWin9x", "Connect4 (1995)", None),
             "eXo/eXoWin9x/Connect4 (1995)"
+        );
+    }
+
+    #[test]
+    fn rel_paths_keep_flat_and_lang_layouts_for_other_packs() {
+        let app = Some(r"eXo\eXoDOS\!dos\SQ5\Space Quest V.bat");
+        assert_eq!(
+            super::collection_rel_game_dir("eXoDOS", "SQ5", app),
+            "eXo/eXoDOS/SQ5"
+        );
+        assert_eq!(
+            super::collection_rel_game_dir("eXoDOS_GLP", "SQ5", app),
+            "eXo/eXoDOS/!german/SQ5"
+        );
+        assert_eq!(
+            super::collection_rel_zip("eXoDOS_GLP", "Space Quest V", app),
+            "eXo/eXoDOS/!german/Space Quest V.zip"
         );
     }
 }

@@ -11,7 +11,8 @@ use crate::db::queries;
 use crate::torrent::TorrentIndex;
 
 use super::collections::{collection_rel_game_dir, collection_rel_zip, COLLECTION_MAP};
-use super::games::{configured_data_dir, copy_dir_recursive, extract_game_zip, game_op_lock, running_game_key, running_games};
+use super::games::{configured_data_dir, game_op_lock, running_game_key, running_games};
+use super::install::{copy_dir_recursive, extract_game_zip};
 use super::paths::{bundled_torrent_path, game_root};
 use super::{DbState, TorrentState};
 

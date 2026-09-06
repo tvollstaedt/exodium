@@ -4,6 +4,7 @@ pub(crate) mod paths;
 pub(crate) mod assets;
 pub(crate) mod layout;
 pub(crate) mod library;
+pub(crate) mod install;
 pub(crate) mod content_packs;
 mod games;
 mod playlists;
@@ -17,7 +18,7 @@ pub use content_packs::{
     list_content_packs, uninstall_content_pack, ContentPackState,
 };
 pub use games::{
-    cancel_download, download_game, game_printing_unavailable, game_engine_info, get_config, get_download_progress, get_game,
+    game_printing_unavailable, game_engine_info, get_config, get_game,
     get_game_settings, get_game_variants, get_games, get_genres, get_recently_played,
     get_section_keys, get_installed_games, launch_game, open_manual, set_config,
     set_game_settings,
@@ -36,6 +37,7 @@ pub use setup::{
     setup_from_local, setup_import, setup_start,
     validate_exodos_dir, TorrentState,
 };
+pub use install::{cancel_download, download_game, get_download_progress};
 pub use library::{game_name_from_app_path, reset_game_data, scan_installed_games, torrent_search_names, uninstall_game};
 pub use assets::{get_game_metadata, get_poster_dir, get_preview_dir};
 pub use paths::{bundled_metadata_dir, init_log_dir, init_resource_dir};

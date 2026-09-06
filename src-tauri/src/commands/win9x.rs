@@ -1062,7 +1062,7 @@ pub(crate) async fn launch_win9x_game(
     }
 
     if game.shortcode.as_deref().is_some_and(|s| !s.is_empty()) {
-        super::games::extract_before_launch(app, &game, id, source, &torrent_root).await?;
+        super::install::extract_before_launch(app, &game, id, source, &torrent_root).await?;
     }
 
     // Working dir is <torrent_root>/eXo - every relative path in the confs
