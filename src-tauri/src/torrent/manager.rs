@@ -451,7 +451,7 @@ impl DownloadManager {
     /// own tree, which no eXo tool produces and which made an imported
     /// installation look half-empty.
     pub fn torrent_root(&self) -> PathBuf {
-        crate::commands::setup::game_root(&self.data_dir.to_string_lossy())
+        crate::commands::paths::game_root(&self.data_dir.to_string_lossy())
     }
 
     /// Wait out an in-progress initial check, then apply the CURRENT

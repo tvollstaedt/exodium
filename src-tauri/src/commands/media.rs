@@ -379,7 +379,7 @@ async fn start_media(
     if let Some(cached) = kind.cached(&data_dir, &source, gamedata_idx) {
         let mut status = VideoStatus::phase("ready");
         status.progress = 1.0;
-        status.path = Some(crate::commands::setup::path_to_fwd_slash(&cached));
+        status.path = Some(crate::commands::paths::path_to_fwd_slash(&cached));
         return Ok(status);
     }
 
@@ -429,7 +429,7 @@ async fn start_media(
         kind,
         id,
         gamedata_idx,
-        local_archive: crate::commands::setup::game_root(&data_dir).join(&file.path),
+        local_archive: crate::commands::paths::game_root(&data_dir).join(&file.path),
         archive_len: file.size,
         archive_path: file.path.clone(),
         data_dir,
@@ -486,7 +486,7 @@ impl FetchTarget {
     async fn store(&self, entry_name: &str, bytes: &[u8]) -> Result<String, String> {
         let cached = self.kind.cache_file(&self.data_dir, &self.source, self.gamedata_idx, entry_name);
         write_cache(&cached, bytes).await?;
-        Ok(crate::commands::setup::path_to_fwd_slash(&cached))
+        Ok(crate::commands::paths::path_to_fwd_slash(&cached))
     }
 }
 

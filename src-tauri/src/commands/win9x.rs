@@ -110,7 +110,7 @@ fn resource_candidate(app: &AppHandle, sub: &str) -> Option<PathBuf> {
     if let Ok(res) = app.path().resource_dir() {
         candidates.push(res.join(sub));
     }
-    if let Some(res) = crate::commands::setup::RESOURCE_DIR.get() {
+    if let Some(res) = crate::commands::paths::RESOURCE_DIR.get() {
         candidates.push(res.join(sub));
     }
     // Dev builds: the emulators are no longer in bundle.resources, so tauri
@@ -663,7 +663,7 @@ pub async fn win9x_multiplayer_info(
     let Some(app_path) = game.application_path.as_deref() else {
         return Ok(not_multiplayer);
     };
-    let torrent_root = crate::commands::setup::game_root(&data_dir);
+    let torrent_root = crate::commands::paths::game_root(&data_dir);
     let Some(conf_dir) = app_path
         .replace('\\', "/")
         .rsplit_once('/')
@@ -1013,7 +1013,7 @@ pub(crate) async fn launch_win9x_game(
     per_game_config: &std::collections::HashMap<String, String>,
 ) -> Result<String, String> {
     let source = game.torrent_source.as_deref().unwrap_or("eXoWin9x");
-    let torrent_root = crate::commands::setup::game_root(data_dir);
+    let torrent_root = crate::commands::paths::game_root(data_dir);
     let variant = game.dosbox_variant.clone().unwrap_or_else(|| "x98".to_string());
     let variant = variant.as_str();
 
@@ -1151,7 +1151,7 @@ fn launch_dosbox_x(
         });
         let patched = extract_zip_mounts(&patched, exo_dir);
         let patched_path =
-            super::games::launch_conf_dir(app)?.join(format!("win9x_play_{}.conf", id));
+            super::paths::launch_conf_dir(app)?.join(format!("win9x_play_{}.conf", id));
         std::fs::write(&patched_path, &patched)
             .map_err(|e| format!("Failed to write patched play.conf: {e}"))?;
         patched_path
@@ -1195,7 +1195,7 @@ fn launch_dosbox_x(
             frag.push('\n');
         }
     }
-    let frag_path = super::games::launch_conf_dir(app)?.join(format!("win9x_overrides_{}.conf", id));
+    let frag_path = super::paths::launch_conf_dir(app)?.join(format!("win9x_overrides_{}.conf", id));
     std::fs::write(&frag_path, &frag).map_err(|e| format!("Failed to write override conf: {e}"))?;
     cmd.arg("-conf").arg(&frag_path);
 
@@ -1383,7 +1383,7 @@ pub async fn win9x_engine_available(
             .map_err(|e| e.to_string())?
             .unwrap_or_default()
     };
-    let torrent_root = crate::commands::setup::game_root(&data_dir);
+    let torrent_root = crate::commands::paths::game_root(&data_dir);
     Ok(win9x_engine_resolvable(&app, &torrent_root, &data_dir, Some(variant.as_str())))
 }
 

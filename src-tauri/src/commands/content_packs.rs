@@ -487,7 +487,7 @@ fn unwrapped_source(staging_dir: &Path, install_dir: &Path) -> PathBuf {
     let mut only: Option<PathBuf> = None;
     for entry in entries.flatten() {
         let path = entry.path();
-        if crate::commands::setup::is_os_metadata(&path) {
+        if crate::commands::paths::is_os_metadata(&path) {
             continue;
         }
         if only.is_some() {

@@ -9,7 +9,7 @@ pub mod vhd;
 // Re-export utilities used by the generate_db binary and integration tests
 pub use commands::game_name_from_app_path;
 pub use commands::torrent_search_names;
-pub use commands::setup::game_root;
+pub use commands::paths::game_root;
 pub use commands::{collection_base_id, CollectionDef, COLLECTION_MAP};
 
 use std::path::Path;
@@ -171,7 +171,7 @@ pub fn allow_asset_dir(app: &tauri::AppHandle, data_dir: &Path) {
     // blocking every content-pack image ("asset protocol not configured to
     // allow" spam).
     let dirs = [
-        commands::setup::game_root(&data_dir.to_string_lossy()),
+        commands::paths::game_root(&data_dir.to_string_lossy()),
         data_dir.join("content"),
     ];
     for dir in dirs {
@@ -186,7 +186,7 @@ pub fn allow_asset_dir(app: &tauri::AppHandle, data_dir: &Path) {
     // result was ~200 denials per session and no fallback covers for any game
     // without a downloaded poster pack.
     let preview_roots = [
-        commands::setup::RESOURCE_DIR.get().map(|d| d.join("previews")),
+        commands::paths::RESOURCE_DIR.get().map(|d| d.join("previews")),
         // `tauri dev` resolves previews from the source tree - see
         // setup::get_preview_dir, which probes exactly this path first.
         Some(Path::new(env!("CARGO_MANIFEST_DIR")).join("resources").join("previews")),
@@ -756,7 +756,7 @@ pub fn run() {
             // Establishes the game root - and repairs a pre-single-root install
             // on the way, which rewrites data_dir. Must run before anything
             // below reads it.
-            commands::setup::load_root_folder(&conn);
+            commands::paths::load_root_folder(&conn);
 
             // Clean up stale content-pack download artifacts from interrupted installs.
             if let Ok(Some(user_data_dir)) = db::queries::get_config(&conn, "data_dir") {

@@ -67,7 +67,7 @@ struct IndexEntry {
 fn index() -> &'static [IndexEntry] {
     static INDEX: OnceLock<Vec<IndexEntry>> = OnceLock::new();
     INDEX.get_or_init(|| {
-        let Ok(dir) = crate::commands::setup::bundled_metadata_dir() else {
+        let Ok(dir) = crate::commands::paths::bundled_metadata_dir() else {
             log::error!("scummvm: no bundled metadata dir - launch index unavailable");
             return Vec::new();
         };
@@ -193,7 +193,7 @@ fn ensure_config(data_dir: &str, slug: &str) -> Result<PathBuf, String> {
     if ini.exists() {
         return Ok(ini);
     }
-    let bundled = crate::commands::setup::bundled_metadata_dir()?
+    let bundled = crate::commands::paths::bundled_metadata_dir()?
         .join("scummvm_ini")
         .join(format!("{slug}.ini"));
     match std::fs::read(&bundled) {
@@ -466,7 +466,7 @@ async fn launch_inner(
     per_game_config: &HashMap<String, String>,
 ) -> Result<String, String> {
     let source = game.torrent_source.as_deref().unwrap_or("eXoScummVM");
-    let torrent_root = crate::commands::setup::game_root(data_dir);
+    let torrent_root = crate::commands::paths::game_root(data_dir);
     let game_dir = super::games::extract_before_launch(app, &game, id, source, &torrent_root).await?;
     let variant = select_variant(&game_dir, &torrent_root, per_game_config)?;
     if let Some(note) = &variant.note {
@@ -569,7 +569,7 @@ pub async fn scummvm_engine_info(
             source: None,
         });
     };
-    let torrent_root = crate::commands::setup::game_root(&data_dir);
+    let torrent_root = crate::commands::paths::game_root(&data_dir);
     let resolved = resolve_scummvm(&torrent_root, &data_dir, &variant);
     Ok(ScummVmEngineInfo {
         available: resolved.is_some(),

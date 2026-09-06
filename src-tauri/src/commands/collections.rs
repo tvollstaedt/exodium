@@ -273,3 +273,24 @@ pub(crate) fn collection_rel_zip(source: &str, game_name: &str, app_path: Option
         None => format!("{}/{}.zip", prefix, game_name),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn rel_paths_nest_win9x_games_under_their_year_dir() {
+        let app = Some(r"eXo\eXoWin9x\!win9x\1995\Connect4 (1995)\Connect4 (1995).bat");
+        assert_eq!(
+            super::collection_rel_game_dir("eXoWin9x", "Connect4 (1995)", app),
+            "eXo/eXoWin9x/1995/Connect4 (1995)"
+        );
+        assert_eq!(
+            super::collection_rel_zip("eXoWin9x", "Connect4 (1995)", app),
+            "eXo/eXoWin9x/1995/Connect4 (1995).zip"
+        );
+        // A malformed path falls back to the flat layout instead of panicking.
+        assert_eq!(
+            super::collection_rel_game_dir("eXoWin9x", "Connect4 (1995)", None),
+            "eXo/eXoWin9x/Connect4 (1995)"
+        );
+    }
+}

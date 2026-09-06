@@ -27,6 +27,7 @@ use crate::models::Game;
 use crate::torrent::manager::DownloadProgress;
 
 use super::TorrentState;
+use super::paths::launch_conf_dir;
 use super::collections::{collection_game_prefix, collection_lang_dir, collection_rel_game_dir, collection_rel_zip};
 
 
@@ -959,7 +960,7 @@ pub async fn uninstall_game(
         .to_string();
 
     let source = game.torrent_source.as_deref().unwrap_or("eXoDOS");
-    let torrent_root = crate::commands::setup::game_root(&data_dir);
+    let torrent_root = crate::commands::paths::game_root(&data_dir);
 
     // Get game name from bat filename for ZIP deletion
     let game_name = game.application_path.as_deref()
@@ -1172,7 +1173,7 @@ pub async fn reset_game_data(db_state: State<'_, DbState>, id: i64) -> Result<St
 
     let shortcode = game.shortcode.as_deref().ok_or("Game has no shortcode")?.to_string();
     let source = game.torrent_source.as_deref().unwrap_or("eXoDOS");
-    let torrent_root = crate::commands::setup::game_root(&data_dir);
+    let torrent_root = crate::commands::paths::game_root(&data_dir);
     let game_name = game
         .application_path
         .as_deref()
@@ -1349,7 +1350,7 @@ fn conf_requests_printer(text: &str) -> bool {
 /// root is `launch_game`'s working-dir base.
 fn resolve_game_conf(data_dir: &str, dosbox_conf: &str) -> Option<(PathBuf, PathBuf)> {
     let rel = dosbox_conf.replace('\\', "/");
-    let root = crate::commands::setup::game_root(data_dir);
+    let root = crate::commands::paths::game_root(data_dir);
 
     let direct = root.join(&rel);
     if direct.exists() {
@@ -1457,7 +1458,7 @@ pub async fn game_engine_info(
     let Some(data_dir) = data_dir else {
         return Ok(GameEngineInfo { ece_available: false, uses_ece: false });
     };
-    let main_root = crate::commands::setup::game_root(&data_dir);
+    let main_root = crate::commands::paths::game_root(&data_dir);
     Ok(GameEngineInfo {
         ece_available: resolve_engine(dosbox_variant.as_deref(), &main_root, &Default::default())
             .is_some(),
@@ -1500,7 +1501,7 @@ pub async fn game_printing_unavailable(
         return Ok(false);
     }
     let main_root =
-        crate::commands::setup::game_root(&data_dir);
+        crate::commands::paths::game_root(&data_dir);
     Ok(resolve_engine(dosbox_variant.as_deref(), &main_root, &per_game_config).is_none())
 }
 
@@ -2810,69 +2811,6 @@ pub async fn get_recently_played(state: State<'_, DbState>, limit: Option<usize>
     queries::fetch_recently_played(&conn, limit.unwrap_or(12)).map_err(|e| e.to_string())
 }
 
-/// Launch a downloaded game via DOSBox Staging.
-/// Where the per-launch DOSBox config fragments live.
-///
-/// NOT the game data dir: that is a location the user picked for their games,
-/// and these files accumulated there one per game ever launched (15 of them in
-/// one report) with nothing ever cleaning them up. They are derived from
-/// settings and rewritten on every launch, so the app's own directory is the
-/// right home - and `sweep_legacy_launch_confs` removes the old ones.
-pub(crate) fn launch_conf_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    use tauri::Manager;
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join("launch");
-    std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create {}: {e}", dir.display()))?;
-    Ok(dir)
-}
-
-/// Remove `*.conf` files from `dir`, optionally only those with `prefix`.
-/// Non-recursive and never touches subdirectories - both callers clean a flat
-/// directory that also holds files belonging to someone else.
-fn remove_conf_files(dir: impl AsRef<Path>, prefix: Option<&str>) -> usize {
-    let Ok(entries) = std::fs::read_dir(dir) else { return 0 };
-    let mut removed = 0;
-    for entry in entries.flatten() {
-        let name = entry.file_name();
-        let Some(name) = name.to_str() else { continue };
-        if !name.ends_with(".conf") {
-            continue;
-        }
-        if prefix.is_some_and(|p| !name.starts_with(p)) {
-            continue;
-        }
-        if std::fs::remove_file(entry.path()).is_ok() {
-            removed += 1;
-        }
-    }
-    removed
-}
-
-/// Delete launch fragments left in the game data dir by earlier versions.
-/// They are regenerated on demand, so removing them loses nothing.
-pub fn sweep_legacy_launch_confs(data_dir: &str) {
-    let removed = remove_conf_files(data_dir, Some("exodium_"));
-    if removed > 0 {
-        log::info!("Removed {} stray launch config(s) from the game folder", removed);
-    }
-}
-
-/// Empty the launch-config dir at startup.
-///
-/// One fragment is written per game ever launched and it is only read while
-/// DOSBox starts up, so without this they pile up forever - the same unbounded
-/// growth that made them a problem in the game folder. Startup is the safe
-/// moment: no game this instance launched is running yet.
-pub fn prune_launch_confs(app: &AppHandle) {
-    let Ok(dir) = launch_conf_dir(app) else { return };
-    let removed = remove_conf_files(&dir, None);
-    if removed > 0 {
-        log::debug!("Cleared {} stale launch config(s)", removed);
-    }
-}
 
 #[tauri::command]
 pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) -> Result<String, String> {
@@ -2966,7 +2904,7 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
     // main tree and this game's tree are the same directory.
     let source = game.torrent_source.as_deref().unwrap_or("eXoDOS");
     let src_game_prefix = collection_game_prefix(source);
-    let main_torrent_root = crate::commands::setup::game_root(&data_dir);
+    let main_torrent_root = crate::commands::paths::game_root(&data_dir);
     let torrent_root = main_torrent_root.clone();
     // working_dir is the first path component of game_prefix (e.g. "eXo")
     let working_dir_name = src_game_prefix.split('/').next().unwrap_or("eXo");
@@ -3309,7 +3247,7 @@ pub(crate) fn spawn_emulator_and_track(
     {
         cmd.stdin(std::process::Stdio::null());
         let mut stdio_set = false;
-        if let Some(log_dir) = crate::commands::setup::LOG_DIR.get() {
+        if let Some(log_dir) = crate::commands::paths::LOG_DIR.get() {
             let _ = std::fs::create_dir_all(log_dir);
             let dosbox_log_path = log_dir.join(format!("dosbox-{}.log", id));
             match std::fs::File::create(&dosbox_log_path) {
@@ -3406,47 +3344,6 @@ mod tests {
         assert_eq!(super::strip_appdir_entries("/tmp/.mount_x/usr/bin:", "/tmp/.mount_x"), None);
     }
 
-    // Both cleanups run against directories that also hold the user's own
-    // files, so "only ours, only .conf, never recurse" is the contract.
-    #[test]
-    fn remove_conf_files_respects_prefix_and_extension() {
-        let dir = std::env::temp_dir().join(format!("exodium_conf_sweep_{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(dir.join("sub")).unwrap();
-        for f in ["exodium_a.conf", "global_overrides_7.conf", "dosbox.conf", "notes.txt"] {
-            std::fs::write(dir.join(f), b"x").unwrap();
-        }
-        std::fs::write(dir.join("sub").join("exodium_nested.conf"), b"x").unwrap();
-
-        assert_eq!(super::remove_conf_files(&dir, Some("exodium_")), 1);
-        assert!(!dir.join("exodium_a.conf").exists());
-        // The game's own dosbox.conf must survive a prefixed sweep.
-        assert!(dir.join("dosbox.conf").exists());
-        assert!(dir.join("sub").join("exodium_nested.conf").exists());
-
-        assert_eq!(super::remove_conf_files(&dir, None), 2);
-        assert!(dir.join("notes.txt").exists());
-        assert_eq!(super::remove_conf_files(&dir, None), 0);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn rel_paths_nest_win9x_games_under_their_year_dir() {
-        let app = Some(r"eXo\eXoWin9x\!win9x\1995\Connect4 (1995)\Connect4 (1995).bat");
-        assert_eq!(
-            super::collection_rel_game_dir("eXoWin9x", "Connect4 (1995)", app),
-            "eXo/eXoWin9x/1995/Connect4 (1995)"
-        );
-        assert_eq!(
-            super::collection_rel_zip("eXoWin9x", "Connect4 (1995)", app),
-            "eXo/eXoWin9x/1995/Connect4 (1995).zip"
-        );
-        // A malformed path falls back to the flat layout instead of panicking.
-        assert_eq!(
-            super::collection_rel_game_dir("eXoWin9x", "Connect4 (1995)", None),
-            "eXo/eXoWin9x/Connect4 (1995)"
-        );
-    }
 
     #[test]
     fn rel_paths_keep_flat_and_lang_layouts_for_other_packs() {
@@ -3712,7 +3609,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let data_dir = tmp.path().to_string_lossy().into_owned();
         let rel = "eXo/eXoWin3x/!win3x/GeoGeo/dosbox.conf";
-        let root = tmp.path().join(crate::commands::setup::DEFAULT_ROOT_FOLDER);
+        let root = tmp.path().join(crate::commands::paths::DEFAULT_ROOT_FOLDER);
 
         // Nothing on disk: no result.
         assert!(resolve_game_conf(&data_dir, rel).is_none());

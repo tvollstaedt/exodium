@@ -137,7 +137,7 @@ pub(crate) fn load_manifest() -> Result<Manifest, String> {
     }
 
     // Production: read the bundled copy from resource_dir.
-    if let Some(res_dir) = super::setup::RESOURCE_DIR.get() {
+    if let Some(res_dir) = super::paths::RESOURCE_DIR.get() {
         let bundled = res_dir.join("manifest.json");
         if bundled.exists() {
             let content = std::fs::read_to_string(&bundled)

@@ -1,5 +1,6 @@
 pub mod media;
 pub(crate) mod collections;
+pub(crate) mod paths;
 pub(crate) mod content_packs;
 mod games;
 mod playlists;
@@ -25,11 +26,12 @@ pub use playlists::{
     set_playlist_membership,
 };
 pub use setup::{
-    bundled_metadata_dir, factory_reset, game_name_from_app_path,
+    factory_reset, game_name_from_app_path,
     get_available_collections, get_default_data_dir, get_game_metadata, get_log_dir,
     data_dir_is_empty, get_poster_dir, get_preview_dir, get_setup_status, get_torrent_info,
-    init_download_manager, init_log_dir, init_resource_dir, open_log_folder,
+    init_download_manager, open_log_folder,
     scan_installed_games, setup_from_local, setup_import, setup_start, torrent_search_names,
     validate_exodos_dir, TorrentState,
 };
+pub use paths::{bundled_metadata_dir, init_log_dir, init_resource_dir};
 pub use collections::{collection_base_id, CollectionDef, COLLECTION_MAP};

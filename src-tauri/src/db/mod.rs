@@ -505,7 +505,7 @@ fn populate_manual_paths(conn: &Connection) -> DbResult<()> {
             if d.exists() {
                 Some(d.clone())
             } else {
-                crate::commands::setup::RESOURCE_DIR
+                crate::commands::paths::RESOURCE_DIR
                     .get()
                     .map(|r| r.join("metadata"))
             }
