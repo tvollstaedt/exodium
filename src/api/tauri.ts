@@ -175,10 +175,8 @@ export async function launchGame(id: number): Promise<string> {
   return invoke("launch_game", { id });
 }
 
-/** Whether the game's printing features will be missing at launch (13 eXoDOS
- *  titles enable a virtual printer; Staging has none yet). The backend decides
- *  with the same engine-selection logic launch_game uses, so Windows + an
- *  installed ECE build correctly answers false. */
+/** The game wants eXo's virtual printer and the engine that would run is
+ *  Staging, which has none. Decided by the backend's own engine selection. */
 export async function gamePrintingUnavailable(id: number): Promise<boolean> {
   return invoke("game_printing_unavailable", { id });
 }
@@ -453,10 +451,8 @@ export async function getAvailableCollections(): Promise<CollectionInfo[]> {
   return invoke("get_available_collections");
 }
 
-/** `adopt` lets archives on disk ADD games to the library. Only pass it where
- *  the user is asking what is in a folder (Rescan, data-dir change) - a
- *  download drags its piece neighbours in with it, so the automatic scan must
- *  confirm the library, not extend it. */
+/** `adopt` lets archives on disk ADD games to the library: Rescan and a
+ *  data-dir change only, never the startup scan (§4). */
 export async function scanInstalledGames(adopt = false): Promise<number> {
   return invoke("scan_installed_games", { adopt });
 }
@@ -544,11 +540,8 @@ export interface VideoStatus {
   error: string | null;
 }
 
-/** Start (or join) the fetch of a game's preview video. Returns immediately -
- *  the video is streamed out of the GameData archive, which can take a minute
- *  on a cold torrent. Poll getVideoStatus. */
-/** False on a Linux system whose GStreamer cannot build an audio pipeline -
- *  mounting a <video> there wedges the WebKit process and freezes the app. */
+/** False where mounting a <video> would wedge WebKit (Linux without a
+ *  GStreamer audio sink). */
 export async function videoPlaybackSupported(): Promise<boolean> {
   return invoke("video_playback_supported");
 }

@@ -299,8 +299,7 @@ body {
   color: var(--text-muted);
 }
 
-/* Status line + settings shortcut that used to live in the pill's tooltip
-   and click target. */
+/* Status line + settings shortcut. */
 .download-sheet-footer {
   display: flex;
   align-items: center;

@@ -17,13 +17,9 @@ use walkdir::WalkDir;
 /// working.
 pub const SEEDING_OFF_BPS: u32 = 1024;
 
-/// Apply the effective transfer caps to a session.
-///
-/// Free-standing because two callers need it: `DownloadManager::apply_limits`
-/// for a running session, and `init_download_manager` for one that was just
-/// created (a new session starts unlimited in both directions). Both MUST go
-/// through here - seeding and the user's upload limit write the same knob, and
-/// a second copy of this rule would drift from the first.
+/// The ONE place that sets the session's transfer caps: seeding and the
+/// user's upload limit write the same knob, and seeding-off (1 KB/s) wins.
+/// Called for a running session (`apply_limits`) and a fresh one (§11).
 pub fn apply_session_limits(
     session: &librqbit::Session,
     seeding: bool,
@@ -69,13 +65,8 @@ fn clear_file_pieces(bytes: &mut [u8], offset: u64, size: u64, piece_len: u64) {
     }
 }
 
-/// Convert a path to its NT extended-length form on Windows (`\\?\C:\...` or
-/// `\\?\UNC\server\share\...`). On other platforms this is a no-op.
-///
-/// The prefix tells the Win32 API to skip path normalization and the
-/// MAX_PATH (260) check, allowing paths up to 32 767 characters. librqbit
-/// passes the output folder verbatim to the file writer, so prefixing it
-/// here is enough - every file it later opens inherits the long-path mode.
+/// NT extended-length form (`\\?\C:\...`, `\\?\UNC\...`): lifts the
+/// MAX_PATH limit for every file librqbit opens under the folder.
 #[cfg(target_os = "windows")]
 fn to_long_path(p: &Path) -> String {
     // \\?\ disables path normalization, so we must hand it backslash-only paths.
@@ -100,25 +91,11 @@ fn to_long_path(p: &Path) -> String {
     p.to_string_lossy().into_owned()
 }
 
-/// Remove 0-byte zip files in `root` that are NOT part of the current torrent
-/// - i.e. true orphans from a previous run or unrelated user files.
-///
-/// `keep_paths` must contain the **full set** of the torrent's file paths
-/// (forward-slashed, as produced by `TorrentIndex::from_file`), not just the
-/// user's current selection. librqbit's `init()` creates a 0-byte placeholder
-/// for **every** file declared by the torrent, regardless of `only_files`.
-/// With fastresume's piece-cache (v0.6.4+), pieces shared between files get
-/// marked "had" once any selected file's pieces arrive - and librqbit will
-/// then refuse to re-download those pieces even if some of their target files
-/// were deleted. Deleting a tracked placeholder therefore puts librqbit's
-/// in-memory state at odds with disk: `file_progress` reports 100% complete
-/// while `<file>.zip` is gone, and the user is stuck in an extraction loop
-/// that never resolves (observed v0.6.6 with Dominium 762/762 bytes "100%"
-/// but the zip never on disk).
-///
-/// To make the match work on Windows - where `WalkDir` yields backslash-
-/// separated paths - we normalize each on-disk entry's string form to forward
-/// slashes before comparing.
+/// Remove 0-byte zips under `root` that no enabled torrent declares.
+/// `keep_paths` must be the FULL file list of every collection sharing the
+/// root, not the selection: librqbit creates a placeholder per declared file
+/// and its fastresume ledger marks shared pieces "have", so deleting a
+/// tracked placeholder leaves a file at "100%" that never appears on disk.
 fn cleanup_placeholder_files(root: &Path, keep_paths: &[String]) -> std::io::Result<()> {
     let mut removed = 0;
     let mut kept = 0;
@@ -181,12 +158,8 @@ pub struct DownloadProgress {
     /// Optional error/status message from the command layer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-    /// Torrent lifecycle state from librqbit. During the `initializing` phase
-    /// librqbit hashes the entire torrent's existing on-disk content before
-    /// any peer pieces are requested - on Windows with thousands of placeholder
-    /// files this can take several minutes, and per-file `progress` will stay
-    /// at 0 the whole time. The frontend uses this to show a meaningful
-    /// "Validating…" status instead of a frozen 0%.
+    /// librqbit's torrent state. `initializing` (hash check, minutes on
+    /// Windows) keeps `progress` at 0; the UI shows "Validating…" instead.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub torrent_state: Option<String>,
     /// Whole-torrent validation/download progress (0.0..1.0). During init this
@@ -194,10 +167,8 @@ pub struct DownloadProgress {
     /// bytes across all selected files.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub torrent_progress: Option<f64>,
-    /// Progress (0.0..1.0) of the game's extras (GameData: manuals, videos,
-    /// music). Downloads continue after the game itself is installed and
-    /// playable - surfaced so the UI can show the second phase instead of
-    /// letting it finish invisibly.
+    /// Progress of the game's extras (GameData), which keep downloading after
+    /// the game is playable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub extras_progress: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -226,30 +197,20 @@ pub struct DownloadManagerStatus {
     pub live: bool,
 }
 
-/// Manages BitTorrent downloads using librqbit with selective file support.
-/// Must be Send+Sync for use in Tauri's managed state.
+/// One collection's torrent in the shared librqbit session, added on the
+/// first download (adding creates 14,000+ placeholder files).
 ///
-/// The torrent is only added to the session on first download request,
-/// avoiding the creation of 14,000+ placeholder files at startup.
-///
-/// Lock-order convention: `selection_apply` before `handle` before
-/// `selected_files`, always. Mixed order deadlocks - tokio's
-/// write-preferring RwLock blocks new readers while a writer waits, so two
-/// tasks holding one lock each and waiting on the other freeze every
-/// download.
+/// Lock order: `selection_apply`, then `handle`, then `selected_files`.
+/// tokio's RwLock is write-preferring, so a mixed order deadlocks.
 pub struct DownloadManager {
     session: Arc<Session>,
     handle: RwLock<Option<Arc<ManagedTorrent>>>,
     torrent_index: TorrentIndex,
     torrent_bytes: Arc<Vec<u8>>,
     selected_files: RwLock<HashSet<usize>>,
-    /// Serializes every `update_only_files` push into librqbit (including
-    /// its wait-for-check preamble). Two concurrent selection updates - or
-    /// one racing the re-check a previous update triggered - wedge
-    /// librqbit's checking task so hard that even `stats()` blocks forever,
-    /// freezing every progress poll (field report: three first downloads
-    /// clicked in quick succession on Linux 0.8.7, UI stuck on "Starting
-    /// download..." with a silent log).
+    /// Serializes every selection push into librqbit: two concurrent
+    /// `update_only_files`, or one racing a re-check, wedge its checking
+    /// task until even `stats()` blocks.
     selection_apply: tokio::sync::Mutex<()>,
     data_dir: PathBuf,
     /// Hex SHA1 info-hash of this manager's torrent, for finding it among
@@ -258,13 +219,8 @@ pub struct DownloadManager {
     /// Where librqbit keeps <hash>.bitv piece-ledger files - needed for the
     /// surgical ledger patch on uninstall.
     persistence_dir: PathBuf,
-    /// Torrent-relative paths that placeholder cleanup must never delete.
-    /// All four eXoDOS torrents overlay into the same root, so this must be
-    /// the UNION of every enabled collection's file list (set after all
-    /// managers are built) - cleaning with only this torrent's list deletes
-    /// placeholders that sibling torrents still track (cross-collection
-    /// variant of the v0.6.6 stuck-download bug). Falls back to this
-    /// torrent's own list when unset.
+    /// Union of every enabled collection's file list, since all share one
+    /// root (`cleanup_placeholder_files`). This torrent's own list when unset.
     cleanup_keep_paths: std::sync::RwLock<Option<Arc<Vec<String>>>>,
 }
 
@@ -276,14 +232,9 @@ pub(crate) fn fastresume_dir(session_dir: &Path) -> PathBuf {
 }
 
 impl DownloadManager {
-    /// Create a shared librqbit session. Call once, then pass to `new_with_session`.
-    /// `session_dir` is where librqbit stores its internal state (.librqbit/).
-    /// This should be the app config directory, NOT the game data directory.
-    ///
-    /// `persistence_dir` is where fastresume bitfields, per-torrent .torrent
-    /// copies and session.json live. Pre-seeding `<info_hash>.bitv` files in
-    /// here before this call lets librqbit skip its initial checksum pass on
-    /// fresh installs - see `setup::seed_fastresume_bitvs`.
+    /// The shared librqbit session. `session_dir` is the app config dir (not
+    /// the data dir); `persistence_dir` holds the fastresume bitfields and
+    /// session.json - a pre-seeded `<info_hash>.bitv` skips the initial check.
     pub async fn create_session(
         session_dir: &Path,
         persistence_dir: &Path,
@@ -299,11 +250,8 @@ impl DownloadManager {
                     persistence: None,
                     ..Default::default()
                 }),
-                // fastresume + JSON persistence: librqbit caches the per-torrent
-                // have-pieces bitfield to `<persistence_dir>/<info_hash>.bitv`.
-                // On subsequent adds (or after we plant an empty bitfield for a
-                // fresh install) librqbit skips the initial_check pass entirely
-                // - turning a 5-10 minute Windows wait into seconds.
+                // The persisted bitfield lets later adds skip the initial
+                // check (minutes on Windows).
                 fastresume: true,
                 persistence: Some(SessionPersistenceConfig::Json {
                     folder: Some(persistence_dir.to_path_buf()),
@@ -347,12 +295,9 @@ impl DownloadManager {
         })
     }
 
-    /// Adopt this manager's torrent if the session auto-resumed it from JSON
-    /// persistence. Without this, a download in flight at last shutdown keeps
-    /// downloading inside librqbit after restart, but the manager reports no
-    /// progress (handle = None) and the next add_torrent would apply a fresh
-    /// selection that silently deselects the resumed files. Returns true when
-    /// a session torrent was adopted.
+    /// Adopt a torrent the session auto-resumed from persistence; otherwise a
+    /// download in flight at shutdown continues invisibly and the next add
+    /// would deselect it. True when adopted.
     pub async fn hydrate_from_session(&self) -> bool {
         if self.handle.read().await.is_some() {
             return true;
@@ -398,22 +343,8 @@ impl DownloadManager {
         &self.torrent_index
     }
 
-    /// The one place that sets the session's transfer caps.
-    ///
-    /// Seeding and the user's upload limit write the same knob, so they cannot
-    /// be applied independently - whoever ran last would win, and turning
-    /// sharing off after setting a limit would silently lift the cap. Seeding
-    /// off always wins: librqbit has no runtime upload kill-switch, and 1 KB/s
-    /// keeps protocol handshakes working while making uploads negligible.
-    ///
-    /// Limits are in KB/s, `None` meaning unlimited. The session is shared
-    /// across collections, so calling this on any one manager affects all.
-    /// Live transfer rates for the whole session.
-    ///
-    /// Session-wide on purpose: all collections share one session, so this is
-    /// one cheap read instead of summing per-torrent stats - and `stats()`
-    /// copies a 15,000-entry file-progress vector plus a path String per
-    /// selected file, which is a lot of work to poll for three numbers.
+    /// Session-wide rates: one read, not a sum over torrents (`stats()` copies
+    /// a 15,000-entry file-progress vector per call).
     pub fn session_transfer(&self) -> SessionTransfer {
         let snap = self.session.stats_snapshot();
         SessionTransfer {
@@ -424,14 +355,13 @@ impl DownloadManager {
         }
     }
 
+    /// Caps in KB/s, `None` = unlimited; session-wide. See `apply_session_limits`.
     pub fn apply_limits(&self, seeding: bool, up_kbps: Option<u32>, down_kbps: Option<u32>) {
         apply_session_limits(&self.session, seeding, up_kbps, down_kbps);
     }
 
-    /// Stop the shared librqbit session: aborts live torrents and flushes
-    /// persistence, so callers can delete data files without a writer task
-    /// racing the delete and re-creating them. The session is shared across
-    /// collections - stopping via any one manager stops them all.
+    /// Stop the shared session (all collections) and flush persistence, so a
+    /// caller can delete data files without a writer re-creating them.
     pub async fn shutdown_session(&self) {
         self.session.stop().await;
     }
@@ -441,35 +371,16 @@ impl DownloadManager {
         self.selected_files.read().await.contains(&file_index)
     }
 
-    /// The directory this torrent's files live in.
-    ///
-    /// ONE root for every collection, not `<data_dir>/<torrent name>`: eXo's
-    /// packs are separate torrents but a single installation (their
-    /// Setup/eXoMerge bats merge `eXo\` and `Content\` into one folder), and
-    /// their file paths - `eXo/eXoDOS/…`, `eXo/eXoWin9x/…` - are built to sit
-    /// side by side. Following librqbit's naming instead gave every pack its
-    /// own tree, which no eXo tool produces and which made an imported
-    /// installation look half-empty.
+    /// The single game root every collection writes into (§2), never
+    /// `<data_dir>/<torrent name>`.
     pub fn torrent_root(&self) -> PathBuf {
         crate::commands::paths::game_root(&self.data_dir.to_string_lossy())
     }
 
-    /// Wait out an in-progress initial check, then apply the CURRENT
-    /// selection (re-read at apply time, so concurrent waiters converge on
-    /// the same final set).
-    ///
-    /// Pushing update_only_files into an initializing torrent has wedged
-    /// librqbit's checking task in the field (Windows, uninstall -> re-add,
-    /// "Validating N%" frozen forever) - twice, both times when a selection
-    /// update raced the check. So: wait for the check to finish first. Must
-    /// NOT be called while holding the handle lock - a full re-check takes
-    /// minutes and progress polling reads that lock.
-    ///
-    /// The `selection_apply` mutex makes appliers mutually exclusive: an
-    /// update can also race the re-check that a PREVIOUS update triggered
-    /// (three games queued back-to-back on a fresh collection), which
-    /// wedges librqbit just the same. Each applier therefore re-runs the
-    /// wait loop while already holding the mutex.
+    /// Wait out an initial check, then push the CURRENT selection (re-read
+    /// under `selection_apply`, so concurrent waiters converge). A push into
+    /// a checking torrent wedges librqbit. Never call with the handle lock
+    /// held: a re-check takes minutes and progress polling reads that lock.
     async fn wait_ready_then_apply_selection(
         &self,
         handle: &Arc<ManagedTorrent>,
@@ -489,11 +400,9 @@ impl DownloadManager {
             }
             tokio::time::sleep(Duration::from_millis(500)).await;
         }
-        // Small retry tail for the init->live transition race. The
-        // selected_files read lock is HELD across the apply so a concurrent
-        // deselect_file (write lock) strictly serializes after us and
-        // re-applies the newer, smaller set - without this a cancelled file
-        // could be resurrected inside librqbit by our in-flight apply.
+        // Retry tail for the init->live race. The `selected_files` read lock
+        // is held across the push, so a concurrent deselect serializes after
+        // us and re-applies its smaller set.
         const MAX_ATTEMPTS: u32 = 10;
         for attempt in 0..MAX_ATTEMPTS {
             let result = {
@@ -511,16 +420,10 @@ impl DownloadManager {
         unreachable!()
     }
 
-    /// Open a streaming reader over ONE file without selecting it for
-    /// download. The stream's own read position drives which pieces librqbit
-    /// fetches, which is what lets a 2.5 MB video come out of a 1.1 GB archive
-    /// without pulling the archive.
-    ///
-    /// Adds the torrent if it isn't running yet, reusing `download_files` with
-    /// an empty index list rather than duplicating that (delicate) add path.
-    /// librqbit's `FileStream` type lives in a private module and cannot be
-    /// named from here, so the reader is returned by its capabilities - which
-    /// is all `zip_range` needs anyway.
+    /// A seekable reader over one file WITHOUT selecting it: the read position
+    /// drives which pieces librqbit fetches (§14). Adds the torrent with an
+    /// empty selection when needed. Returned by capability because librqbit's
+    /// `FileStream` type is private.
     pub async fn stream_file(
         &self,
         file_index: usize,
@@ -571,12 +474,8 @@ impl DownloadManager {
         } else {
             // First download - add torrent to session now
             let selected = self.selected_files.read().await.clone();
-            // Explicitly set output_folder to torrent_root so downloads land in data_dir,
-            // not in the session's default output folder (which is app_data_dir).
-            // On Windows, prefix with \\?\ so file writes use the NT extended-length
-            // path API (32 768-char limit) instead of the legacy MAX_PATH (260).
-            // Without this, deeply nested torrent entries silently fail to open and
-            // the download appears stuck at 0%.
+            // Explicit output folder (the session default is the app data
+            // dir); long-path form on Windows or nested entries fail to open.
             let raw_root = self.torrent_root();
             let output_folder = to_long_path(&raw_root);
 
@@ -630,27 +529,18 @@ impl DownloadManager {
             *handle_guard = Some(Arc::clone(&handle));
             log::info!("Torrent added (already_managed={already_managed}), downloading files: {:?}", file_indices);
 
-            // If the session already had this torrent, apply our file selection.
-            // Waits out any in-progress initial check first (see
-            // wait_ready_then_apply_selection) - done AFTER dropping the
-            // handle lock below, via `pending_selection_update`.
+            // Already in the session: merge and re-apply the selection after
+            // the handle lock is dropped (`pending_selection_update`).
             if already_managed {
-                // Merge librqbit's current selection first: the session may
-                // have auto-resumed files from a previous run that this
-                // manager doesn't know about - replacing the selection
-                // outright would silently deselect them mid-download.
+                // Merge, don't replace: auto-resumed files from a previous
+                // run would otherwise be deselected mid-download.
                 let session_selection = handle.only_files().unwrap_or_default();
                 let mut selected = self.selected_files.write().await;
                 selected.extend(session_selection.iter().copied());
             }
 
-            // Periodic diagnostic stats: log peer count, live state, and
-            // download speed every 2 s for 60 s after a fresh add. This is
-            // the window during which Windows-stuck-at-0% manifests; without
-            // these snapshots we have no signal to tell network/peer issues
-            // (peers=0) apart from disk/librqbit issues (peers>0, speed=0).
-            // Capture file paths up front so the spawned task does not need
-            // a reference to self.
+            // Diagnostic stats every 2 s for 60 s after an add: tells a peer
+            // problem (peers=0) from a disk one (peers>0, speed=0).
             let stats_handle = Arc::clone(&handle);
             let watched_files: Vec<(usize, String, u64)> = file_indices.iter()
                 .filter_map(|&idx| {
@@ -661,20 +551,14 @@ impl DownloadManager {
                 let start = std::time::Instant::now();
                 while start.elapsed() < Duration::from_secs(60) {
                     let s = stats_handle.stats();
-                    // The Display impl gives us state + progress + (when live)
-                    // download/upload speeds - the most diagnostic-dense
-                    // single line we can emit. Augment with the per-file
-                    // breakdown so we can tell partial progress apart.
                     let per_file: Vec<String> = watched_files.iter().map(|(idx, name, size)| {
                         let dl = s.file_progress.get(*idx).copied().unwrap_or(0);
                         let pct = if *size > 0 { (dl as f64 / *size as f64) * 100.0 } else { 0.0 };
                         format!("[{}]={}/{} ({:.1}%) {}", idx, dl, size, pct, name)
                     }).collect();
                     if let Some(ref err) = s.error {
-                        // Also fires when the torrent was removed from the
-                        // session (uninstall invalidation) - stats() then
-                        // reports a broken "None" state every poll. Log once
-                        // and stop instead of spamming for the full 60 s.
+                        // Also after an uninstall removed the torrent: log
+                        // once, stop.
                         log::error!("[stats] state={} error={:?}", s.state, err);
                         break;
                     }
@@ -687,22 +571,8 @@ impl DownloadManager {
                 log::debug!("[stats] periodic logger finished after 60 s");
             });
 
-            // Cleanup: removes 0-byte zip files that are NOT in the torrent's
-            // file list (true orphans from a previous run / unrelated files).
-            //
-            // Critical: pass the FULL torrent file list, not just the user's
-            // current selection. librqbit's `init()` opens (creates) every
-            // file declared by the torrent, so all 14k+ slots exist as 0-byte
-            // sparse files immediately after add. With fastresume enabled
-            // (v0.6.4+), pieces shared between files get marked "have" once
-            // any selected file's pieces arrive - and librqbit then refuses
-            // to re-download those pieces, even if some target files were
-            // deleted. Deleting a tracked placeholder therefore makes
-            // librqbit's in-memory state lie about disk state, leaving the
-            // user stuck in a "100% but zip missing" loop on subsequent
-            // downloads (observed v0.6.4-v0.6.6).
-            // ... and because all collections share one overlay root, prefer
-            // the union keep-list over this torrent's own file list.
+            // Orphan cleanup with the union keep-list (see
+            // `cleanup_placeholder_files` for why the full list matters).
             let root = self.torrent_root();
             let keep_paths: Arc<Vec<String>> = self
                 .cleanup_keep_paths
@@ -832,13 +702,9 @@ impl DownloadManager {
         }
     }
 
-    /// Remove a file from the active selection, telling librqbit to stop prioritising it.
-    /// Mutates the set immediately, then pushes it to the session via the
-    /// serialized applier in the background: a direct update_only_files here
-    /// was the second unserialized caller (besides queueing) able to race a
-    /// check and wedge librqbit. The applier reads the CURRENT set at apply
-    /// time, so this reduced selection wins over any apply already in
-    /// flight, and cancel stays instant even while a long check runs.
+    /// Drop a file from the selection now and push the change through the
+    /// serialized applier in the background, so cancel is instant even during
+    /// a long check and cannot race one.
     pub async fn deselect_file(self: &Arc<Self>, file_index: usize) {
         {
             let mut selected = self.selected_files.write().await;
@@ -869,12 +735,10 @@ impl DownloadManager {
         Some(self.torrent_root().join(&entry.path))
     }
 
-    /// Read this torrent's on-disk piece ledger and clear the bits of every
-    /// piece overlapping the given files. The on-disk snapshot can lag the
-    /// in-memory bitfield by one flush interval, so pieces downloaded in the
-    /// final seconds before an uninstall may re-download - bounded, harmless. Returns (path, patched bytes), or
-    /// None when anything looks unexpected (missing ledger, zero piece
-    /// length, size mismatch) - callers then fall back to the full re-check.
+    /// The on-disk piece ledger with every piece of the given files cleared:
+    /// (path, bytes), or None on any format surprise (callers then take the
+    /// full re-check). The snapshot may lag the in-memory bitfield by one
+    /// flush; those pieces re-download.
     fn patched_bitv_without(&self, drop_indices: &[usize]) -> Option<(PathBuf, Vec<u8>)> {
         let hash = self.info_hash_hex.as_ref()?;
         let path = self.persistence_dir.join(format!("{}.bitv", hash));
@@ -898,21 +762,12 @@ impl DownloadManager {
         Some((path, bytes))
     }
 
-    /// Reset librqbit's piece bookkeeping after a tracked file was deleted
-    /// from disk (uninstall). The persisted fastresume bitfield still claims
-    /// the deleted file's pieces exist, so a re-download would instantly
-    /// report 100% with no file on disk - the unrecoverable "stuck at 100%"
-    /// loop. Dropping the torrent from the session deletes its .bitv +
-    /// session entry; the next download re-adds it and re-derives state from
-    /// what is actually on disk (an initial hash-check pass, so still-selected
-    /// downloads keep their completed pieces).
-    ///
-    /// `drop_indices`: file indices to remove from the selection first
-    /// (the uninstalled game's own files), so the re-add doesn't fetch them.
-    /// `deleted_indices`: the subset whose files were actually DELETED from
-    /// disk - only their pieces are cleared in the ledger. Clearing the bits
-    /// of merely-deselected files (e.g. a shared GameData ZIP still on disk)
-    /// would force a pointless multi-GB re-download on the next install.
+    /// Reset librqbit's piece bookkeeping after files were deleted (uninstall):
+    /// the ledger still claims their pieces, so a re-download would report
+    /// 100% with nothing on disk. Drops the torrent from the session; the
+    /// next download re-adds it. `drop_indices` leave the selection,
+    /// `deleted_indices` (the subset really gone) lose their ledger bits - a
+    /// deselected-but-present GameData zip must not re-download.
     pub async fn invalidate_after_file_delete(
         &self,
         drop_indices: &[usize],
@@ -932,23 +787,15 @@ impl DownloadManager {
             // would have adopted a persisted one) - nothing to invalidate.
             return Ok(());
         };
-        // Surgical ledger patch: snapshot the piece bitfield, clear only the
-        // deleted files' pieces, and restore it after session.delete (which
-        // erases the file). The next add loads it via fastresume and skips
-        // the full re-check - which took 15-30 min in the field. Boundary
-        // pieces shared with neighbors are cleared too (they just get
-        // re-fetched); on any format surprise we fall back to the full check.
+        // Patched ledger restored after session.delete erases it: the next
+        // add skips the full re-check (15-30 min in the field).
         let patched_bitv = self.patched_bitv_without(deleted_indices);
         self.session
             .delete(librqbit::api::TorrentIdOrHash::Hash(handle.info_hash()), false)
             .await?;
         if let Some((path, bytes)) = patched_bitv {
-            // librqbit's async bitv flusher may hold the old file's handle
-            // for a moment after session.delete; on filesystems without
-            // POSIX delete semantics (exFAT/SMB/older NTFS) that leaves the
-            // name delete-pending and a write fails transiently. Write to a
-            // temp name and rename with a short retry so the optimization
-            // doesn't silently degrade to the full re-check there.
+            // The flusher may still hold the old handle (delete-pending on
+            // exFAT/SMB): write a temp name and rename with a short retry.
             let tmp = path.with_extension("bitv.tmp");
             let mut restored = false;
             for attempt in 0..10u32 {

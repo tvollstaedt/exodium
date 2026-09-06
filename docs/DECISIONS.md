@@ -74,3 +74,9 @@
 - Verworfen: `launch.rs` zusaetzlich herausloesen (games.rs waere dann ~1.100 Zeilen; kommt, wenn die Launch-Pipeline das naechste Mal angefasst wird); Re-Exports der alten Pfade in games.rs/setup.rs belassen (verdeckte Indirektion, genau das Muster, das den Split noetig machte).
 - Grund: Beide Dateien waren Sammelbecken ohne Modulgrenze; jede Aenderung an Download oder Scan brauchte eine Suche durch 4k Zeilen.
 - Gotcha: Vier Helfer wurden dafuer `pub(crate)` (`game_op_lock`, `running_games`, `running_game_key`, `copy_dir_recursive`, `extract_game_zip`); sie sind die geteilte Basis von Launch, Install und Library. `prune_gallery_cache_at_startup` ist der eine Einstieg in den Gallery-Cache von aussen.
+
+## 2026-09-06 - Kommentar-Pass: Vertrag statt Geschichte
+- Entscheidung: Kommentare beschreiben, was gilt (Vertrag, Invariante, der eine nicht-offensichtliche Grund), maximal vier Zeilen pro Funktions-Doc; Messwerte, Vorfaelle und verworfene Alternativen stehen in DECISIONS.md und den CLAUDE.md-Paragraphen, im Code nur als `(§N)`-Verweis. Regel steht jetzt in den Conventions der CLAUDE.md.
+- Verworfen: Kommentare ganz streichen (die Invarianten sind das Wissen, das im Code nicht steht); Historie in `git blame` verweisen (die Erklaerung, WARUM eine Zeile so ist, bleibt im Code, nur die Anekdote geht).
+- Grund: 2.353 Zeilen in Bloecken ab fuenf Zeilen, zu grossen Teilen Erzaehlung und Wiederholung der CLAUDE.md; jetzt 119. Netto minus 1.947 Zeilen, kein Code geaendert.
+- Gotcha: Die Paragraphen-Nummern der CLAUDE.md sind damit Referenzziele - beim Umnummerieren `grep "§"` ueber src/ und src-tauri/.

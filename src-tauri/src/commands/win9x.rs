@@ -22,11 +22,9 @@ pub(crate) fn win9x_support_ready(torrent_root: &Path, variant: Option<&str>) ->
     }
 }
 
-/// The pack's play.confs reference the x98 parent VHDs in inconsistent case
-/// (`win98jap` / `Win98Jap`, `Win95dx8` / `win95Dx8` / `Win95DX8`), which is
-/// invisible on Windows/macOS but breaks ~24 games on Linux's case-sensitive
-/// filesystems. Symlink every observed conf spelling to the real file. No-op
-/// for aliases that already exist and on non-Unix platforms.
+/// The confs spell the x98 parent VHDs in several cases (`win98jap`,
+/// `Win98Jap`); symlink every spelling to the real file for case-sensitive
+/// filesystems. Unix only.
 pub(crate) fn add_parent_case_aliases(dest_root: &Path) {
     #[cfg(unix)]
     {
@@ -78,10 +76,8 @@ impl EngineCmd {
     }
 }
 
-/// A Command for console-subsystem helpers (`where`, `powershell`). Exodium
-/// is a GUI-subsystem exe on Windows, so without CREATE_NO_WINDOW every such
-/// child gets its own console - the panel's engine probe flashed two CMD
-/// windows per open.
+/// A Command for console helpers (`where`, `powershell`) that does not flash
+/// a console window under a GUI-subsystem exe.
 pub(crate) fn hidden_command(program: &str) -> Command {
     #[allow(unused_mut)]
     let mut cmd = Command::new(program);
@@ -122,12 +118,8 @@ fn resource_candidate(app: &AppHandle, sub: &str) -> Option<PathBuf> {
     candidates.into_iter().find(|p| p.exists())
 }
 
-/// Downloaded emulator pack probe: <data_dir>/content/emulators/<sub>.
-///
-/// Deliberately a filesystem check, not a ledger lookup: factory_reset with
-/// kept game data wipes the config table (and with it the content_packs
-/// ledger) while `content/` survives - launching must keep working before
-/// the next `list_content_packs` re-adopts the pack.
+/// `<data_dir>/content/emulators/<sub>` if present. A filesystem check, not
+/// the ledger: a factory reset keeps `content/` but clears the ledger.
 pub(crate) fn pack_candidate(data_dir: &str, sub: &str) -> Option<PathBuf> {
     if data_dir.is_empty() {
         return None;
@@ -163,11 +155,9 @@ fn has_cap_net_raw(bin: &Path) -> bool {
     })
 }
 
-/// A system-installed DOSBox-X that already holds CAP_NET_RAW - the one
-/// binary pcap multiplayer can run through. The pack's AppImage can never be
-/// that binary: a file capability puts the loader into secure-execution mode,
-/// which ignores the LD_LIBRARY_PATH its bundled libraries need, and the
-/// capability would be lost on every pack update anyway.
+/// A system DOSBox-X holding CAP_NET_RAW, the only binary pcap can run
+/// through: a file capability on the pack's AppImage breaks its bundled
+/// libraries (secure-execution mode) and dies with the next pack update.
 #[cfg(target_os = "linux")]
 fn path_dosbox_x_with_cap() -> Option<PathBuf> {
     let abs = absolutize_on_path(Path::new("dosbox-x"))?;
@@ -183,12 +173,8 @@ fn flatpak_dosbox_x_available() -> bool {
         .unwrap_or(false)
 }
 
-/// DOSBox-X for x98 games. On Windows eXo's own "x98" build (extracted from
-/// EXTWin9x.zip) is the intended emulator, exactly like the ECE precedent, and
-/// nothing is bundled for it - see `resolve_86box` for why. macOS and Linux
-/// use the downloaded emulator pack (pinned 2025.02.01, near eXo's own x98
-/// build), falling back to the pre-pack bundled copy, then PATH, then the
-/// Flatpak on Linux.
+/// DOSBox-X for x98 games: eXo's own build on Windows; elsewhere the
+/// emulator pack, then the old bundled copy, then PATH, then Flatpak (§16).
 fn resolve_dosbox_x(app: &AppHandle, torrent_root: &Path, data_dir: &str) -> Option<EngineCmd> {
     if cfg!(windows) {
         let exo_build = torrent_root.join("eXo/emulators/dosbox/x98/dosbox-x.exe");
@@ -230,12 +216,8 @@ fn resolve_dosbox_x(app: &AppHandle, torrent_root: &Path, data_dir: &str) -> Opt
     None
 }
 
-/// 86Box for 86box* games. On Windows eXo's own build is used, for the same
-/// reason as DOSBox-X: it comes out of EXTWin9x.zip together with the parent
-/// VHDs, and `win9x_support_ready` already refuses to launch without those -
-/// so a bundled Windows build can never be the reason a launch succeeds, and
-/// cost 68 MB of installer to never run. macOS/Linux need their own builds
-/// (the pack ships .exe only). PATH fallback on every platform.
+/// 86Box for 86box* games: eXo's own build on Windows, the pack elsewhere,
+/// PATH as fallback. Nothing is bundled (§16).
 fn resolve_86box(app: &AppHandle, torrent_root: &Path, data_dir: &str) -> Option<EngineCmd> {
     if cfg!(windows) {
         let exo_build = torrent_root.join("eXo/emulators/86Box98/86Box.exe");
@@ -264,10 +246,8 @@ fn resolve_86box(app: &AppHandle, torrent_root: &Path, data_dir: &str) -> Option
     None
 }
 
-/// Which emulator pack a Win9x variant needs: the auto-queue and the panel
-/// button both key off this. pcbox has no pack (Windows-only emulator we do
-/// not ship); Windows needs no pack at all (eXo's EXTWin9x.zip carries both
-/// builds next to the parent VHDs).
+/// Which emulator pack a variant needs (auto-queue and panel button). None
+/// for pcbox (not shipped) and on Windows (eXo's payload carries both).
 pub(crate) fn emulator_pack_for_variant(variant: Option<&str>) -> Option<&'static str> {
     match variant {
         Some("pcbox") => None,
@@ -317,14 +297,9 @@ fn find_file_ci(dir: &Path, name: &str) -> Option<PathBuf> {
     })
 }
 
-/// The single top-level directory a zip wraps everything in, if it does.
-///
-/// eXo's convention is files at the zip ROOT - the game's desktop shortcut
-/// points straight at `E:\<GAME>.EXE`. A zip that wraps them in a folder puts
-/// the executable one level too deep and the shortcut dies with "drive or
-/// network connection is unavailable" (Chinese Checkers: `CC32/CCHECK11.EXE`
-/// against a shortcut for `E:\CCHECK11.EXE`, after eXo repackaged a newer
-/// build).
+/// The one top-level directory a zip wraps everything in, if any. eXo's
+/// convention is files at the root; a wrapped zip (Chinese Checkers) mounts
+/// them a level too deep for the guest's desktop shortcut.
 fn zip_wrapper_dir(zip_path: &Path) -> Option<String> {
     let file = std::fs::File::open(zip_path).ok()?;
     let mut archive = zip::ZipArchive::new(file).ok()?;
@@ -345,22 +320,10 @@ fn zip_wrapper_dir(zip_path: &Path) -> Option<String> {
     wrapper
 }
 
-/// Rewrite `MOUNT <letter> "<...>.zip"` to mount an extracted copy instead.
-///
-/// Two reasons, both measured:
-///
-/// 1. **A zip mount crashes DOSBox-X on exit.** Booting a guest OS converts
-///    every mounted host drive into an emulated FAT disk (`convertdrivefat`),
-///    and tearing that down walks into PhysFS - the zip layer - after it is
-///    gone: `PHYSFS_close <- physfsFile::Close <- fatFromDOSDrive::~ <-
-///    FreeBIOSDiskList`, SIGSEGV, in three of three crash reports. That
-///    aborts the teardown loop, so disks later in the list - including the
-///    game's own save VHD - never get closed cleanly. A directory mount has
-///    no PhysFS layer and shuts down normally.
-/// 2. A zip that wraps its files in one directory mounts them a level too
-///    deep for the game's desktop shortcut (see `zip_wrapper_dir`).
-///
-/// The extracted copy lives next to the zip and is reused on later launches.
+/// Rewrite `MOUNT <letter> "<...>.zip"` to mount an extracted copy beside the
+/// zip: a zip mount crashes DOSBox-X in teardown (PhysFS after it is gone),
+/// which leaves the save VHD unclosed, and a wrapped zip (`zip_wrapper_dir`)
+/// mounts a level too deep (§16).
 fn extract_zip_mounts(conf: &str, exo_dir: &Path) -> String {
     let mount_target = |line: &str| -> Option<(String, String)> {
         let trimmed = line.trim_start();
@@ -407,17 +370,9 @@ fn extract_zip_mounts(conf: &str, exo_dir: &Path) -> String {
         .join("\n")
 }
 
-/// Can this process capture raw packets? DOSBox-X's `pcap` backend bridges
-/// the guest NIC onto a real interface, which is what eXo's remote-multiplayer
-/// titles need: the guest dials a PPTP tunnel to a community-run IPX gateway
-/// (the ipxbox project, which pairs an IPX server with a PPTP endpoint for
-/// Win9x clients), and PPTP rides on GRE - a protocol user-mode NAT cannot
-/// carry.
-///
-/// Windows gets this for free (the pack's setup installs npcap). On macOS the
-/// `/dev/bpf*` nodes are root-only unless Wireshark's ChmodBPF helper is
-/// installed; on Linux it takes CAP_NET_RAW. Both are one-time, user-side
-/// decisions we must not make for them - so we detect and adapt instead.
+/// Can this process capture raw packets? Remote multiplayer dials PPTP (GRE),
+/// which only DOSBox-X's `pcap` bridge carries; on macOS that needs readable
+/// `/dev/bpf*` (§16).
 #[cfg(all(unix, not(target_os = "linux")))]
 fn can_capture_packets() -> bool {
     (0..4).any(|i| {
@@ -429,16 +384,9 @@ fn can_capture_packets() -> bool {
     })
 }
 
-/// Can the emulator we would launch open a capture handle?
-///
-/// macOS: the /dev/bpf* nodes are user-visible state, and a child process
-/// inherits our access - probing from Exodium's own process answers for the
-/// emulator too. Linux is different: CAP_NET_RAW is a FILE capability on the
-/// emulator binary, not on us, so an AF_PACKET probe from this process says
-/// nothing about DOSBox-X (it answered false even after a successful setcap).
-/// Ask the binary instead - and because `resolve_dosbox_x` prefers a
-/// capability-holding system copy, "some dosbox-x on PATH has the cap" is
-/// exactly "the binary we will launch has the cap".
+/// Can the emulator we would launch capture? macOS: a child inherits our
+/// `/dev/bpf*` access, so probing here answers. Linux: CAP_NET_RAW sits on
+/// the emulator FILE, so ask `getcap` about the PATH binary we would run.
 #[cfg(unix)]
 fn host_can_bridge() -> bool {
     #[cfg(target_os = "linux")]
@@ -451,15 +399,8 @@ fn host_can_bridge() -> bool {
     }
 }
 
-/// Whether an interface can carry a second machine's MAC address.
-///
-/// Wi-Fi cannot: a station is associated with exactly one MAC, and the access
-/// point neither forwards frames from a foreign source MAC nor delivers frames
-/// addressed to one (802.11 has no client-side bridging outside WDS). The
-/// emulated NE2000 card has its own MAC, so on Wi-Fi its DHCP request is
-/// simply dropped - the guest ends up with no address at all, which is worse
-/// than the NAT it had before. Measured: Windows 98 answers "Error 752, the
-/// host name you dialed could not be found".
+/// Can the interface carry a second MAC? Wi-Fi cannot (a station is
+/// associated under one address), so the guest's DHCP request is dropped.
 #[cfg(unix)]
 fn is_wired_interface(name: &str) -> bool {
     #[cfg(target_os = "macos")]
@@ -539,10 +480,7 @@ pub async fn win9x_network_status() -> Result<Win9xNetworkStatus, String> {
     {
         let captures = host_can_bridge();
         let wired = default_interface().is_some_and(|n| is_wired_interface(&n));
-        // Linux grants the capability to a system-installed dosbox-x; the
-        // downloaded pack's AppImage cannot hold it (secure-exec would break
-        // its bundled libraries), so without a PATH copy there is nothing to
-        // enable and the row has to say why.
+        // Only a PATH copy can hold the capability (`path_dosbox_x_with_cap`).
         #[cfg(target_os = "linux")]
         let system_bin = binary_exists_on_path("dosbox-x");
         #[cfg(not(target_os = "linux"))]
@@ -593,13 +531,8 @@ pub struct Win9xMultiplayerInfo {
     pub prompt: bool,
 }
 
-/// Is the default route on a wireless link? None when it cannot be told.
-///
-/// Bridging over Wi-Fi is a DOSBox-X limitation, not a platform one: its own
-/// documentation notes that the pcap backend "needs very low level access to
-/// your real network adapter, which can be problematic with wireless
-/// adapters", and recommends slirp there. Windows with npcap is no exception,
-/// so the check runs on all three platforms.
+/// Is the default route on a wireless link? None when unknown. Checked on
+/// every platform: pcap over Wi-Fi fails with npcap too.
 fn on_wireless_link() -> Option<bool> {
     #[cfg(unix)]
     {
@@ -626,12 +559,8 @@ fn on_wireless_link() -> Option<bool> {
     }
 }
 
-/// What online play looks like for this game on this machine.
-///
-/// The panel needs more than a yes/no: a title that cannot go online because
-/// the host is on Wi-Fi gets a note but no dialog (there is nothing to grant),
-/// while one that only lacks the permission gets the offer on Play. Silence in
-/// both cases is what leaves players wondering why the in-game dial fails.
+/// Online-play state for the panel: Wi-Fi gets a note (nothing to grant), a
+/// missing permission gets the offer on Play.
 #[tauri::command]
 pub async fn win9x_multiplayer_info(
     db_state: State<'_, super::DbState>,
@@ -778,13 +707,8 @@ pub async fn disable_win9x_network(app: AppHandle) -> Result<Win9xNetworkStatus,
     win9x_network_status().await
 }
 
-/// Install a boot-time helper that hands this user the BPF devices.
-///
-/// Same shape as Wireshark's ChmodBPF, with one deliberate difference: the
-/// nodes are chowned to the current user rather than opened up to a shared
-/// `access_bpf` group. It is the narrower grant, and it takes effect
-/// immediately - a new group membership would only apply after a re-login,
-/// which reads as "the button did nothing".
+/// A boot-time LaunchDaemon that chowns `/dev/bpf*` to this user - narrower
+/// than ChmodBPF's group and effective without a re-login.
 #[cfg(target_os = "macos")]
 async fn install_bpf_daemon_macos() -> Result<(), String> {
     let user = std::env::var("USER").map_err(|_| "cannot determine the current user")?;
@@ -833,13 +757,8 @@ async fn install_bpf_daemon_macos() -> Result<(), String> {
     run_privileged_macos_script(&script).await
 }
 
-/// Run a shell script as root through macOS's own authentication sheet.
-///
-/// Piped stdio is what makes this fail INSIDE the app: a Tauri 2 GUI process
-/// on macOS returns EBADF from posix_spawn when the child inherits
-/// parent-derived descriptors (the same bug the emulator spawn works around).
-/// So: null stdio, a shell does the redirection into files, and pre_exec
-/// forces fork+exec, which tolerates the parent's fd state.
+/// Run a script as root through macOS's authentication sheet. Null stdio plus
+/// fork+exec: the posix_spawn EBADF from `spawn_emulator_and_track` applies.
 #[cfg(target_os = "macos")]
 async fn run_privileged_macos_script(script: &Path) -> Result<(), String> {
     let tmp_dir = script.parent().ok_or("bad script path")?.to_path_buf();
@@ -896,13 +815,8 @@ async fn run_privileged_macos(body: &str) -> Result<(), String> {
     run_privileged_macos_script(&script).await
 }
 
-/// Absolute path of the DOSBox-X a capability can sit on: a system install
-/// from PATH, nothing else. The downloaded pack's AppImage is deliberately
-/// not an option - a file capability puts the loader into secure-execution
-/// mode, which ignores the LD_LIBRARY_PATH its bundled libraries need, and a
-/// pack update would silently drop the grant. Flatpak cannot carry one at
-/// all. (`resolve_dosbox_x` prefers a capability-holding PATH copy, so the
-/// grant lands on the binary that then actually launches.)
+/// The DOSBox-X a capability may be granted to: a PATH install only (see
+/// `path_dosbox_x_with_cap`); Flatpak cannot carry one.
 #[cfg(target_os = "linux")]
 fn resolved_dosbox_x_path() -> Result<PathBuf, String> {
     if let Some(bin) = absolutize_on_path(Path::new("dosbox-x")) {
@@ -952,28 +866,9 @@ async fn grant_cap_net_raw_linux() -> Result<(), String> {
     Ok(())
 }
 
-/// The interface pcap can bridge onto. Wired only - see below.
-///
-/// Wired links carry any source address, so the guest keeps its own MAC and
-/// gets its own DHCP lease. Wi-Fi cannot be made to work, and the reason is
-/// worth recording because the obvious fix looks convincing until you capture
-/// the traffic:
-///
-/// A station is associated under exactly one address and normal 3-address
-/// frames have no field for a second one, so a guest with its own MAC gets
-/// nothing through. Cloning the host's MAC into the emulated card does fix
-/// that layer - but then the DHCP server, which keys leases on the MAC, hands
-/// the guest THE HOST'S OWN IP. Both stacks now answer for one address, and
-/// the host's kernel resets every connection the guest opens. Measured on
-/// macOS Wi-Fi, the guest's PPTP dial:
-///
-///   guest > server:1723  [S]     ; SYN from 10.x.y.z (the host's own IP)
-///   server > guest       [S.]    ; server answers
-///   10.x.y.z > server    [R]     ; the HOST's stack resets it
-///
-/// The remaining fix - a static guest IP outside the DHCP pool - lives inside
-/// eXo's Win9x image, not here. So on Wi-Fi we stay on slirp, which at least
-/// gives the guest working TCP/UDP.
+/// The interface pcap can bridge onto: the default route's, wired only.
+/// Do not retry MAC cloning for Wi-Fi - the guest then gets the host's own
+/// DHCP lease and the host's kernel resets its connections (§16).
 #[cfg(unix)]
 fn bridgeable_interface() -> Option<String> {
     if !host_can_bridge() {
@@ -982,13 +877,8 @@ fn bridgeable_interface() -> Option<String> {
     default_interface().filter(|nic| is_wired_interface(nic))
 }
 
-/// Network-backend fragment appended to every DOSBox-X launch.
-///
-/// Windows keeps eXo's authored `pcap` setup verbatim. Elsewhere we bridge
-/// with pcap when the host allows raw capture (then remote multiplayer works
-/// as eXo intended) and otherwise fall back to slirp: user-mode NAT that
-/// carries plain TCP/UDP, loads without a permission prompt, and above all
-/// does not greet the player with an in-guest network error at boot.
+/// Network-backend fragment for every DOSBox-X launch: eXo's `pcap` setup on
+/// Windows; elsewhere pcap when the host can capture, slirp otherwise.
 fn ne2000_override() -> String {
     #[cfg(unix)]
     {
@@ -1127,15 +1017,10 @@ fn launch_dosbox_x(
     let options_conf = exo_dir.join("emulators/dosbox/options9x.conf");
     let base_conf = exo_dir.join("emulators/dosbox/x98/dosbox-x.conf");
 
-    // One narrow exception to "the conf runs verbatim": `.\`-relative HOST
-    // path tokens are rewritten to `./` form. DOSBox-X on POSIX opens
-    // existing files through backslash paths fine, but CANNOT CREATE them -
-    // `vhdmake` silently wrote nothing, every boot reused the shipped, dirty
-    // child VHD, and games whose child isn't shipped at all (W95-C.vhd)
-    // booted "Invalid system disk". Guest text is untouched - that is
-    // rewrite_host_paths' contract (see the Win3x PATH lesson). A token is
-    // only rewritten when its target (or, for files vhdmake will create, its
-    // parent directory) exists under eXo/.
+    // The one rewrite in a verbatim conf: `.\` HOST tokens become `./`,
+    // because DOSBox-X on POSIX cannot CREATE files through backslash paths
+    // (vhdmake wrote nothing). Only tokens whose target, or parent for
+    // files vhdmake creates, exists under eXo/.
     let play_conf = {
         let content = std::fs::read_to_string(&play_conf)
             .map_err(|e| format!("Failed to read {}: {}", play_conf.display(), e))?;
@@ -1174,14 +1059,8 @@ fn launch_dosbox_x(
         cmd.arg("-conf").arg(&options_conf);
     }
 
-    // User preference overrides, applied last so they win. DOSBox-X shares
-    // the [sdl] fullscreen key with vanilla DOSBox; glshader does not apply.
-    // - windowresolution: eXo's options9x.conf default (1280x960) is in
-    //   logical points and overflows a 1117-point MacBook screen with the
-    //   image partly cut off; 1024x768 fits every common display.
-    // - output opengl: the base conf's ttf/outputswitch combo is not
-    //   user-resizable; opengl windows scale by dragging.
-    // - ne2000 backend: see `ne2000_override`.
+    // User overrides, applied last. 1024x768 fits every common display
+    // (eXo's 1280x960 overflows a MacBook); opengl windows are resizable.
     let mut frag = format!(
         "[sdl]\nfullscreen = {}\nwindowresolution = 1024x768\noutput = opengl\n{}",
         fullscreen,
@@ -1199,14 +1078,8 @@ fn launch_dosbox_x(
     std::fs::write(&frag_path, &frag).map_err(|e| format!("Failed to write override conf: {e}"))?;
     cmd.arg("-conf").arg(&frag_path);
 
-    // eXo's bats pass -nomenu; we deliberately keep the menu. DOSBox-X
-    // 2025.02.01 renders the guest at a FIXED size and crops when the window
-    // is dragged smaller (measured on macOS with opengl, surface and
-    // openglpp alike - upstream issue #3661), so the Video menu is the only
-    // runtime escape hatch: fullscreen scales correctly, and the output mode
-    // can be switched to `surface`, which centres the whole guest screen
-    // instead of cropping it. On macOS the menu lives in the global menu bar
-    // and costs no window space.
+    // Menu kept (eXo passes -nomenu): DOSBox-X crops a shrunk window
+    // (upstream #3661), and Video > output/fullscreen is the escape hatch.
     if cfg!(windows) {
         cmd.arg("-noconsole");
     }
@@ -1362,11 +1235,8 @@ pub struct Win9xSupportStatus {
     pub total_bytes: u64,
 }
 
-/// Whether the emulator a Win9x game needs is resolvable on this machine.
-/// The launcher's own resolver answers, so the note in the detail panel can
-/// never disagree with what launch would actually do. Mainly a Linux
-/// concern: DOSBox-X has no official Linux binaries, so PATH/Flatpak may
-/// genuinely be empty there.
+/// Is the emulator a Win9x game needs resolvable here? Answered by the
+/// launcher's own resolver, so the panel never disagrees with a launch.
 #[tauri::command]
 pub async fn win9x_engine_available(
     app: AppHandle,
@@ -1387,13 +1257,8 @@ pub async fn win9x_engine_available(
     Ok(win9x_engine_resolvable(&app, &torrent_root, &data_dir, Some(variant.as_str())))
 }
 
-/// Support-file state for the detail panel: lets it show "Windows 9x support
-/// files still downloading (N%)" instead of a bare launch failure.
-///
-/// `variant` scopes the readiness check to the tree that game actually
-/// boots from - the same scoping `download_game`'s queue gate uses. Without
-/// it, an x98-ready/86Box-missing install reads "missing" for x98 games
-/// whose download would never fetch anything.
+/// Support-payload state for the panel. `variant` scopes readiness to the
+/// tree the game boots from, like `download_game`'s queue gate.
 #[tauri::command]
 pub async fn get_win9x_support_status(
     torrent_state: State<'_, TorrentState>,

@@ -8,16 +8,11 @@ use tauri::AppHandle;
 
 use crate::db::queries;
 
-/// Cached Tauri resource_dir(), set once during app setup. Needed because
-/// sync helpers (bundled_metadata_dir, bundled_torrent_path) are called from
-/// contexts that don't carry an AppHandle - and without this cache they'd
-/// have to be plumbed everywhere.
+/// Tauri's resource_dir, set once at setup for callers without an AppHandle.
 pub(crate) static RESOURCE_DIR: OnceLock<PathBuf> = OnceLock::new();
 
-/// Cached log directory. Set once during app setup from `app_log_dir()`.
-/// Cache rather than re-resolving in the command because we observed
-/// `app.path().app_log_dir()` returning errors when called from a command
-/// invocation in shipped Windows builds (where setup-time resolution worked).
+/// The log dir, set once at setup: `app_log_dir()` has failed when called
+/// from a command on shipped Windows builds.
 pub(crate) static LOG_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 /// Called once from lib.rs' setup closure with the app's resource directory.
@@ -30,18 +25,9 @@ pub fn init_log_dir(dir: PathBuf) {
     let _ = LOG_DIR.set(dir);
 }
 
-/// Name of the ONE folder inside the data dir that holds every collection.
-///
-/// eXo ships each pack as its own torrent but expects them merged: their
-/// Setup/eXoMerge bats copy `Content\` and `eXo\` of every pack into a single
-/// folder, giving one `eXo/` tree with `eXoDOS/`, `eXoWin3x/`, `eXoWin9x/`
-/// side by side. Exodium writes the same layout, so an installation made by
-/// eXo's own setup can be imported as-is - and nothing is downloaded twice
-/// because we looked in a folder eXo never creates.
-///
-/// Cached rather than read per call: every path derivation needs it, and the
-/// three places that can change it (fresh setup, import, data-dir change) all
-/// set it explicitly.
+/// The one folder inside the data dir holding every collection, eXo's own
+/// merged layout (§2). Cached: every path derivation needs it, and setup,
+/// import and a data-dir change set it explicitly.
 static ROOT_FOLDER: std::sync::RwLock<Option<String>> = std::sync::RwLock::new(None);
 
 /// Default when nothing was stored - what fresh installs have always used.
@@ -60,25 +46,9 @@ pub fn set_root_folder(name: &str) {
     }
 }
 
-/// Point an install made before the single-root layout at the tree it already
-/// has, instead of nesting a second one inside it.
-///
-/// Until the single root, the main eXoDOS torrent wrote STRAIGHT INTO the data
-/// dir, so a legacy install looks like `<data>/eXo/…` + `<data>/Content/…`.
-/// `game_root` is `<data>/<root_folder>`, which can never equal `<data>` - so
-/// those users would get `<data>/eXoDOS/` as their root and re-download 282 GB
-/// next to the games they already own. Seen in testing: 8.7 GB of a second
-/// eXoDOS tree inside the first one.
-///
-/// The repair is a re-labelling, not a move: `root_folder` becomes the `.`
-/// sentinel, so `game_root` resolves to the data dir itself - exactly where the
-/// games already are. The data dir stays put deliberately; moving it up a level
-/// would work for the games but strand everything else keyed to it (content
-/// packs, the video and gallery caches) and drop Exodium's `content/` into the
-/// user's parent folder.
-///
-/// Keyed on `root_folder` being unset - true only for installs predating the
-/// change. Once written, the user's value is trusted.
+/// A pre-single-root install has its games AT the data dir; write the `.`
+/// sentinel so `game_root` is the data dir itself instead of a second tree
+/// inside it (§2). Keyed on `root_folder` being unset.
 pub(crate) fn repair_legacy_root(conn: &rusqlite::Connection) {
     let has_root = queries::get_config(conn, "root_folder")
         .ok()
@@ -103,11 +73,8 @@ pub(crate) fn repair_legacy_root(conn: &rusqlite::Connection) {
     let _ = queries::set_config(conn, "root_folder", ROOT_IS_DATA_DIR);
 }
 
-/// Load the root folder name from config into the cache.
-///
-/// Repairs the pre-single-root layout on the way: every caller reads `data_dir`
-/// right after this, so it is the one place where the fix reliably lands
-/// before a path is derived from either value.
+/// Load `root_folder` into the cache, repairing a legacy layout first - the
+/// one place every entry point passes before deriving a path.
 pub fn load_root_folder(conn: &rusqlite::Connection) {
     repair_legacy_root(conn);
     let name = queries::get_config(conn, "root_folder")
@@ -118,11 +85,7 @@ pub fn load_root_folder(conn: &rusqlite::Connection) {
     set_root_folder(&name);
 }
 
-/// The single directory holding every collection's files.
-///
-/// Replaces the old per-collection roots (`<data>/eXoWin9x/…`), which were an
-/// artefact of librqbit naming a torrent's output folder after the torrent -
-/// not a layout eXo or anyone else expects.
+/// The single directory holding every collection's files (§2).
 pub fn game_root(data_dir: &str) -> PathBuf {
     let name = ROOT_FOLDER
         .read()
@@ -135,11 +98,8 @@ pub fn game_root(data_dir: &str) -> PathBuf {
     PathBuf::from(data_dir).join(name)
 }
 
-/// Files the OS drops into a folder on its own. They are not user data, and
-/// keeping them is not free: a merged folder that still holds a `.DS_Store` is
-/// not empty, so it survives, `stray_roots` finds it again and the migration
-/// prompt returns at every start with nothing left to move. Seen in testing
-/// with exactly two `.DS_Store` files against 48 GB moved.
+/// Files the OS drops into folders on its own; a merge must not count them
+/// as content, or the emptied folder survives and the prompt returns.
 pub(crate) fn is_os_metadata(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
         return false;
@@ -155,13 +115,8 @@ pub(crate) fn path_to_fwd_slash(p: &Path) -> String {
     p.to_string_lossy().replace('\\', "/")
 }
 
-/// Get info about the bundled torrent without starting anything.
-/// Resolve bundled metadata directory.
-///
-/// Dev mode reads straight from the repo tree via CARGO_MANIFEST_DIR. Prod
-/// mode looks inside the Tauri resource_dir cached by `init_resource_dir`
-/// at app startup. current_exe().parent() is NOT used because on macOS
-/// that's Contents/MacOS/ while bundled resources live in Contents/Resources/.
+/// The bundled `metadata/` dir: the repo tree in dev, `RESOURCE_DIR` in
+/// production.
 pub fn bundled_metadata_dir() -> Result<PathBuf, String> {
     let dev_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -215,14 +170,8 @@ pub(crate) fn bundled_torrent_path(filename: &str) -> Result<PathBuf, String> {
     ))
 }
 
-/// Launch a downloaded game via DOSBox Staging.
-/// Where the per-launch DOSBox config fragments live.
-///
-/// NOT the game data dir: that is a location the user picked for their games,
-/// and these files accumulated there one per game ever launched (15 of them in
-/// one report) with nothing ever cleaning them up. They are derived from
-/// settings and rewritten on every launch, so the app's own directory is the
-/// right home - and `sweep_legacy_launch_confs` removes the old ones.
+/// Where the per-launch DOSBox conf fragments live: the app's own dir, not
+/// the user's game folder (`sweep_legacy_launch_confs` removes the old ones).
 pub(crate) fn launch_conf_dir(app: &AppHandle) -> Result<PathBuf, String> {
     use tauri::Manager;
     let dir = app
@@ -265,12 +214,7 @@ pub fn sweep_legacy_launch_confs(data_dir: &str) {
     }
 }
 
-/// Empty the launch-config dir at startup.
-///
-/// One fragment is written per game ever launched and it is only read while
-/// DOSBox starts up, so without this they pile up forever - the same unbounded
-/// growth that made them a problem in the game folder. Startup is the safe
-/// moment: no game this instance launched is running yet.
+/// Empty the launch-conf dir at startup, when no game of this instance runs.
 pub fn prune_launch_confs(app: &AppHandle) {
     let Ok(dir) = launch_conf_dir(app) else { return };
     let removed = remove_conf_files(&dir, None);

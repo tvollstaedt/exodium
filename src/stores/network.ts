@@ -5,10 +5,7 @@ import { cancelAllPackJobs } from "./contentPacks";
 
 export type NetworkMode = "live" | "offline";
 
-/** Whether the torrent engine may run at all. "offline" makes Exodium a pure
- *  launcher for games already on disk - no session, no downloads, no sharing.
- *  Mirrors the `network_mode` config key read by the Rust side; an unset key
- *  means "live" so installs from before this setting are unaffected. */
+/** Mirrors the `network_mode` config key (§11); unset means live. */
 const [networkMode, setNetworkModeSignal] = createSignal<NetworkMode>("live");
 export { networkMode };
 
@@ -32,22 +29,13 @@ export interface ModeSwitchResult {
   packs: number;
 }
 
-/** Persist the mode and rebuild the torrent state to match it. The config
- *  write MUST land before initDownloadManager() - the backend reads the key
- *  there to decide whether to create a session at all (same invariant as
- *  `collections`). Going offline drops every manager, which releases the last
- *  Arc to the librqbit session and stops all traffic.
- *
- *  Returns what was stopped, so the caller can say so precisely. On failure the
- *  config write is rolled back: leaving the DB claiming one mode while the
- *  session runs in the other is worse than either. */
+/** Persist the mode, then rebuild the torrent state (the config write MUST
+ *  land before initDownloadManager). Returns what was stopped; rolls the
+ *  write back on failure. */
 export async function applyNetworkMode(mode: NetworkMode): Promise<ModeSwitchResult> {
   const previous = networkMode();
   setNetworkModeSignal(mode);
-  // Stop trackers BEFORE the managers disappear, or the poll loop sees null
-  // progress and reports a failure that never happened.
-  // Content packs download over HTTP and would otherwise keep running while
-  // the app claims to be offline - the badge would be lying.
+  // Trackers and HTTP pack jobs stop BEFORE the managers go.
   const stopped: ModeSwitchResult = mode === "offline"
     ? { downloads: stopAllDownloadTracking(), packs: await cancelAllPackJobs() }
     : { downloads: 0, packs: 0 };

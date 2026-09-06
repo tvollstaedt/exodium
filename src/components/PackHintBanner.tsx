@@ -14,28 +14,10 @@ interface Props {
   collection: string;
 }
 
-/**
- * A one-time, non-blocking nudge that this collection's covers can be better.
- *
- * Content packs otherwise live in Settings, where nobody looks: the only other
- * mention is the welcome modal, which fires once at first run and only ever
- * offers eXoDOS. Someone who later browses eXoWin3x sees low-res covers and no
- * hint that better ones exist.
- *
- * The trigger is what the grid is actually rendering, not what is downloadable.
- * A language pack has no poster pack of its own but resolves to eXoDOS's
- * (`asset_fallback`), so its covers are already sharp - offering it a 4.1 GB
- * metadata pack under an artwork headline was noise. Conversely eXoWin3x shows
- * 80 px previews, which is exactly where the hint belongs.
- *
- * Everything it needs is already in memory (`packsByCollection`, filled by the
- * same startup sweep that resolves installed state), so switching collections
- * renders it in the same frame as the grid. An earlier version fetched per
- * collection and dropped in a beat later, shifting the grid down.
- *
- * Deliberately a suggestion, not a gate - it dismisses per collection and never
- * reappears once answered either way.
- */
+/** One-time nudge above the Browse grid that a poster pack would sharpen
+ *  this collection's covers (§10). Triggered by what the grid renders (Tier
+ *  0), read from the store so it lands in the same frame; dismissed per
+ *  collection for both answers. */
 export function PackHintBanner(props: Props) {
   // null until the stored list has arrived. Treating "not loaded yet" as "not
   // dismissed" made the banner flash on every start before the config landed.

@@ -17,38 +17,25 @@ interface DownloadState {
 const [downloads, setDownloads] = createSignal<Record<number, DownloadState>>({});
 
 const POLL_MS = 1000;
-// Consecutive poll ticks where getDownloadProgress returned null despite the
-// download being marked in-flight. If this stays high for >5s we surface a
-// user-visible error instead of pretending we're still starting. Observed on
-// Windows: if session.add_torrent() fails (MAX_PATH, port bind, etc.) the
-// handle stays None forever and file_progress returns None silently.
+// Null polls before "didn't start": a failed add_torrent leaves the handle
+// None forever and file_progress null.
 const NULL_POLL_THRESHOLD = 5; // ~5 seconds at 1s polling interval
 // Seconds without progress before the status turns into peer-wait feedback,
 // and before it becomes an actionable stall warning.
 const STALL_HINT_SECS = 15;
 const STALL_WARN_SECS = 90;
 
-/** Everything one in-flight download knows about itself.
- *
- *  One object per download rather than a table per field: ending a run is a
- *  single `trackers.delete`, and cancellation is a single flag the poll loop
- *  re-reads after every await. The previous shape kept these twelve fields in
- *  twelve module-level records, which meant every exit path had to empty all
- *  of them by hand and a forgotten one leaked state into the next attempt. */
+/** One in-flight download. One object, so ending a run is one delete and
+ *  cancellation one flag the poll loop re-reads after every await. */
 interface Tracker {
   gameId: number;
   /** Kept on the tracker so status writes inside the loop don't have to
    *  re-pass the title on every tick. */
   title?: string;
-  /** Set by whoever ends this run (cancel, uninstall, a newer attempt, or a
-   *  terminal poll result). Checked after every await, which is what stops a
-   *  poll that was already in flight at cancel time from writing the store
-   *  back and resurrecting the card. */
+  /** Set by whoever ends the run; checked after every await so an in-flight
+   *  poll cannot resurrect the card. */
   cancelled: boolean;
-  /** True while the download_game backend command is still in flight.
-   *  Progress legitimately polls null during that window (torrent handle not
-   *  attached yet, validation pass, first-ever torrent add), so the
-   *  didn't-start verdict must not fire until the command has resolved. */
+  /** download_game still in flight: null progress is expected until then. */
   commandPending: boolean;
   nullPolls: number;
   /** When the game first reached 100% without finishing; 0 until then. */
@@ -60,14 +47,9 @@ interface Tracker {
    *  downloading - the library refresh must fire at that moment (game is
    *  playable), not only when the extras finish minutes later. */
   announcedInstalled: boolean;
-  /** Stall detection: value + timestamp of the last observed progress
-   *  increase, for this file and for the whole torrent. A game's file can sit
-   *  at exactly 0 for minutes while data pours in: pieces are 8 MB and most
-   *  games are far smaller, so a re-download after uninstall has to refetch
-   *  the entire block the game shares with its neighbours, and per-file
-   *  progress only moves when that block validates. Without the torrent-level
-   *  pair the honest "no data received" warning fires on a download that is
-   *  working perfectly. */
+  /** Last progress increase (value, time) for the file and for the torrent:
+   *  a file sits at 0 while its 8 MB piece fills, so the torrent pair is
+   *  what tells a stall from a wait. */
   lastProgressVal: number;
   lastProgressAt: number;
   lastTorrentVal: number;
@@ -116,17 +98,11 @@ async function tick(t: Tracker) {
   if (t.cancelled) { return; }
 
   if (!p) {
-    // Backend returned null - torrent handle not attached yet. While the
-    // download_game command is still running that's expected (first-ever
-    // torrent add + validation can take a while) - keep waiting. Only once
-    // the command has resolved do consecutive misses indicate the
-    // silent-stuck bug.
+    // Null: no handle yet. Expected while the command runs, a fault after.
     if (t.commandPending) {
       t.nullPolls = 0;
-      // The backend can legitimately spend minutes here on the FIRST download
-      // of a collection (placeholder creation + hash check of 14k files, slow
-      // on Windows). Say so instead of sitting mute on "Starting download..." -
-      // testers read that as a hang.
+      // The first download of a collection can take minutes here (hash
+      // check); say so.
       if ((Date.now() - t.lastProgressAt) / 1000 > 8) {
         setState(t, {
           status: "Preparing the collection (one-time setup, can take a few minutes)…",
@@ -189,10 +165,8 @@ async function tick(t: Tracker) {
     // Fires metadata-cache invalidation: when extras finished AFTER the game,
     // this is what makes the manual button resolve on its own.
     notifyGameLibraryChanged(t.gameId);
-    // Delay cleanup so isInstalled() stays true until fetchGames() propagates
-    // the updated installed flag from the DB into the games store. Skipped if
-    // a new download for the same game started in the meantime - that one owns
-    // the entry now.
+    // Keep isInstalled() true until fetchGames() carries the flag; a newer
+    // download owns the entry.
     setTimeout(() => {
       if (trackers.has(t.gameId)) { return; }
       clearState(t.gameId);
@@ -223,11 +197,8 @@ async function tick(t: Tracker) {
   t.stuckSince = 0;
 
   if (p.torrent_state === "initializing") {
-    // librqbit is hash-checking the entire torrent's existing on-disk content
-    // before any peer pieces are requested. On Windows with thousands of
-    // placeholder files this can take 5–10 minutes the first time. Per-file
-    // progress stays at 0 the whole time, so we surface the torrent-level
-    // validation progress to the user.
+    // Hash check (minutes on Windows): file progress stays 0, show the
+    // torrent-level validation instead.
     const tp = typeof p.torrent_progress === "number" ? p.torrent_progress : 0;
     setState(t, {
       status: `Validating torrent ${(tp * 100).toFixed(0)}% (first run can take several minutes)`,
@@ -251,13 +222,8 @@ async function tick(t: Tracker) {
     t.lastTorrentAt = now;
   }
   const stalledSecs = (now - t.lastProgressAt) / 1000;
-  // Data is arriving for the torrent even if none of it has landed in this
-  // game's file yet - so this is a wait, not a fault.
-  //
-  // Two signals, because torrent progress also moves in whole pieces: at
-  // 50 KB/s an 8 MB piece takes over two minutes, so on a slow line the
-  // per-piece signal goes quiet exactly like a real stall. The session byte
-  // rate is continuous and settles it.
+  // Data is arriving for the torrent, so a wait, not a fault. Two signals:
+  // piece progress goes quiet on a slow line, the byte rate does not.
   const pieceAdvanced = (now - t.lastTorrentAt) / 1000 < STALL_HINT_SECS;
   const bytesFlowing = (transferStats()?.download_bps ?? 0) >= 1024;
   const receiving = pieceAdvanced || bytesFlowing;
@@ -329,21 +295,16 @@ export function startGameDownload(gameId: number, title?: string) {
   });
 }
 
-/** Stop any polling/UI state for a game regardless of phase - used by
- *  uninstall, which may run during the extras phase where downloading is
- *  false but a poll loop is still alive (it would otherwise resurrect a
- *  phantom stuck/failed card for the freshly uninstalled game). */
+/** Stop tracking a game in any phase (uninstall during extras would
+ *  otherwise get a phantom card back). */
 export function stopGameDownloadTracking(gameId: number) {
   const t = trackers.get(gameId);
   if (t) { endTracker(t); }
   clearState(gameId);
 }
 
-/** Stop tracking every in-flight download and report how many there were.
- *  Going offline drops the torrent managers, after which `getDownloadProgress`
- *  returns null forever - the poll loop would read that as the silent-stuck
- *  bug and label a perfectly healthy download "Download didn't start". The
- *  torrent selection stays in the DB, so switching back online resumes it. */
+/** Stop tracking every download (going offline drops the managers, and
+ *  null progress would read as "didn't start"). Returns the count. */
 export function stopAllDownloadTracking(): number {
   const active = Object.keys(downloads()).map(Number).filter((id) => downloads()[id]?.downloading);
   for (const id of active) {
@@ -352,10 +313,8 @@ export function stopAllDownloadTracking(): number {
   return active.length;
 }
 
-/** Restart-resume for the extras phase: an installed game whose GameData
- *  was still downloading when the app quit resumes invisibly (librqbit
- *  session restore) - poll it so the phase stays visible and the completion
- *  refresh fires. No-op when a tracker already exists or extras are done. */
+/** Resume polling an installed game's extras after a restart, so the phase
+ *  stays visible. No-op when tracked or done. */
 export async function watchExtrasIfPending(gameId: number, title?: string) {
   if (trackers.has(gameId) || getDownloadState(gameId)) { return; }
   try {
@@ -371,10 +330,8 @@ export async function cancelGameDownload(gameId: number) {
   clearState(gameId);
   try {
     await cancelDownload(gameId);
-    // Second sweep: cancel_download can take seconds (deselect + session
-    // bookkeeping), and anything that wrote the store in the meantime would
-    // otherwise leave a card behind. Skipped when a new download for the same
-    // game started while this was running - that one owns the entry now.
+    // Second sweep after the slow backend cancel; a newer download owns
+    // the entry.
     if (!trackers.has(gameId)) {
       clearState(gameId);
     }

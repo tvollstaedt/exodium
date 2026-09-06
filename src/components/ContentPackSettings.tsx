@@ -97,12 +97,8 @@ export function ContentPackSettings() {
   };
 
   const handleCancel = async (collectionId: string, packId: string, displayName: string) => {
-    // cancelContentPackJob clears its activeJobs entry synchronously and
-    // fires the backend cancel asynchronously, so we DON'T set
-    // pending="cancel" - that would briefly mark a row whose job has
-    // already disappeared from the active state, causing a flash where
-    // the "Install"/"Remove" branch shows a stale spinner. Just await
-    // the backend round-trip and surface any error via toast.
+    // No pending="cancel": cancelContentPackJob clears the row's job
+    // synchronously, and a pending mark would flash over the Install branch.
     try {
       await cancelContentPackJob(collectionId, packId);
     } catch (e) {

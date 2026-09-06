@@ -1,11 +1,7 @@
-//! One-time support payloads that ride inside a torrent's `eXo/util/*.zip`.
-//!
-//! Every pack has the same matryoshka shape: the util zip holds ONE inner zip
-//! whose subtrees land under `<torrent_root>/eXo/`. The payload is queued
-//! with the first game that needs it, extracted by a watcher task once the
-//! zip is complete, and re-armed at startup if the app quit mid-download.
-//! Readiness gates test directory EXISTENCE, so extraction stages into a
-//! temp dir and moves each subtree into place with an atomic rename.
+//! One-time support payloads inside a torrent's `eXo/util/*.zip` (one inner
+//! zip, subtrees land under `eXo/`): queued with the first game that needs
+//! them, extracted by a watcher, re-armed at startup. Readiness is directory
+//! existence, so extraction stages and renames atomically.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -200,9 +196,8 @@ pub(crate) async fn ensure_queued(pack: &'static SupportPack, mgr: &Arc<Download
     spawn_watcher(pack, Arc::clone(mgr), util.index);
 }
 
-/// Re-arm the watcher after an app restart: one armed by a download click
-/// dies with the app, and a zip finishing in a later session would never
-/// extract (observed on Windows: 736 MB downloaded, ROMs never landed).
+/// Re-arm the watcher after a restart: one armed by a download click dies
+/// with the app, and a zip finishing later would never extract.
 pub(crate) async fn rearm(pack: &'static SupportPack, mgr: &Arc<DownloadManager>) {
     if (pack.ready)(&mgr.torrent_root()) {
         return;

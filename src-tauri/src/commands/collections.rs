@@ -3,10 +3,8 @@
 use serde::Serialize;
 
 
-/// Metadata describing a single eXo collection.
-/// All path conventions for a collection are captured here so that game
-/// launch / install / uninstall code does not need to hard-code any
-/// collection-specific strings.
+/// One eXo collection: every path convention and the launcher it dispatches
+/// to, so no other code keys on the id string.
 #[derive(Debug, Clone, Serialize)]
 pub struct CollectionDef {
     /// Internal collection ID (e.g. "eXoDOS", "eXoDOS_GLP").
@@ -19,10 +17,7 @@ pub struct CollectionDef {
     pub torrent_file: &'static str,
     /// Optional bundled DOSBox/emulator configs ZIP.
     pub configs_zip: Option<&'static str>,
-    /// The folder name the torrent creates inside the data dir (always "eXoDOS").
-    /// All four collections (eXoDOS, GLP, PLP, SLP) share the same output folder via
-    /// the overlay model - their torrents all have the internal name "eXoDOS" and write
-    /// to <data_dir>/eXoDOS/ without any per-collection subdirectory.
+    /// The torrent's internal folder name (`eXoDOS` for all four DOS packs).
     pub inner_folder: &'static str,
     /// Path from <inner_folder> to the individual game directories.
     /// e.g. "eXo/eXoDOS" → games are at <inner_folder>/eXo/eXoDOS/<shortcode>/
@@ -37,16 +32,10 @@ pub struct CollectionDef {
     /// (`Images/<platform>/`, `Manuals/<platform>/`) and matches the XML's
     /// `<Platform>` value.
     pub platform: &'static str,
-    /// Games live under a 4-digit year subdirectory and are keyed by their
-    /// title directory instead of an 8-char shortcode:
-    /// `<game_prefix>/<year>/<Title (Year)>/` (eXoWin9x layout). All path
-    /// derivation keys off this flag, never off the collection id.
+    /// Games sit under `<game_prefix>/<year>/<Title (Year)>/`, the title dir
+    /// being the shortcode (eXoWin9x). Path derivation keys on this flag.
     pub year_subdirs: bool,
-    /// Which launch pipeline runs the collection's games. Path derivation
-    /// never keys on this (that is `year_subdirs` and `lang_dir`); it is the
-    /// one switch `launch_game`/`download_game` dispatch on, so a collection
-    /// with its own emulator is added by naming it here, not by string
-    /// comparisons on the id.
+    /// The launch pipeline `launch_game` and `download_game` dispatch on.
     pub launcher: Launcher,
 }
 
@@ -68,25 +57,15 @@ pub fn collection_def(id: &str) -> Option<&'static CollectionDef> {
     COLLECTION_MAP.iter().find(|c| c.id == id)
 }
 
-/// The collection to consult for assets `collection` has none of its own.
-///
-/// Language packs borrow their base collection's art and manuals - their
-/// variants hash to the EN title's key. A collection with its own game tree
-/// borrows nothing: its games are not in the other pack, so a same-title hit
-/// would show a different game's cover. `None` means "no fallback".
+/// Where a collection borrows art and manuals from: language packs use
+/// their base collection's, a collection with its own game tree none.
 pub fn asset_fallback(collection: &str) -> Option<&'static str> {
     let base = collection_base_id(collection);
     (base != collection).then_some(base)
 }
 
-/// The base (non-language-pack) collection a source belongs to.
-///
-/// Language packs share the base collection's game tree and its GameData
-/// archives, so "eXoDOS_GLP" resolves to "eXoDOS". A collection with its own
-/// game tree resolves to itself. Used wherever a lookup may only cross
-/// collection boundaries WITHIN one pack family - shortcodes are unique per
-/// family, not globally, so an unqualified match can hit a different game in
-/// another pack that happens to share the code.
+/// The pack family: language packs resolve to their base collection, the
+/// rest to themselves. Shortcodes are unique per family only (§1).
 pub fn collection_base_id(source: &str) -> &'static str {
     let Some(def) = collection_def(source) else {
         return "eXoDOS";
@@ -101,11 +80,8 @@ pub fn collection_base_id(source: &str) -> &'static str {
         .unwrap_or("eXoDOS")
 }
 
-/// All known eXo collections.
-/// Language packs are listed BEFORE eXoDOS so their games are matched to the
-/// correct torrent before eXoDOS can claim same-title translations.
-/// To add a new collection, append a CollectionDef entry here - no other
-/// Rust file needs to be changed for path/emulator dispatch.
+/// Every collection. Language packs come BEFORE eXoDOS so title matching
+/// reaches them first. A new pack is one entry here (§15).
 pub const COLLECTION_MAP: &[CollectionDef] = &[
     CollectionDef {
         id: "eXoDOS_GLP",
@@ -180,10 +156,6 @@ pub const COLLECTION_MAP: &[CollectionDef] = &[
         year_subdirs: false,
         launcher: Launcher::DosBox,
     },
-    // eXoWin9x nests its games one level deeper than every other pack
-    // (`eXo/eXoWin9x/<year>/<Title (Year)>.zip`) and has no 8-char shortcodes:
-    // the title directory doubles as the shortcode. Games boot Windows 95/98
-    // inside DOSBox-X (or 86Box) from VHD images - Staging cannot run them.
     CollectionDef {
         id: "eXoWin9x",
         display_name: "eXoWin9x",
@@ -198,10 +170,6 @@ pub const COLLECTION_MAP: &[CollectionDef] = &[
         year_subdirs: true,
         launcher: Launcher::Win9x,
     },
-    // eXoScummVM: flat title-named zips like eXoWin3x, but no shortcodes -
-    // the zip stem (`Maniac Mansion (Multi-Platform)`) is the title directory
-    // AND the key into eXo's launch index (metadata/scummvm.txt). No configs
-    // zip: there is no per-game conf, the whole launch is one command line.
     CollectionDef {
         id: "eXoScummVM",
         display_name: "eXoScummVM",
@@ -231,10 +199,8 @@ pub(crate) fn collection_lang_dir(source: &str) -> Option<&'static str> {
     crate::commands::collections::collection_def(source).and_then(|c| c.lang_dir)
 }
 
-/// The year directory a `year_subdirs` collection nests its games under,
-/// read from the application_path (`eXo\eXoWin9x\!win9x\<year>\<TitleDir>\…`).
-/// None for every other collection - and for a malformed path, in which case
-/// callers fall back to the flat `<game_prefix>/<shortcode>` layout.
+/// The year dir of a `year_subdirs` game, read from its application_path;
+/// None elsewhere (callers then use the flat layout).
 pub(crate) fn collection_year_dir(source: &str, app_path: Option<&str>) -> Option<String> {
     let def = crate::commands::collections::collection_def(source)?;
     if !def.year_subdirs {
@@ -247,10 +213,8 @@ pub(crate) fn collection_year_dir(source: &str, app_path: Option<&str>) -> Optio
     (year.len() == 4 && year.bytes().all(|b| b.is_ascii_digit())).then(|| year.to_string())
 }
 
-/// Torrent-relative directory holding a game's installed files.
-/// Standard: <game_prefix>[/<lang_dir>]/<shortcode>
-/// year_subdirs (eXoWin9x): <game_prefix>/<year>/<shortcode> - the shortcode
-/// IS the title directory there ("Connect4 (1995)").
+/// A game's dir relative to the root: `<prefix>[/<lang>]/<shortcode>`, or
+/// `<prefix>/<year>/<shortcode>` for `year_subdirs`.
 pub(crate) fn collection_rel_game_dir(source: &str, shortcode: &str, app_path: Option<&str>) -> String {
     let prefix = collection_game_prefix(source);
     if let Some(year) = collection_year_dir(source, app_path) {

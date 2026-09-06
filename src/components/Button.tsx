@@ -23,21 +23,13 @@ const VARIANT_CLASS: Record<ButtonVariant, string> = {
 
 interface ButtonProps extends JSX.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
-  /** Shows a spinner and blocks input. An in-flight action must not be
-   *  clickable twice - that used to be re-implemented per button, and one of
-   *  them always forgot the `disabled`. */
+  /** Spinner plus disabled: an in-flight action is never clickable twice. */
   loading?: boolean;
   /** Replacement label while loading; defaults to the normal children. */
   loadingLabel?: JSX.Element;
 }
 
-/** Every action button in the app.
- *
- *  It exists for the states, not the styling: disabled and loading were spelled
- *  out at ~40 call sites, each free to forget one. A disabled button that still
- *  lit up on hover (because `.btn-small:hover` had no `:not(:disabled)`) read as
- *  clickable and was reported as such - the kind of thing a shared component
- *  fixes once. */
+/** Every action button: one place for the disabled and loading states. */
 export function Button(props: ButtonProps) {
   const [own, rest] = splitProps(props, ["variant", "loading", "loadingLabel", "class", "children", "disabled"]);
   const variantClass = () => VARIANT_CLASS[own.variant ?? "small"];

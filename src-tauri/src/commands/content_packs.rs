@@ -162,17 +162,9 @@ pub struct ContentPackStatus {
     pub installed_version: Option<u32>,
 }
 
-/// Record packs that are on disk but missing from the install ledger.
-///
-/// The ledger lives in `config.content_packs`, and `factory_reset` clears the
-/// whole config table while only deleting `content/` when the user also asked
-/// for their game data to go. A reset that keeps the data therefore forgot
-/// every pack it kept - Settings offered "Install" for 30 GB the user already
-/// had, and the grid used art the app believed was absent.
-///
-/// Disk wins: a pack directory that exists IS the pack. It is adopted at the
-/// manifest's current version, because the alternative - version 0 - makes
-/// `cleanup_stale_content_packs` delete it on the next start.
+/// Record packs present on disk but missing from the ledger (a factory reset
+/// keeps `content/` but clears the config table). Adopted at the manifest's
+/// version, or the stale-pack cleanup would delete them next start.
 fn adopt_packs_on_disk(
     conn: &rusqlite::Connection,
     collection: &str,
@@ -300,10 +292,8 @@ pub(crate) fn installable_pack(collection: &str, pack_id: &str) -> Option<Conten
     (info.torrent_file_path.is_some() || has_http_source).then_some(info)
 }
 
-/// Payload of the "content-pack-install-started" event. Emitted for EVERY
-/// job, because the backend can start one itself (the Win9x emulator
-/// auto-queue) and the frontend's progress badge only polls jobs it knows
-/// about.
+/// "content-pack-install-started" payload, emitted for every job: the
+/// frontend only polls jobs it knows about, and the backend starts some.
 #[derive(Clone, Serialize)]
 struct PackInstallStarted {
     collection: String,
@@ -458,25 +448,10 @@ pub(crate) async fn start_pack_install(
     Ok(())
 }
 
-/// The directory whose CONTENTS should become `install_dir`.
-///
-/// `install_path` names the exact target (`content/posters/eXoWin9x`), but the
-/// archives disagree about whether they carry that last segment themselves:
-/// `posters-eXoDOS-v5` and `posters-eXoWin3x-v1` wrap everything in a
-/// `<collection>/` directory, `posters-eXoWin9x-v1` was packed from inside it
-/// and is flat. Unwrapping makes both shapes land in the same place, so a
-/// mis-packed archive is a non-event instead of a republish.
-///
-/// The wrapper must be the ONLY entry and must repeat the target's own name -
-/// "one top-level directory" alone would swallow a pack whose real payload
-/// happens to be a single `Images/`.
-///
-/// OS metadata does not count towards "only". All three tarballs were rolled
-/// on a Mac and carry an AppleDouble sidecar per entry, INCLUDING one for the
-/// wrapper itself (`._eXoDOS`, the archive's very first member). `tar tzf`
-/// hides those - bsdtar folds them back into xattrs - but the `tar` crate
-/// writes them as ordinary files, so staging held two entries and the wrapper
-/// went unrecognised: `content/posters/eXoDOS/eXoDOS/`, and every cover 404'd.
+/// The directory whose contents become `install_dir`: the staging dir, or
+/// its lone wrapper when that repeats the target's own name (§10). The name
+/// check keeps a pack whose payload is a single `Images/` intact; AppleDouble
+/// sidecars do not count as entries.
 fn unwrapped_source(staging_dir: &Path, install_dir: &Path) -> PathBuf {
     let Some(target_name) = install_dir.file_name() else {
         return staging_dir.to_path_buf();
@@ -501,11 +476,7 @@ fn unwrapped_source(staging_dir: &Path, install_dir: &Path) -> PathBuf {
     }
 }
 
-/// Move a finished staging tree into its install dir.
-///
-/// Shared by both install routes (HTTP tarball and torrent zip), which had a
-/// byte-identical copy of this until the AppleDouble fix had to be made twice
-/// - the second copy is exactly the one a future fix forgets.
+/// Move a finished staging tree into its install dir (both install routes).
 fn commit_staging(staging_dir: &Path, install_dir: &Path) -> Result<(), String> {
     if let Some(parent) = install_dir.parent() {
         std::fs::create_dir_all(parent)
@@ -612,11 +583,8 @@ async fn do_install_full(
     }
 }
 
-/// Torrent-sourced install: queue the target file in the collection's torrent,
-/// poll progress, then extract the downloaded ZIP to the install directory.
-///
-/// Leaves the ZIP in place after extraction so the torrent keeps seeding and
-/// a future re-install can skip the download if the extracted dir is deleted.
+/// Torrent-sourced install: queue the file, poll, extract. The zip stays for
+/// seeding and re-installs.
 async fn do_install_torrent(
     jobs: &Arc<RwLock<HashMap<String, ContentPackJob>>>,
     app_handle: &AppHandle,
@@ -661,10 +629,8 @@ async fn do_install_torrent(
         .await
         .map_err(|e| format!("Failed to queue torrent download: {}", e))?;
 
-    // Poll for completion, updating progress on the job. file_progress
-    // returning None means the manager lost the torrent handle (e.g. after a
-    // failed session restore) - without the counter this would spin in
-    // "downloading" forever with only cancel as an exit.
+    // A run of None from file_progress means the handle is gone; give up
+    // instead of spinning.
     let mut none_streak = 0u32;
     loop {
         if cancel.load(Ordering::Relaxed) {
@@ -930,11 +896,8 @@ async fn do_install(
     Ok(())
 }
 
-/// Recursively copy a directory tree (fallback for cross-filesystem rename).
-///
-/// Symlinks are recreated, not followed: the emulator packs carry .app
-/// bundles whose Frameworks are symlink-heavy, and a materialized copy both
-/// bloats the install and breaks the bundle's code-signature seal.
+/// Copy a tree (cross-filesystem fallback for rename). Symlinks are
+/// recreated, not followed: .app bundles depend on them and their seal.
 fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
     std::fs::create_dir_all(dst).map_err(|e| format!("mkdir {}: {}", dst.display(), e))?;
     for entry in
@@ -1045,11 +1008,8 @@ pub async fn cancel_content_pack_install(
 
 // ── Startup cleanup of stale download artifacts ──────────────────────────────
 
-/// Called once at startup. Uninstalls any content pack whose recorded
-/// installed version is lower than the current manifest's version for that
-/// pack - used to flush out e.g. shortcode-keyed v1 poster packs left over
-/// from a previous Exodium release. Logs a list of what was removed; fails
-/// open (keeps going) if the manifest or install dir can't be read.
+/// Startup: uninstall packs below the manifest's `min_compatible_version`
+/// (a layout change). Fails open.
 pub fn cleanup_stale_content_packs(conn: &rusqlite::Connection, data_dir: &Path) {
     let Ok(manifest) = load_manifest() else {
         log::debug!("cleanup_stale_content_packs: manifest unavailable, skipping");
@@ -1072,11 +1032,7 @@ fn cleanup_stale_content_packs_with(
         let Some(col_manifest) = manifest.collections.get(col_id) else { continue };
         for (pack_id, installed_pack) in col_packs {
             let Some(info) = col_manifest.content_packs.get(pack_id) else { continue };
-            // Newer manifest version alone is NOT a reason to delete: the pack
-            // still works, and Settings offers the update. Only a version below
-            // the compatibility floor is unusable - the v0.2 posters were
-            // shortcode-keyed and 404'd every tile against the hash-keyed
-            // lookup, which is what this cleanup was written for.
+            // A newer manifest version is an update offer, not a deletion.
             if installed_pack.version >= info.min_compatible_version {
                 continue;
             }

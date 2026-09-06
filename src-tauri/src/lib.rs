@@ -39,13 +39,8 @@ use commands::{
     ContentPackState, DbState, TorrentState,
 };
 
-/// Raise the file-descriptor soft limit as high as the platform allows.
-/// librqbit's filesystem storage opens EVERY file of a torrent read/write
-/// and keeps the handles (14,011 for the eXoDOS torrent) - Linux's default
-/// soft limit of 1024 makes the first torrent add fail with "error opening
-/// ... in read/write mode" at roughly file #950 (verified in the field:
-/// Brickwar's GameData at torrent index 947). Standard practice for torrent
-/// clients; no-op on Windows (no comparable limit).
+/// Raise the fd soft limit as far as allowed: librqbit keeps every torrent
+/// file open (14,011 for eXoDOS), and the default 1024 fails the first add.
 #[cfg(unix)]
 fn raise_fd_limit() {
     unsafe {
@@ -60,12 +55,8 @@ fn raise_fd_limit() {
         // setrlimit at kern.maxfilesperproc, so fall back through sane values.
         let mut candidates: Vec<libc::rlim_t> = vec![lim.rlim_max.min(1 << 20), 65536, 10240];
 
-        // macOS: kern.maxfilesperproc scales with installed RAM - 245760 on
-        // large machines but 61440 (or less) on small ones. 61440 < 65536,
-        // so without querying it those machines fell through to 10240: fewer
-        // fds than the eXoDOS torrent has files (14011), and librqbit opens
-        // EVERY file on torrent add. Field failure: EMFILE at torrent index
-        // ~10220 ("Laserwars (1994).zip") on an M2 Mac mini.
+        // macOS: kern.maxfilesperproc scales with RAM (61440 on small
+        // machines, below the 65536 ceiling), so query it.
         #[cfg(target_os = "macos")]
         {
             let mut maxfiles: libc::c_int = 0;
@@ -158,18 +149,12 @@ pub fn install_bundled_db(target: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Grant the asset protocol access to the game-media subtree of the
-/// user-chosen data dir at runtime. The static scope in tauri.conf.json is
-/// limited to $RESOURCE/$APPDATA; game media (thumbnails, screenshots,
-/// manuals) all live under <data_dir>/eXoDOS - granting the data dir itself
-/// (often $HOME) would expose far more than the app serves.
+/// Grant the asset protocol the media subtrees of the data dir at runtime;
+/// the static scope covers $RESOURCE/$APPDATA only, and the data dir itself
+/// (often $HOME) would be far too wide.
 pub fn allow_asset_dir(app: &tauri::AppHandle, data_dir: &Path) {
     use tauri::Manager;
-    // Two served subtrees: every collection's media in the single game root
-    // and installed content packs (posters, metadata screenshots) in
-    // <data>/content. Regression note: v0.7.x granted only eXoDOS/, silently
-    // blocking every content-pack image ("asset protocol not configured to
-    // allow" spam).
+    // The game root and the content packs under <data>/content.
     let dirs = [
         commands::paths::game_root(&data_dir.to_string_lossy()),
         data_dir.join("content"),
@@ -180,11 +165,7 @@ pub fn allow_asset_dir(app: &tauri::AppHandle, data_dir: &Path) {
         }
     }
 
-    // Bundled preview thumbnails. The static scope grants $RESOURCE/**, which
-    // covers the packaged app - but in `tauri dev` the previews are read from
-    // the source tree (src-tauri/resources/previews), which is outside it. The
-    // result was ~200 denials per session and no fallback covers for any game
-    // without a downloaded poster pack.
+    // Bundled previews: outside $RESOURCE in `tauri dev`.
     let preview_roots = [
         commands::paths::RESOURCE_DIR.get().map(|d| d.join("previews")),
         // `tauri dev` resolves previews from the source tree - see
@@ -251,13 +232,9 @@ fn open_or_reinstall_db(db_path: &Path) -> Result<rusqlite::Connection, String> 
     }
 }
 
-/// Append collections this release added to the user's `collections` config.
-///
-/// A catalog refresh brings a new pack's games into an existing install, but
-/// `init_download_manager` only starts managers for the ids listed in that
-/// config - written once at setup. Without this the new games render with a
-/// download button that can only fail ("No torrent manager for collection").
-/// Existing entries are preserved and their order kept; nothing is removed.
+/// Append collections this release added to the `collections` config, which
+/// setup wrote once: a catalog refresh alone leaves their games with a
+/// download button that cannot work (§15). Nothing is removed or reordered.
 fn enable_new_collections(conn: &rusqlite::Connection) {
     let Ok(Some(current)) = db::queries::get_config(conn, "collections") else {
         return;
@@ -278,10 +255,8 @@ fn enable_new_collections(conn: &rusqlite::Connection) {
     }
 }
 
-/// Stage the bundled catalog DB as a temp file so it can be ATTACHed for a
-/// catalog refresh. Always a copy in data_dir - ATTACHing the bundled file
-/// in place would create WAL sidecars inside the (possibly read-only/signed)
-/// resources dir. The caller deletes the temp file when done.
+/// Copy the bundled catalog DB into the data dir for ATTACH: in place it
+/// would write WAL sidecars into the signed resources dir. Caller deletes.
 fn stage_bundled_catalog(data_dir: &Path) -> Result<std::path::PathBuf, String> {
     let metadata_dir = bundled_metadata_dir()?;
     let tmp = data_dir.join("catalog-refresh.db");
@@ -338,14 +313,9 @@ impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for SharedFileMakeWriter {
     }
 }
 
-/// Initialize the global tracing subscriber. Output is fanned out to both
-/// stderr (visible in `pnpm tauri dev`) and a persistent log file at
-/// `<log_dir>/exodium.log` (the only sink visible in a packaged Windows GUI
-/// build, where stderr is detached). `tracing-log` bridges `log!` calls from
-/// any crate into the same subscriber, so logs from `log` and `tracing` users
-/// (e.g. librqbit) end up in one stream.
-///
-/// Returns the log file path so the UI can show it to users for diagnosis.
+/// The tracing subscriber: stderr plus `<log_dir>/exodium.log` (the only
+/// sink a packaged Windows build has), with `log!` bridged in. Returns the
+/// log path.
 fn init_logger(log_dir: &std::path::Path) -> Option<std::path::PathBuf> {
     use std::io::Write;
     use tracing_subscriber::{fmt, prelude::*, EnvFilter};
@@ -367,10 +337,7 @@ fn init_logger(log_dir: &std::path::Path) -> Option<std::path::PathBuf> {
         .append(true)
         .open(&log_path);
 
-    // Default to info everywhere - debug chatter (librqbit's per-piece /
-    // requeue messages) drowned the log window in the field. Override with
-    // `RUST_LOG` when diagnosing, e.g. `RUST_LOG=librqbit=debug,exodium_lib=debug`
-    // (or `librqbit_dht=debug` for DHT issues).
+    // info by default; `RUST_LOG=librqbit=debug,exodium_lib=debug` to dig.
     let default_filter = "info";
     let env_filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new(default_filter));
@@ -441,38 +408,11 @@ pub struct RenderPath {
     pub force_dmabuf: bool,
 }
 
-/// WebKit bug 262607 ("[GTK] Disable DMABuf renderer for NVIDIA proprietary
-/// drivers") was closed WONTFIX, so WebKitGTK never degrades on its own and
-/// each app has to pick a path. Measured on the reference box (RTX 3080,
-/// driver 610.57.04, WebKitGTK 2.52.5, KDE/Wayland, 5120x1440) with a 300-layer
-/// transform animation:
-///
-/// | backend | DMA-BUF | explicit sync |            result |
-/// |---------|---------|---------------|-------------------|
-/// | Wayland |      on |            on | Gdk "Error 71" protocol error, app dies |
-/// | Wayland |     off |             - | 10.6 fps, WebProcess 95% CPU, 7 nvidia fds |
-/// | Wayland |      on |           off | 60.8 fps, WebProcess 14% CPU, 38 nvidia fds |
-/// | X11     |      on |             - | "Failed to create GBM buffer", never paints |
-/// | X11     |     off |             - | 37.9 fps, WebProcess 95% CPU |
-///
-/// So NVIDIA needs a workaround on both backends, but a DIFFERENT one, and
-/// disabling the DMA-BUF renderer is the expensive answer - it is what the
-/// user's ~10 fps panel animation was. Non-NVIDIA GPUs get nothing set: their
-/// DMA-BUF path is the fast one and disabling it would be a regression.
-///
-/// Keeping the DMA-BUF renderer is not enough on its own before WebKitGTK
-/// 2.52: `AcceleratedBackingStoreDMABuf::checkRequirements` there ends in a
-/// `strstr(vendor, "NVIDIA")` that refuses the renderer outright, and
-/// `WEBKIT_FORCE_DMABUF_RENDERER` (read a few instructions earlier, any value
-/// but "0") is the override. 2.52 deleted both the check and the variable, so
-/// setting it is free there. Same harness, same box, WebKitGTK 2.50.4:
-/// unforced 12.8 fps / 97% CPU / 7 nvidia fds, forced 60.0 fps / 29% CPU / 38
-/// fds - identical to what 2.52.5 does with no variable at all.
-///
-/// `accel_known_bad` is the safety valve - see `accel_sentinel`. A previous
-/// accelerated start that did not survive falls back to the path that always
-/// renders, because a user whose app will not start is worse off than one
-/// whose app scrolls badly.
+/// The WebKitGTK render path per GPU vendor and GDK backend (§17 has the
+/// measurements). NVIDIA needs a different workaround on Wayland (explicit
+/// sync off) and X11 (DMA-BUF off); everyone else gets nothing set.
+/// `accel_known_bad` (see `accel_sentinel`) forces the path that always
+/// renders after an accelerated start died.
 #[cfg(target_os = "linux")]
 pub fn choose_render_path(nvidia: bool, wayland: bool, accel_known_bad: bool) -> RenderPath {
     if !nvidia {
@@ -503,10 +443,8 @@ fn nvidia_proprietary_in_use() -> bool {
     Path::new("/sys/module/nvidia_drm").exists() || Path::new("/dev/nvidia0").exists()
 }
 
-/// Which GDK backend GTK will pick, decided the same way GTK decides it.
-/// `GDK_BACKEND` wins when set, otherwise a Wayland display means the Wayland
-/// backend. Must be read AFTER `prefer_wayland_backend_in_appimage` has had
-/// its say, since that is what may set the variable.
+/// The GDK backend, decided as GTK does (`GDK_BACKEND`, else
+/// `WAYLAND_DISPLAY`). Read AFTER `prefer_wayland_backend_in_appimage`.
 #[cfg(target_os = "linux")]
 fn on_wayland_backend() -> bool {
     match std::env::var("GDK_BACKEND") {
@@ -518,11 +456,9 @@ fn on_wayland_backend() -> bool {
     }
 }
 
-/// Marker written before an accelerated start and cleared once the app has
-/// been alive long enough to have painted. Its presence at startup means the
-/// last accelerated attempt died, so we take the safe path instead. The GDK
-/// failure happens when the webview first renders - AFTER `setup()` has run -
-/// so surviving setup is not evidence; elapsed time and a clean exit are.
+/// Marker armed before an accelerated start, cleared after 6 s or a clean
+/// exit. Found at startup, it means the last attempt died at first paint,
+/// which is after `setup()` - so only elapsed time counts as survival.
 #[cfg(target_os = "linux")]
 fn accel_sentinel() -> Option<std::path::PathBuf> {
     let base = match std::env::var_os("XDG_DATA_HOME") {
@@ -532,14 +468,9 @@ fn accel_sentinel() -> Option<std::path::PathBuf> {
     Some(base.join("com.redfox.exodium").join("accel-attempt"))
 }
 
-/// The AppImage build strips linuxdeploy's `export GDK_BACKEND=x11` (see
-/// `.github/workflows/build.yml`), so a Wayland session reaches the Wayland
-/// backend and with it the accelerated path. Should that start not survive,
-/// this puts the AppImage back exactly where it was: X11 backend, no DMA-BUF,
-/// which is what every AppImage did up to 0.12.1. Returns whether the Wayland
-/// backend is being attempted, so the caller knows to arm the sentinel even
-/// for a non-NVIDIA GPU - the crash the x11 export existed for
-/// (tauri-apps/tauri#8541) is not vendor-specific.
+/// The AppImage no longer exports `GDK_BACKEND=x11`; after a failed start
+/// this puts it back. Returns whether Wayland is being attempted, so the
+/// sentinel is armed for every GPU (tauri#8541 is not vendor-specific).
 #[cfg(target_os = "linux")]
 fn prefer_wayland_backend_in_appimage(accel_known_bad: bool) -> bool {
     // APPDIR is set by AppRun, and the AppImage is the only build whose GDK
@@ -594,21 +525,14 @@ fn apply_render_path() {
     );
 
     if (!path.disable_dmabuf && nvidia) || appimage_wayland {
-        // Something riskier than the old blanket-safe path is in play -
-        // accelerated compositing, the AppImage's Wayland backend, or both.
-        // Arm the sentinel and disarm it once we have clearly survived first
-        // paint. A clean exit disarms it too (see `run`), or quitting inside
-        // the window would cost the next start its acceleration.
+        // Arm the sentinel; first paint or a clean exit disarms it.
         if let Some(p) = sentinel {
             if let Some(dir) = p.parent() {
                 let _ = std::fs::create_dir_all(dir);
             }
             let _ = std::fs::write(&p, "1");
-            // The GDK failure kills the process about a second after setup,
-            // so a few seconds of life is already proof. Keep this short: any
-            // ungraceful kill inside the window (SIGTERM at logout, force
-            // quit) costs the NEXT start its acceleration, and that start
-            // then clears the marker again.
+            // The GDK failure hits within a second; a kill inside this
+            // window costs the next start its acceleration, nothing more.
             std::thread::spawn(|| {
                 std::thread::sleep(std::time::Duration::from_secs(6));
                 disarm_accel_sentinel();
@@ -649,11 +573,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
-            // Initialize the logger as early as possible so later setup steps' log
-            // output is captured. `app_log_dir()` resolves to platform conventions:
-            //   Windows:  %APPDATA%\com.redfox.exodium\logs
-            //   macOS:    ~/Library/Logs/com.redfox.exodium
-            //   Linux:    ~/.local/share/com.redfox.exodium/logs
+            // Logger first, so the rest of setup is captured.
             let log_dir = app.path().app_log_dir().ok();
             // Cache the log directory so the `get_log_dir` Tauri command can
             // serve it without going through `app.path()` again - the
@@ -674,15 +594,9 @@ pub fn run() {
                 log::warn!("resource_dir() unavailable; bundled assets may not be found");
             }
 
-            // Any failure from here on is fatal but must be VISIBLE: a panic
-            // in setup() kills the process with nothing on screen. A BLOCKING
-            // dialog can't be used here either - setup() runs on the main
-            // thread before the event loop, and tauri-plugin-dialog's
-            // blocking_show deadlocks there on macOS (the alert needs the
-            // main run loop, which would be parked). Instead: show a
-            // non-blocking dialog whose dismissal exits the app, and continue
-            // setup on an empty in-memory DB so the event loop starts and
-            // the dialog can actually render.
+            // A fatal error here must be VISIBLE: a panic shows nothing, and
+            // a blocking dialog deadlocks before the event loop on macOS. So:
+            // non-blocking dialog, in-memory DB, let the loop start.
             let mut startup_error: Option<String> = None;
 
             let data_dir = match app.path().app_data_dir() {
@@ -728,11 +642,8 @@ pub fn run() {
                     .show(move |_| exit_handle.exit(1));
             }
 
-            // Catalog refresh: existing installs never re-read the bundled DB,
-            // so corrected/new catalog data (torrent indices, sizes, new games)
-            // is applied here whenever the shipped CATALOG_VERSION moves ahead
-            // of the installed one. User state (installed/favorites/...) and
-            // games.id survive - see db::refresh_catalog.
+            // Catalog refresh when the bundled version is ahead; user state
+            // and ids survive (`db::refresh_catalog`).
             let installed_ver = db::catalog_version(&conn);
             if startup_error.is_none() && installed_ver < db::CATALOG_VERSION {
                 match stage_bundled_catalog(&data_dir) {
@@ -764,10 +675,6 @@ pub fn run() {
                 // Asset protocol must reach game media in the user-chosen dir.
                 allow_asset_dir(app.handle(), user_data_path);
                 commands::content_packs::cleanup_stale_downloads(user_data_path);
-                // Remove content packs whose installed version is lower than the
-                // current manifest (e.g. v0.2.x shortcode-keyed posters after the
-                // v0.3.x hash-keyed rebuild). Without this the 404s for every
-                // game card flood the tauri::protocol::asset error log.
                 commands::content_packs::cleanup_stale_content_packs(&conn, user_data_path);
             }
 
@@ -778,10 +685,7 @@ pub fn run() {
             app.manage(commands::media::MusicState::new());
             app.manage(commands::media::MediaServerState::new());
 
-            // macOS uses native traffic-light controls (no custom titlebar).
-            // Linux/Windows keep the framed shell from tauri.conf.json
-            // (decorations: false). Done at runtime so we don't depend on
-            // platform-specific config files which weren't picking up reliably.
+            // macOS: native traffic lights; elsewhere the custom frame.
             #[cfg(target_os = "macos")]
             {
                 if let Some(win) = app.get_webview_window("main") {

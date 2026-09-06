@@ -65,10 +65,7 @@ const Tag = (props: {
   </Show>
 );
 
-/** One metadata row: pictogram, label, value. Ten of these written out was
- *  six lines each of identical markup, and adding a field meant remembering
- *  the shape. Renders nothing when the value is absent, which is what every
- *  caller's `<Show>` used to do. */
+/** One metadata row: pictogram, label, value. Nothing when absent. */
 const Field = (props: {
   icon: FieldIconName;
   label: string;
@@ -123,11 +120,8 @@ export function GameDetailPanel(props: Props) {
   /** Set by the dialog's confirm path, which starts its own launch - so the
    *  close handler (which fires for both answers) does not start a second. */
   let netPromptAccepted = false;
-  /** ECE or Staging for the selected game, straight from the backend's own
-   *  `resolve_engine`. Not derived from the variant here: the answer depends
-   *  on the platform, on the ECE build being extracted, and on the user's
-   *  per-game override, and a label contradicting what launches is worse than
-   *  none. */
+  /** ECE or Staging, from the backend's `resolve_engine` (§9) - never
+   *  derived here. */
   const [engineInfo, setEngineInfo] = createSignal<GameEngineInfo | null>(null);
   /** Null until the backend answers. Guessing "Staging" in the meantime made
    *  every ECE game on Windows flash the wrong engine and the wrong note. */
@@ -176,11 +170,7 @@ export function GameDetailPanel(props: Props) {
     return dismissedNotesLoaded() && !isNoteDismissed(n.key) ? n : null;
   };
   let heroVideoRef: HTMLVideoElement | undefined;
-  /** Whether the overflow control has anything to offer. GameActionsMenu gates
-   *  every entry on the game's own state, so without this the button could
-   *  open an empty popup - which reads as broken. Mirrors that gating:
-   *  Settings and Reset need an install, Uninstall also accepts in_library,
-   *  and Playlist only needs an id. */
+  /** The ⋯ button must never open an empty menu; Playlist needs only an id. */
   const hasMoreActions = () => selected()?.id != null;
 
   const [moreMenu, setMoreMenu] = createSignal<{ x: number, y: number } | null>(null);
@@ -194,11 +184,7 @@ export function GameDetailPanel(props: Props) {
   const [launchingId, setLaunchingId] = createSignal<number | null>(null);
   const [uninstallingId, setUninstallingId] = createSignal<number | null>(null);
   const [resettingId, setResettingId] = createSignal<number | null>(null);
-  // The panel always describes exactly ONE row. Multi-language cards are a
-  // merged group, so the user picks which language everything below the title
-  // refers to - actions, description, manual, screenshots. Before this, the
-  // header described the EN row while the Versions list acted on variant rows,
-  // and nothing said which one the description or the manual belonged to.
+  // The panel describes exactly ONE row; the chip switcher picks it (§12).
   const [selectedId, setSelectedId] = createSignal<number | null>(null);
   let launchTimer: number | undefined;
   onCleanup(() => { if (launchTimer) { clearTimeout(launchTimer); } });
@@ -208,10 +194,7 @@ export function GameDetailPanel(props: Props) {
 
 
   // ── Selected variant ───────────────────────────────────────────────────
-  // Single-language games have exactly one row (the game itself), so every
-  // rule below collapses to it - the panel has ONE rendering path, which is
-  // what previously drifted apart (the Manual button existed only on the
-  // single-language branch).
+  // A single-language game is a group of one; there is no second path.
   const rows = (): Game[] => {
     const v = variants();
     if (v.length > 0) { return v; }
@@ -247,10 +230,8 @@ export function GameDetailPanel(props: Props) {
     return props.game?.[key];
   };
 
-  /** Which row's description we're showing, and whether that's a fallback.
-   *  Only 98 of 648 German rows have their own text; Polish and Spanish have
-   *  none - so saying "English text, no German available" beats silently
-   *  showing English under a DE badge. */
+  /** The description shown and whether it is the EN fallback (most LP rows
+   *  have no text of their own). */
   const descriptionSource = () => {
     const sel = selected();
     const primary = props.game;
@@ -281,22 +262,15 @@ export function GameDetailPanel(props: Props) {
     const row = manualRow();
     return !!row && !!sel?.language && !!row.language && row.language !== sel.language;
   };
-  // Download progress used to be echoed here too; the action bar now renders
-  // it for the selected variant and the chips show it for the others, so this
-  // line is only for launch/uninstall messages.
+  // Launch/uninstall messages only; download progress lives in the action
+  // bar and the chips.
   const currentStatus = () => status();
 
 
   // ── Settle gate ──────────────────────────────────────────────────────────
-  // The panel slides in over 260ms, and opening it also kicks off the metadata
-  // scan (a strip of thumbnails to decode) plus the Win9x probes - all landing
-  // inside that window. Linux may paint the animation on WebKit's fallback
-  // renderer (CLAUDE.md §17), where that burst is visible as a stutter, so the
-  // work that is neither cheap nor layout-defining waits for the slide-in to
-  // end. `animationend` on the panel is the signal; the timeout covers the
-  // cases where it never fires (reduced motion, a hidden window). Variants and
-  // the game's own fields stay immediate - they decide the panel's layout, and
-  // holding them back would only trade a stutter for a visible pop-in.
+  // Heavy work (metadata scan, Win9x probes) waits for the 260 ms slide-in,
+  // which stutters on a software renderer (§17). `animationend` is the
+  // signal, the timeout the fallback. Layout-defining data stays immediate.
   const [panelSettled, setPanelSettled] = createSignal(false);
   let settleTimer: ReturnType<typeof setTimeout> | undefined;
   // Guarded on open/closed rather than on props.game itself: the prop is
@@ -318,10 +292,8 @@ export function GameDetailPanel(props: Props) {
   onCleanup(() => clearTimeout(settleTimer));
   const win9x = createWin9xStatus(() => props.game, panelSettled);
 
-  // Reset media state only when the DISPLAYED GAME changes - background
-  // library refreshes (install/uninstall completing) replace the game object
-  // with a fresh one for the same id, and resetting on those made the cover
-  // image and media strip flicker on every state change.
+  // Reset only when the displayed game changes: library refreshes replace
+  // the object for the same id.
   let lastGameId: number | null | undefined = undefined;
   let lastMetaKey: string | null = null;
   createEffect(() => {
@@ -376,28 +348,21 @@ export function GameDetailPanel(props: Props) {
     }
   });
 
-  // Metadata (screenshots + manual) belongs to the SELECTED variant, not to
-  // the group: an LP metadata pack can ship its own screenshots, and the
-  // manual differs per language where one exists. Keyed on id+source+manual so
-  // the background variant refresh (same rows, new objects) doesn't refetch.
+  // Metadata belongs to the SELECTED variant; keyed on id+source+manual so
+  // a variant refresh (same rows, new objects) does not refetch.
   createEffect(() => {
     const v = selected();
     const row = manualRow();
     if (!v?.title || !v.torrent_source) { return; }
     const key = `${v.id}:${v.torrent_source}:${row?.manual_path ?? ""}`;
     if (key === lastMetaKey) { return; }
-    // Held until the slide-in ends: the scan returns a strip of thumbnails to
-    // decode, which is the heaviest thing an open kicks off. The loading flag
-    // is set anyway, so the Manual button looks exactly as it did before -
-    // busy from the first frame rather than briefly inert.
+    // Held until settled; the loading flag keeps the Manual button busy.
     if (!panelSettled()) { setMetadataLoading(true); return; }
     lastMetaKey = key;
     setMetadata(null);
     setBrokenImages(new Set<number>());
-    // The previous variant's cover may have 404'd; the new one gets a fresh
-    // chance rather than inheriting the placeholder. (The walk itself resets
-    // via the keyed effect above - doing it here too restarted a completed
-    // fallback at settle time.)
+    // A new variant gets a fresh chance at its cover; the walk itself
+    // resets in the keyed effect above.
     setImgError(false);
     setMetadataLoading(true);
     loadGameMetadata(v.torrent_source, v.title, v.shortcode ?? null, row?.manual_path ?? null)
@@ -405,11 +370,8 @@ export function GameDetailPanel(props: Props) {
       .finally(() => setMetadataLoading(false));
   });
 
-  // Refresh variant list when a download transitions to installed so
-  // badges/buttons stay current. Tracks per-id transitions via the store's
-  // `installed` flag (its documented contract - status text keeps changing
-  // during the extras phase, and re-matching it on every poll tick both
-  // missed that phase and refetched variants redundantly).
+  // Refresh the variants once per install transition (the store's
+  // `installed` flag, not its status text).
   const announcedInstalls = new Set<number>();
   createEffect(() => {
     const dl = downloads();
@@ -435,10 +397,7 @@ export function GameDetailPanel(props: Props) {
 
   const handleKeyDown = (e: KeyboardEvent) => {
     if (e.key !== "Escape") { return; }
-    // A stacked overlay handles this Escape itself - closing the panel
-    // underneath in the same press would yank the user two levels at once.
-    // The actions menu counts: it stays mounted while the dialogs it opened
-    // are up, so one signal covers menu, playlist and game settings.
+    // One Escape closes one layer; the actions menu covers its dialogs.
     if (lightboxOpen() || manualOpen()) { return; }
     if (moreMenu()) { setMoreMenu(null); return; }
     props.onClose();
@@ -455,10 +414,8 @@ export function GameDetailPanel(props: Props) {
     onCleanup(() => window.removeEventListener("keydown", handleKeyDown, true));
   });
 
-  // LP rows usually inherit the EN thumbnail_key, but some carry a key with no
-  // file behind it (own-title hash from an old DB). A null key falls through to
-  // the primary row's candidates; a WRONG key only reveals itself as a 404, so
-  // the <img onError> walks this list instead of giving up on the first miss.
+  // Own candidates, then the primary row's: an LP key with no file behind
+  // it only shows as a 404, so `<img onError>` walks the list.
   const thumbCandidates = () => {
     const g = selected() ?? props.game;
     if (!g) { return []; }
@@ -506,24 +463,15 @@ export function GameDetailPanel(props: Props) {
     return id != null ? getVideoState(id) : undefined;
   };
   const videoReady = () => videoState()?.phase === "ready" && !!videoState()?.path;
-  // Finding out whether a game has a video means reading the archive index over
-  // the torrent, which can take tens of seconds. Staying silent through that
-  // just looks broken, so each stage says what it is - including the negative
-  // answer, which then fades out rather than lingering.
+  // Each stage of the probe says what it is; silence looks broken.
   const videoConfirmed = () => (videoState()?.total_bytes ?? 0) > 0;
   const videoProbing = () => videoState()?.phase === PHASE_PROBING;
   const videoFetching = () => videoState()?.phase === "fetching" && videoConfirmed();
   const videoQueued = () => videoState()?.phase === PHASE_QUEUED;
   const videoFailed = () => videoState()?.phase === "error";
 
-  // There is deliberately no "no video for this game" pill. Most DOS titles
-  // have no trailer, so the honest answer is also the useless one: it told the
-  // reader nothing they could act on and drew the eye to the absence of a
-  // feature. The progress states below still speak, because those describe
-  // work in flight the reader is waiting on.
-  // WebKitGTK cannot play media through the asset protocol (Linux answers a
-  // localhost HTTP URL from media_url; macOS/Windows answer null and keep
-  // convertFileSrc). Async, so the URL lives in a signal the effect fills.
+  // No "no video" pill: most DOS titles have none. The src comes from
+  // media_url (localhost on Linux, §14), else convertFileSrc.
   const [videoSrc, setVideoSrc] = createSignal<string | null>(null);
   createEffect(() => {
     const p = videoState()?.path;
@@ -555,9 +503,8 @@ export function GameDetailPanel(props: Props) {
   });
 
   // ── Theme track ────────────────────────────────────────────────────────
-  // Same beat as the video: the archive is asked a moment after the panel
-  // settles. With autoplay on the theme becomes the player's wanted track;
-  // off, it is only fetched so the row below can offer it.
+  // Same beat as the video. Autoplay on: it becomes the wanted track; off:
+  // fetched so the row can offer it.
   ensureMusicAutoplayLoaded();
   /** The theme belongs to the GROUP, not the selected variant: extras live in
    *  the EN archive only (every LP row has a NULL gamedata index, §14), so
@@ -616,14 +563,8 @@ export function GameDetailPanel(props: Props) {
     }
   });
 
-  // Autoplay as soon as it lands, with sound. Autoplay policies only grant
-  // that once the document has seen a user gesture, and opening this panel is
-  // one - but a preview is worth more than its audio, so a rejected unmuted
-  // play retries muted rather than leaving the cover sitting there.
-  // Latched on the row, NOT re-armed per effect run: `videoState()` reads the
-  // whole videos store, which every background fetch rewrites once per poll.
-  // Re-running the timer on those writes replayed a running preview from 0:00
-  // every 700 ms (and, with the old fixed delay, postponed it forever).
+  // Autoplay with sound, muted on rejection. Latched per row: `videoState()`
+  // reads the whole store, which every background poll rewrites.
   let autoplayTimer: number | undefined;
   let autoplayFor: number | null | undefined;
   onCleanup(() => { if (autoplayTimer) { clearTimeout(autoplayTimer); } });
@@ -636,10 +577,7 @@ export function GameDetailPanel(props: Props) {
     }
     if (!videoReady() || id == null || id === autoplayFor) { return; }
     autoplayFor = id;
-    // Let the cover have the panel first. Opening a game and being met by a
-    // trailer mid-motion reads as an ad; two seconds is long enough to take in
-    // the box art, and the fade then belongs to the video rather than to the
-    // panel opening. Cleared on close and on switching games.
+    // Two seconds of cover first; a trailer mid-slide reads as an ad.
     autoplayTimer = window.setTimeout(() => {
       autoplayTimer = undefined;
       const el = heroVideoRef;
@@ -648,10 +586,7 @@ export function GameDetailPanel(props: Props) {
         el.currentTime = 0;
         el.muted = previewMuted();
         const started = el.play();
-        // Older WebKit returns undefined here instead of a promise. Calling
-        // .then on that throws INSIDE the effect, and Solid propagates the
-        // exception back to whoever set the signal - which made the video
-        // store record a fetch error for a video that had arrived fine.
+        // Older WebKit returns undefined instead of a promise.
         if (started && typeof started.then === "function") {
           started.then(() => setVideoPlaying(true)).catch(() => {
             // Autoplay with sound needs a user gesture the webview may not
@@ -687,19 +622,13 @@ export function GameDetailPanel(props: Props) {
     }
   };
 
-  // The lightbox plays the same preview with its own controls, and both have
-  // sound now - so the hero has to step aside or the trailer runs twice over
-  // itself. Pausing also cross-fades the cover back in, which is what should
-  // be behind the lightbox anyway.
+  // The lightbox plays the same preview; the hero steps aside.
   createEffect(() => {
     if (lightboxOpen()) { heroVideoRef?.pause(); }
   });
 
-  // ...and that pause hands the speakers back to the theme, while the lightbox
-  // goes on playing the same trailer with sound from its OWN <video>. So the
-  // reason is held here for as long as that one is the foreground. Entry 0 is
-  // the video, and only the hero video's own click opens there - a lightbox
-  // started on a screenshot is silent and must not silence the theme.
+  // That pause would hand the speakers back to the theme, so the lightbox
+  // holds the reason while it plays the trailer (entry 0) with sound.
   const lightboxHoldsAudio = () =>
     lightboxOpen() && !!videoSrc() && !previewMuted() && lightboxStart() === 0;
 
@@ -752,12 +681,7 @@ export function GameDetailPanel(props: Props) {
       setLaunchingId(null);
       setStatus("");
       const detail = String(e).replace(/^Error:\s*/, "");
-      // One failure does NOT mean nothing is running: launch_game refuses a
-      // second start of a live game with "'<title>' is already running."
-      // (games.rs). That game's claim on the speakers belongs to the launch
-      // that succeeded, and withdrawing it here started the theme over a
-      // running emulator. Every other failure spawned nothing, so its claim
-      // goes back.
+      // "already running" means the first launch still holds the speakers.
       if (!detail.includes("already running")) { resumeFromGame(gameId); }
       showToast(`Couldn't launch ${props.game?.title ?? "game"}`, "error", { detail });
     }
@@ -819,18 +743,10 @@ export function GameDetailPanel(props: Props) {
     return "★".repeat(full) + "☆".repeat(empty);
   };
 
-  // Manual: shown iff the catalogue lists one for the selected variant or, as
-  // a fallback, for the English row - in which case the label says so, because
-  // "Manual" on a DE selection silently opening the English PDF is exactly the
-  // ambiguity this panel is meant to remove. Unresolved = its GameData ZIP is
-  // still downloading; clicking retries the lookup, so it self-heals.
-  /** True once the file behind the catalogue's promise actually exists. */
-  /** Favourite state of the CARD's row, not the selected variant.
-   *
-   *  The panel is scoped to one variant everywhere else (§12), but favourites
-   *  are not: the grid stars `props.game`, and the Favorites shelf lists that
-   *  row. Starring the DE variant here would leave the card it was opened from
-   *  showing an empty star and put a second entry on the shelf. */
+  // Manual: the selected variant's, else the EN row's with the language in
+  // the label. Unresolved = GameData still downloading; a click retries.
+  /** Favourite state of the CARD's row, not the variant: the grid and the
+   *  Favorites shelf star `props.game` (§12). */
   const [favorited, setFavorited] = createSignal(false);
   createEffect(() => { setFavorited(props.game?.favorited ?? false); });
 
@@ -951,13 +867,9 @@ export function GameDetailPanel(props: Props) {
                 playsinline
                 preload="auto"
                 onEnded={() => { setVideoPlaying(false); resumeFrom("video"); }}
-                // A paused preview is not the foreground either: without this
-                // the speakers stay claimed by a video nobody hears - opening
-                // the lightbox pauses the hero, and closing it left silence.
-                // Unless the lightbox is the one holding them: `pause()` only
-                // QUEUES this event, so it lands after the effect above has
-                // taken the reason over and would withdraw it again - the
-                // theme then played over the lightbox's trailer.
+                // A paused preview releases the speakers - unless the
+                // lightbox holds them: this event lands after the effect
+                // above took the reason over.
                 onPause={() => {
                   setVideoPlaying(false);
                   if (!lightboxHoldsAudio()) { resumeFrom("video"); }
@@ -1018,10 +930,8 @@ export function GameDetailPanel(props: Props) {
                 class="game-detail-video-replay"
                 title="Play the preview again"
                 onClick={() => {
-                  // A click is the gesture autoplay may have lacked, so a
-                  // fallback-muted video gets its sound back here - but only
-                  // if the user has not asked for silence. Forcing muted=false
-                  // outright made Replay override the mute button.
+                  // The click is the gesture autoplay lacked; honour the
+                  // mute button.
                   if (heroVideoRef) { heroVideoRef.muted = previewMuted(); }
                   heroVideoRef?.play();
                 }}

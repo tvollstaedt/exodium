@@ -1,21 +1,9 @@
-/** Fetch slots shared by everything that streams out of a GameData archive.
- *
- *  Each fetch is a torrent stream with its own 32 MB lookahead, and several at
- *  once fight over the same peers - so only MAX_CONCURRENT run, whatever kind
- *  they are. Videos and theme tracks used to need one such scheduler each;
- *  two caps of three would have been six streams.
- *
- *  Jobs carry a priority (lower number = more important): the game on screen
- *  wants its video now (0), the track the player is waiting on comes next (1),
- *  background videos and the shuffle's prefetch wait their turn (2). A request
- *  that finds no free slot evicts the least important, oldest running job -
- *  only one that is strictly less important than itself - and otherwise
- *  queues. An evicted job is not lost: it goes back to the FRONT of the queue,
- *  and its owner is told so it can show "queued" rather than nothing.
- *
- *  Priorities are read at decision time, not at request time, because they
- *  move: the foreground game changes, the prefetched track becomes the
- *  current one. */
+/** Fetch slots shared by videos and theme tracks: each is a torrent stream
+ *  with a 32 MB lookahead, so only MAX_CONCURRENT run. Priority 0 = the
+ *  visible game's video, 1 = the track the player waits on, 2 = background.
+ *  A request without a free slot evicts a strictly less important job (which
+ *  returns to the FRONT of the queue and is told) or queues. Priorities are
+ *  read at decision time - they move. */
 
 export interface MediaJob {
   /** Unique across kinds: `v:<gameId>` for videos, `m:<gameId>` for music. */

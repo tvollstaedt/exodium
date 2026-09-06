@@ -22,10 +22,8 @@ export interface GameActionsMenuProps {
   /** Uninstall and Reset report progress through this when the menu performs
    *  them itself. */
   setStatus?: (s: string) => void;
-  /** Take over the action after the menu has confirmed it. The detail panel
-   *  does: it renders its own "Resetting…" / "Uninstalling…" bar in place of
-   *  the action row, which a status string cannot express. Absent, the menu
-   *  runs the shared helper - which is what the grid wants. */
+  /** Take over the confirmed action (the panel renders its own progress
+   *  bar); absent, the menu runs the shared helper. */
   onReset?: (gameId: number) => void;
   onUninstall?: (gameId: number) => void;
   /** Called once the menu AND anything it opened have closed - the host can
@@ -43,15 +41,8 @@ export interface GameActionsMenuProps {
  *  the component mounted until everything is finished - hence `done`. */
 type Phase = "menu" | "playlist" | "settings" | "done";
 
-/**
- * The one menu behind both the grid's right-click and the detail panel's ⋯.
- *
- * They used to be two copies that had already drifted - the card offered
- * "Details…", the panel did not; each kept its own confirm state, its own
- * reset handler and its own GameSettingsDialog. A game must offer the same
- * actions wherever it is looked at, and that only stays true while there is
- * one place to change them.
- */
+/** The one menu behind the grid's right-click and the panel's ⋯, so a game
+ *  offers the same actions wherever it is looked at. */
 export function GameActionsMenu(props: GameActionsMenuProps) {
   const [phase, setPhase] = createSignal<Phase>("menu");
   // Both destructive entries confirm in place: a menu is easy to mis-hit, and

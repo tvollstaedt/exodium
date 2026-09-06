@@ -34,19 +34,7 @@ export function posterDirForCollection(collectionId: string | null | undefined):
 
 // ── Best-available-tier resolution ───────────────────────────────────────────
 
-/**
- * Return the best available thumbnail path for a game card.
- *
- * Resolution is based on whether each tier's directory is resolved (i.e. the
- * files physically exist on disk), not on the installedPacks signal. This
- * avoids mismatches where LP games (torrent_source = "eXoDOS_GLP") look for
- * "eXoDOS_GLP:posters" but the installed pack is keyed "eXoDOS:posters".
- *
- * Resolution order:
- *   1. Tier 1 - poster dir available (runtime-downloaded HD box art)
- *   2. Tier 0 - preview dir available (bundled low-quality JPEG)
- *   3. null   - no thumbnail at all (has_thumbnail = false)
- */
+/** The first of `thumbnailCandidates`, or null. */
 export function bestThumbnailPath(
   collection: string | null | undefined,
   thumbnailKey: string | null | undefined,
@@ -55,12 +43,9 @@ export function bestThumbnailPath(
   return first ?? null;
 }
 
-/** Return every available thumbnail path for a game, poster (Tier 1) first,
- *  preview (Tier 0) second. GameCard renders the first and swaps to the next
- *  on `<img onError>` - this is the robust way to handle a *stale* poster pack
- *  (left over from a previous Exodium version with shortcode-keyed files)
- *  where the pack dir exists on disk but the specific hash-keyed file inside
- *  doesn't. Without the fallback, the browser 404s and the tile goes blank. */
+/** Cover paths, Tier 1 (poster pack) then Tier 0 (bundled); the card walks
+ *  them on `<img onError>` (§13). Resolved from the dirs on disk, not the
+ *  pack ledger. */
 export function thumbnailCandidates(
   collection: string | null | undefined,
   thumbnailKey: string | null | undefined,

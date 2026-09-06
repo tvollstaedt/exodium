@@ -16,13 +16,9 @@ function formatTime(seconds: number): string {
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
 }
 
-/** The player, as a bottom row of the app shell.
- *
- *  Owns the one `<audio>` element - the store drives it through `AudioPort`
- *  and never touches the DOM - and the element exists for the app's whole
- *  lifetime, while the visible bar appears only once a track is loaded. Not a
- *  floating pill: as the last flex child of `#root` it needs no fixed
- *  positioning, and the detail panel steps aside via `--player-h`. */
+/** The player bar. Owns the one `<audio>` (the store drives it through
+ *  `AudioPort`); the element lives for the app's lifetime, the bar shows
+ *  once a track is loaded. Last flex child of `#root`, `--player-h`. */
 export function NowPlayingBar() {
   let audioRef: HTMLAudioElement | undefined;
   /** The seek bar reads the element directly rather than going through
@@ -67,12 +63,8 @@ export function NowPlayingBar() {
     if (audioRef) { audioRef.volume = musicVolume(); }
   });
 
-  /** What the bar shows, if anything: the × only hides it, so a loaded track
-   *  is not enough - the layout has to give the room back too.
-   *
-   *  A track still being fetched counts. The first shuffle pick takes as long
-   *  as the swarm takes, and a bar that appears only afterwards leaves the
-   *  click looking ignored for a minute. */
+  /** What the bar shows: a loaded OR still-fetching track (a first shuffle
+   *  pick can take a minute), unless hidden with ×. */
   const barTrack = () => currentTrack() ?? wantedTrack();
   const visibleTrack = () => (playerHidden() ? null : barTrack());
   /** Nothing is loaded yet: the transport has nothing to act on. */

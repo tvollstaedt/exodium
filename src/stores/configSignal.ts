@@ -1,21 +1,9 @@
 import { createSignal, type Accessor } from "solid-js";
 import { getConfig, setConfig } from "../api/tauri";
 
-/**
- * A reactive preference backed by the `config` table.
- *
- * Every one of these wants the same four things, and writing them out per
- * preference is how the second copy drifts from the first:
- *
- *  - a value that is UNKNOWN until the stored one arrives, so nothing renders
- *    on a default the user may have overruled weeks ago (that flash is a bug
- *    `PackHintBanner` had to fix by hand);
- *  - a load that runs at most once per session, however many components ask;
- *  - a write that updates the signal FIRST, so the click holds even if the
- *    config never lands;
- *  - failures that stay silent - a preference is not worth interrupting the
- *    user over, in either direction.
- */
+/** A reactive preference backed by the `config` table: unknown until
+ *  loaded (no flash of a default), loaded once per session, written
+ *  signal-first, failures silent. */
 export interface ConfigSignal<T> {
   /** The current value. Equals `fallback` until `ensureLoaded` resolves. */
   value: Accessor<T>;

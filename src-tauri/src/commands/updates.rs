@@ -13,11 +13,8 @@ pub struct PlatformSource {
     pub size_bytes: u64,
 }
 
-/// A downloadable content pack. Two source kinds:
-///   - HTTP tar.gz (url + sha256): externally hosted release asset
-///   - Torrent-sourced ZIP (torrent_file_path): a file inside the collection's
-///     existing torrent. librqbit handles piece-level integrity, so sha256 is
-///     redundant and left empty.
+/// A content pack: an HTTP tar.gz (url + sha256) or a zip inside the
+/// collection's torrent (`torrent_file_path`, integrity by librqbit).
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ContentPackInfo {
     pub display_name: String,
@@ -26,19 +23,14 @@ pub struct ContentPackInfo {
     pub sha256: String,
     pub size_bytes: u64,
     pub version: u32,
-    /// Relative path under data_dir where the pack extracts to. Must name a
-    /// directory owned by this pack ALONE - the installer remove_dir_all's it
-    /// before renaming staging onto it (a path shared between packs deletes
-    /// its siblings' content on every install).
+    /// Install dir under data_dir, owned by this pack ALONE: the installer
+    /// removes it before renaming staging onto it (§10).
     pub install_path: String,
     /// Pack IDs this pack replaces (e.g. media supersedes posters).
     #[serde(default)]
     pub supersedes: Vec<String>,
-    /// Oldest installed version still usable with this app build. An installed
-    /// pack BELOW it is deleted on startup; anything at or above it stays and
-    /// is merely offered as an update. Without this, every content change
-    /// silently wiped the user's art and left them to notice - the poster pack
-    /// grew by 34 covers and would have cost everyone their 376 MB.
+    /// Oldest installed version still usable; below it the pack is deleted
+    /// at startup, at or above it an update is merely offered (§10).
     #[serde(default)]
     pub min_compatible_version: u32,
     /// If set, install via torrent selective-download instead of HTTP. Value
@@ -46,12 +38,8 @@ pub struct ContentPackInfo {
     /// (e.g. "Content/XODOSMetadata.zip"). The extractor expects a .zip.
     #[serde(default)]
     pub torrent_file_path: Option<String>,
-    /// When set, the pack exists only on the listed platforms: the entry for
-    /// the current platform supplies url/sha256/size_bytes (the top-level
-    /// triple is a placeholder by convention), and a platform without an
-    /// entry does not see the pack at all. Keys are release-target tokens
-    /// ("darwin-aarch64", "linux-x86_64", ...), same vocabulary as
-    /// gen_latest_json.py, so adding an architecture later is additive.
+    /// Per-platform sources keyed by release-target token ("darwin-aarch64");
+    /// a platform without an entry never sees the pack (§10).
     #[serde(default)]
     pub platforms: Option<HashMap<String, PlatformSource>>,
 }
@@ -75,10 +63,8 @@ pub(crate) fn current_platform() -> &'static str {
 }
 
 impl ContentPackInfo {
-    /// The pack as this platform sees it: packs without a platforms map pass
-    /// through unchanged, platform-mapped packs get their source triple
-    /// substituted, and None means "not for this platform" - callers drop the
-    /// pack entirely, which is how Windows never sees the emulator packs.
+    /// The pack with this platform's source substituted; None when the pack
+    /// is not for this platform.
     pub fn for_current_platform(&self) -> Option<ContentPackInfo> {
         self.for_platform(current_platform())
     }
@@ -119,10 +105,7 @@ pub struct Manifest {
 
 // ── Manifest loading ──────────────────────────────────────────────────────────
 
-/// Load the manifest from the best available source.
-/// Dev mode reads from the project root. Production reads the bundled copy
-/// from resource_dir (shipped via bundle.resources). HTTP fetch from a remote
-/// manifest_url is a future improvement (v0.2+).
+/// The manifest: repo root in dev, bundled copy in production (§10).
 pub(crate) fn load_manifest() -> Result<Manifest, String> {
     // Dev: read from the project root next to Cargo.toml
     let dev_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -147,7 +130,7 @@ pub(crate) fn load_manifest() -> Result<Manifest, String> {
         }
     }
 
-    // TODO (v0.2): HTTP fetch from manifest_url as final fallback.
+    // TODO: HTTP fetch from manifest_url as final fallback.
     Err("manifest.json not found (dev path or resource_dir)".to_string())
 }
 
@@ -203,11 +186,7 @@ mod manifest_load_tests {
         assert_eq!(resolved.size_bytes, 9);
     }
 
-    /// Every install_path in the shipped manifest must be unique: the
-    /// installer remove_dir_all's the target before renaming staging onto it,
-    /// so a shared path means installing one pack deletes another's content
-    /// (all three poster packs once shared "content/posters" and installing
-    /// the Win9x pack wiped eXoDOS's 396 MB).
+    /// A shared install_path means installing one pack deletes another's.
     #[test]
     fn manifest_install_paths_are_unique() {
         let m = super::load_manifest().expect("load_manifest failed");

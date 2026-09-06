@@ -2,16 +2,9 @@ import { createEffect } from "solid-js";
 import { getGameVariants, type Game } from "../api/tauri";
 import { lastGameLibraryChange } from "./games";
 
-/** Shared cache for `get_game_variants`.
- *
- *  Every multi-language GameCard asks for its group's variants from an effect.
- *  Rendering a page is fine; rendering the whole catalogue (what a jump-bar
- *  jump does) fired one IPC call per multi-language card - ~734 of them in a
- *  burst. Requests are now deduplicated by shortcode, and the resolved list is
- *  reused until something changes a game's library state.
- *
- *  In-flight promises are cached too, so N cards mounting in the same frame
- *  share a single round trip. */
+/** Promise cache for `get_game_variants`, keyed by shortcode, invalidated
+ *  on library changes: every multi-language card asks, and a jump-bar jump
+ *  mounts hundreds at once (§13). */
 const cache = new Map<string, Promise<Game[]>>();
 
 // installed/in_library flags are baked into the cached rows, so anything that

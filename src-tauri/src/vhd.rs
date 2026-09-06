@@ -77,10 +77,7 @@ fn read_parent_info(parent: &Path) -> Result<ParentInfo, String> {
     })
 }
 
-/// A stable pseudo-UUID for the child, derived from its path - launches must
-/// not depend on wall-clock randomness, and a fresh child replaces the old
-/// one wholesale, so uniqueness beyond "differs from the parent" is not
-/// load-bearing.
+/// A path-derived pseudo-UUID: only "differs from the parent" is load-bearing.
 fn child_uuid(child: &Path) -> [u8; 16] {
     let mut h1: u64 = 0xcbf2_9ce4_8422_2325; // FNV-1a
     for b in child.to_string_lossy().as_bytes() {
@@ -118,12 +115,9 @@ pub fn create_differencing(child: &Path, parent: &Path, parent_rel: &str) -> Res
     let w2ru_offset = w2ku_offset + 512;
     let footer_offset = w2ru_offset + 512;
 
-    // Locator paths use FORWARD slashes and native absolute form. 86Box's
-    // minivhd resolves W2ru via cwalk with the path style GUESSED FROM THE
-    // CHILD'S OWN directory - on macOS/Linux that is POSIX style, where a
-    // backslash is just a filename character and eXo's Windows-style
-    // ".\parent\x.vhd" locators dead-end (measured: "parent VHD image not
-    // found"). Windows-style cwalk accepts '/' too, so '/' works everywhere.
+    // Forward slashes: minivhd resolves locators in the child dir's own path
+    // style, where a backslash is a filename character on POSIX. Windows
+    // accepts '/' too.
     let parent_abs = parent
         .canonicalize()
         .unwrap_or_else(|_| parent.to_path_buf())
@@ -166,17 +160,11 @@ pub fn create_differencing(child: &Path, parent: &Path, parent_rel: &str) -> Res
     dh[0x1C..0x20].copy_from_slice(&table_entries.to_be_bytes());
     dh[0x20..0x24].copy_from_slice(&info.block_size.to_be_bytes());
     dh[0x28..0x38].copy_from_slice(&info.uuid); // parent UUID
-    // Parent timestamp: 0, exactly like eXo's makevhd.exe (verified against
-    // a real child). The spec wants the parent's mtime here, but extraction
-    // rewrites mtimes arbitrarily - a real value would make emulators reject
-    // the chain as "parent modified"; 0 is the tool-proven escape hatch
-    // (minivhd treats the mismatch as a warning, not an error).
+    // Parent timestamp 0 like makevhd: extraction rewrites mtimes, and a
+    // real value would read as "parent modified".
     dh[0x38..0x3C].copy_from_slice(&0u32.to_be_bytes());
-    // Parent unicode name (0x40, UTF-16BE): the parent's FILE NAME. Must not
-    // be empty: minivhd's fallback parent probe joins <child dir> + this
-    // name, and with an empty name that join IS the directory - fopen() on a
-    // directory succeeds on POSIX and the "parent" then fails cookie
-    // validation as "file is not a VHD image".
+    // Parent name (0x40, UTF-16BE) must not be empty: minivhd's fallback
+    // probe joins <child dir> + name, and an empty name opens the directory.
     let parent_name: Vec<u8> = parent
         .file_name()
         .map(|n| n.to_string_lossy().encode_utf16().flat_map(|u| u.to_be_bytes()).collect())

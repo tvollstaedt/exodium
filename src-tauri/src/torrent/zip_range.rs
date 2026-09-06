@@ -226,13 +226,8 @@ fn is_video(name: &str) -> bool {
     VIDEO_EXTENSIONS.iter().any(|ext| lower.ends_with(ext))
 }
 
-/// Find the game preview video.
-///
-/// eXoDOS files these under `Videos/MS-DOS/<Title>.mp4`, which is where all but
-/// one of the sampled archives keep them - the exception filed its trailer
-/// under the game's own extras (`eXo/eXoDOS/!dos/<code>/Extras/…Trailer.mp4`).
-/// So the `Videos/` folder wins when present, and anything else counts only as
-/// a fallback, bounded in size.
+/// The preview video: `Videos/` wins, any other playable file is a
+/// size-bounded fallback (one archive keeps its trailer under Extras).
 pub fn find_video(entries: &[ZipEntry]) -> Option<&ZipEntry> {
     let preferred = entries
         .iter()
@@ -264,11 +259,7 @@ pub fn is_music(name: &str) -> bool {
     MUSIC_EXTENSIONS.iter().any(|ext| lower.ends_with(ext))
 }
 
-/// Find the game's theme track.
-///
-/// eXoDOS files ONE track per game under `Music/MS-DOS/<Title>.mp3` (or .ogg),
-/// beside the preview video. Same shape as `find_video`: the curated folder
-/// wins, anything else is a bounded fallback.
+/// The theme track: `Music/` wins, anything else is a bounded fallback.
 pub fn find_music(entries: &[ZipEntry]) -> Option<&ZipEntry> {
     let preferred = entries
         .iter()

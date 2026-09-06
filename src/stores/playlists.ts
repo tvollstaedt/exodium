@@ -21,10 +21,7 @@ export { playlistDialog, setPlaylistDialog };
 export async function loadPlaylists(): Promise<void> {
   try {
     const fresh = await getPlaylists();
-    // Preserve object identity for unchanged playlists: My Library's <For>
-    // keys shelves by reference, and swapping every object on each reload
-    // remounts all shelves - tearing down an open playlist picker inside a
-    // shelf's game card mid-interaction.
+    // Keep unchanged objects: `<For>` keys shelves by reference.
     setPlaylists((prev) => {
       const prevById = new Map(prev.map((p) => [p.id, p]));
       return fresh.map((f) => {
@@ -44,10 +41,7 @@ export async function loadPlaylists(): Promise<void> {
   }
 }
 
-// After a mutation the list refresh is fire-and-forget: the caller (e.g.
-// the name dialog's "Saving..." state) only needs the WRITE to be durable,
-// not the derived views to be repainted. Consumers react to the playlists()
-// signal itself - no separate change counter.
+// Fire-and-forget after a mutation: the write is what the caller awaits.
 function refreshInBackground() {
   loadPlaylists();
 }

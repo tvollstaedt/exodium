@@ -162,20 +162,16 @@ pub async fn set_config(
         let conn = state.lock()?;
         queries::set_config(&conn, &key, &value).map_err(|e| e.to_string())?;
     }
-    // The static asset-protocol scope only covers $RESOURCE/$APPDATA; the
-    // user-chosen game dir (thumbnails, screenshots, manuals served via the
-    // asset protocol) is granted at runtime - here on change, and at startup
-    // in lib.rs for the stored value.
+    // The asset-protocol scope must cover the user-chosen data dir (covers,
+    // screenshots, manuals); lib.rs grants the stored value at startup.
     if key == "data_dir" {
         crate::allow_asset_dir(&app, std::path::Path::new(&value));
     }
     Ok(())
 }
 
-/// Open a manual (or other game file) in the system viewer. The webview has
-/// no opener:allow-open-path capability - this command re-validates that the
-/// path lives under the configured data dir before handing it to the OS,
-/// which also works for data dirs outside $HOME (external drives).
+/// Open a game file in the system viewer. Only paths under the data dir are
+/// allowed; the webview has no opener capability of its own.
 #[tauri::command]
 pub async fn open_manual(
     app: AppHandle,
@@ -251,10 +247,9 @@ pub async fn set_rate_limits(
     Ok(())
 }
 
-/// Re-apply seeding preference and caps together. They share one knob, so a
-/// change to either has to go through the same call - see
-/// `DownloadManager::apply_limits`. No manager means no session, and the
-/// preferences are read again when one is created.
+/// Seeding and rate caps share one librqbit knob, so both are re-applied
+/// together (`DownloadManager::apply_limits`). No manager: nothing to do,
+/// a new session reads the preferences itself.
 async fn apply_stored_limits(db_state: &State<'_, DbState>, torrent_state: &State<'_, TorrentState>) {
     let seeding = crate::commands::setup::seeding_enabled(&db_state.0);
     let (up, down) = crate::commands::setup::rate_limits(&db_state.0);
@@ -281,11 +276,8 @@ pub struct TransferStats {
     pub active: bool,
 }
 
-/// Current transfer rates for the whole torrent session.
-///
-/// All four collections share one librqbit session, so this is a single cheap
-/// read rather than a sum over managers - and it cannot double-count a peer
-/// that serves two collections.
+/// Session-wide transfer rates: one read, and a peer serving two collections
+/// is not counted twice.
 #[tauri::command]
 pub async fn get_transfer_stats(torrent_state: State<'_, TorrentState>) -> Result<TransferStats, String> {
     let managers: Vec<_> = { torrent_state.0.read().await.values().cloned().collect() };
@@ -327,12 +319,8 @@ pub(crate) fn running_game_key(game: &Game) -> String {
     }
 }
 
-/// Per-game mutual exclusion for launch / uninstall / download. The old
-/// sync-command design serialized these ACCIDENTALLY by freezing the main
-/// thread; with async commands the UI stays responsive, so e.g. Uninstall
-/// mid-launch-extraction became clickable - and would rename the game dir
-/// out from under the extractor, polluting the !save backup. Real locks
-/// replace the accidental ones.
+/// Per-game mutual exclusion for launch, uninstall and download: an uninstall
+/// during launch-time extraction would rename the dir under the extractor.
 pub(crate) fn game_op_lock(id: i64) -> std::sync::Arc<tokio::sync::Mutex<()>> {
     static LOCKS: std::sync::OnceLock<
         std::sync::Mutex<std::collections::HashMap<i64, std::sync::Arc<tokio::sync::Mutex<()>>>>,
@@ -346,10 +334,9 @@ pub(crate) fn game_op_lock(id: i64) -> std::sync::Arc<tokio::sync::Mutex<()>> {
 }
 
 
-/// True when the config enables eXo's virtual printer (`printer=true` +
-/// `parallel1=printer`, ECE/DOSBox-X keys). Comment lines are skipped: one
-/// eXoWin3x config carries the entire option documentation as `#` comments
-/// while actually setting `parallel1=disabled`.
+/// The conf enables eXo's virtual printer (`printer=true` or
+/// `parallel1=printer`). Comment lines are skipped: one eXoWin3x conf quotes
+/// the whole option documentation while disabling the port.
 fn conf_requests_printer(text: &str) -> bool {
     text.lines()
         .map(str::trim)
@@ -397,18 +384,10 @@ fn resolve_game_conf(data_dir: &str, dosbox_conf: &str) -> Option<(PathBuf, Path
     None
 }
 
-/// Which engine a DOS game actually launches under: `Some(path)` is eXo's own
-/// DOSBox ECE build, `None` means DOSBox Staging.
-///
-/// THE one place that answers this. `launch_game` picks the binary here, the
-/// detail panel labels the engine from it, and the printing and shader notes
-/// state their limitation from it - a second copy of the rule would drift, and
-/// a panel promising ECE while Staging runs is worse than no note at all.
-///
-/// `engine = staging` in a game's own config forces the fallback: ECE has no
-/// shader pipeline, so users who want the CRT look on Windows trade eXo's
-/// tuned engine for it. Per game and off by default, because eXo picked ECE
-/// for a reason - printing among them.
+/// Which engine runs a DOS game: `Some(path)` is eXo's DOSBox ECE build,
+/// `None` is DOSBox Staging. The ONLY place that decides this - launch, the
+/// panel label and the printing/shader notes all ask here (§9).
+/// `engine = staging` in the game's config forces Staging (ECE has no shaders).
 pub(crate) fn resolve_engine(
     dosbox_variant: Option<&str>,
     main_torrent_root: &std::path::Path,
@@ -443,27 +422,16 @@ fn resolve_ece_binary(
 /// The two engine facts the UI needs, which are NOT the same question.
 #[derive(Debug, serde::Serialize)]
 pub struct GameEngineInfo {
-    /// Could eXo's DOSBox ECE build run this game here at all? Drives whether
-    /// the emulator choice is offered. Ignores the user's override on purpose:
-    /// asking `uses_ece` instead made the control vanish the moment someone
-    /// picked Staging, with no way back to eXo's choice.
+    /// ECE could run this game here (platform + build on disk), override
+    /// ignored - otherwise picking Staging would hide the way back.
     pub ece_available: bool,
     /// What will ACTUALLY run it, override included. Drives the engine label,
     /// the shader note and the printing note.
     pub uses_ece: bool,
 }
 
-/// Which engine this game gets, and whether there is a choice to make.
-///
-/// ECE has no shader pipeline: `glshader` is a DOSBox Staging feature, and eXo
-/// sets it in 750 of its own configs - 675 of them on Staging variants, 16 on
-/// ECE. So a CRT setting on an ECE game is not overridden at launch, it is
-/// dropped, and the UI has to say so instead of offering a control that does
-/// nothing.
-///
-/// Answered with `launch_game`'s own engine selection rather than the variant
-/// alone: ECE exists on Windows and only once extracted from util.zip, so the
-/// same game answers false until that build is on disk.
+/// Which engine this game gets and whether there is a choice. Answered by
+/// `resolve_engine`, so it is false on Windows until the ECE build is on disk.
 #[tauri::command]
 pub async fn game_engine_info(
     db_state: State<'_, DbState>,
@@ -490,13 +458,8 @@ pub async fn game_engine_info(
     })
 }
 
-/// Whether this game's printing features will be missing at launch. 13 eXoDOS
-/// titles enable eXo's virtual printer (for most of them printing IS the
-/// product), and DOSBox Staging has no printer support yet - so the answer is
-/// "the conf requests a printer AND the engine that would run is Staging",
-/// decided by `resolve_engine`, the same answer `launch_game` acts on. So it
-/// flips to false by itself once the ECE build lands on disk - and back to
-/// true if the user forces Staging for that game.
+/// The conf requests eXo's virtual printer AND the engine that would run is
+/// Staging, which has no printer emulation. Decided by `resolve_engine`.
 #[tauri::command]
 pub async fn game_printing_unavailable(
     db_state: State<'_, DbState>,
@@ -539,12 +502,9 @@ fn link_dir(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()>
     junction::create(src, dst)
 }
 
-/// Build the per-launch overlay root for an LP game: a staging dir whose
-/// `<shortcode>` entry links to the LP game dir, so the EN config's autoexec
-/// ("mount c .\eXoDOS\", "cd <shortcode>", launch) runs unmodified against
-/// the LP files. Any other eXoDOS-root entries the autoexec references
-/// (shared CD-image folders etc.) get pass-through links to the real tree.
-/// Rebuilt from scratch on every launch; contains only links, no data.
+/// Per-launch overlay root for an LP game (§10a): `<shortcode>` links to the
+/// LP game dir, other root entries the autoexec names link to the real tree.
+/// Rebuilt every launch; holds links only.
 fn build_lp_overlay(
     working_dir: &std::path::Path,
     game_folder: &str,
@@ -588,11 +548,8 @@ fn build_lp_overlay(
     Ok(staging)
 }
 
-/// Can the EN autoexec run against the LP dir via the overlay? Simulates the
-/// cd chain (a root-level `cd <shortcode>` lands in the LP game dir) and
-/// requires the launch command's program to exist at the resulting location.
-/// LP variants occasionally restructure the game (renamed executable,
-/// different subdirs) - those fall back to the generated-autoexec strategy.
+/// Can the EN autoexec run against the LP dir through the overlay? Simulates
+/// the cd chain and requires the launch command's program to exist there.
 fn lp_autoexec_compatible(
     en_conf: &str,
     shortcode: &str,
@@ -666,11 +623,8 @@ fn lp_autoexec_compatible(
             continue;
         }
 
-        // First real command = the launch line. Verify its program exists at
-        // the simulated cwd; unrecognizable forms (boot images, drive-letter
-        // paths) are trusted - the EN config knows better than any heuristic.
-        // Booter games launch via `boot disk.img` - the image path was
-        // already handled by the path-rewriting, trust the line as-is.
+        // First real command is the launch line. Forms this cannot check
+        // (boot images, drive-letter paths) are trusted.
         if lower == "boot" || lower.starts_with("boot ") {
             return true;
         }
@@ -713,18 +667,10 @@ fn lp_autoexec_compatible(
     true
 }
 
-/// Rewrite eXo's `.\`-relative HOST paths, leaving everything else alone.
-///
-/// `resolve` receives the token after `.\` (e.g. `eXoDOS\SQ5`) and returns the
-/// absolute path to substitute. Quoted tokens run to the closing quote so paths
-/// with spaces survive; unquoted ones end at the first whitespace.
-///
-/// The narrow scope is the point: a blanket backslash swap also rewrites text
-/// meant for the GUEST. `path=C:\;z:\;c:\windows\` became `path=C:/;...`,
-/// which DOS does not resolve, so Windows 3.x could not find `RUNEXIT.EXE` and
-/// 1,122 of 1,138 eXoWin3x games died at Program Manager. Every host path in
-/// both packs is `.\`-relative (2,149 + 9,691, no exceptions), so this is also
-/// complete.
+/// Rewrite eXo's `.\`-relative HOST paths and nothing else. `resolve` gets the
+/// token after `.\` and returns the absolute replacement; quoted tokens run to
+/// the closing quote. Everything else is GUEST text (`path=C:\;z:\`), which a
+/// blanket backslash swap breaks (§15).
 pub(crate) fn rewrite_host_paths(text: &str, resolve: &dyn Fn(&str) -> String) -> String {
     let mut out = String::with_capacity(text.len() + 64);
     let mut rest = text;
@@ -738,12 +684,8 @@ pub(crate) fn rewrite_host_paths(text: &str, resolve: &dyn Fn(&str) -> String) -
             .find(|c: char| if quoted { c == '"' } else { c.is_whitespace() })
             .unwrap_or(tail.len());
         let replacement = resolve(&tail[..end]);
-        // The substituted path can contain spaces the authored `.\`-relative
-        // one never did - they come from the user's data directory - and
-        // DOSBox splits a command's arguments on whitespace, so an unquoted
-        // `mount c .\eXoDOS\` under "D:\My Games\…" would mount "D:/My".
-        // Quote only what is an ARGUMENT: a config property takes its value
-        // literally, and quotes there would become part of the path.
+        // A data dir with spaces needs quotes on mount ARGUMENTS only; a
+        // config property takes its value literally, quotes included.
         if !quoted && replacement.contains(' ') && on_mount_line(text, consumed + idx) {
             out.push('"');
             out.push_str(&replacement);
@@ -768,18 +710,9 @@ fn on_mount_line(text: &str, pos: usize) -> bool {
     cmd.eq_ignore_ascii_case("mount") || cmd.eq_ignore_ascii_case("imgmount")
 }
 
-/// Drop trailing separators from a substituted host path.
-///
-/// DOSBox strips a trailing BACKSLASH before it `stat()`s a mount target -
-/// its own workaround for a CRT that rejects one ("Removing trailing
-/// backslash if not root dir so stat will succeed"). That strip is Windows-
-/// only and matches `\` alone, so our forward slash walks straight past it:
-/// `mount c .\eXoDOS\` became `mount c G:/…/eXoDOS/`, stat failed, and the
-/// autoexec ran on into its `exit` - the emulator opened and closed again
-/// within seconds, with exit code 0 and nothing in the log. It hits the
-/// 1,570 eXoDOS configs (DOOM II among them) and 91 eXoWin3x ones that mount
-/// a directory with a trailing separator, and only on Windows: POSIX `stat`
-/// accepts one.
+/// Drop trailing separators from a substituted host path: on Windows DOSBox
+/// strips a trailing `\` before `stat()`ing a mount target but not `/`, so
+/// `mount c .\eXoDOS\` failed silently for 1,570 configs (§10a).
 fn trim_trailing_sep(path: &str) -> String {
     let trimmed = path.trim_end_matches('/');
     // Never shorten a root ("/" or "G:/") into something else.
@@ -790,15 +723,9 @@ fn trim_trailing_sep(path: &str) -> String {
     }
 }
 
-/// Patch a DOSBox config file: convert Windows-style relative paths to absolute Linux paths.
-/// The eXoDOS configs use `.\eXoDOS\game\` which doesn't work on Linux.
-///
-/// For LP games, `lp_info` provides the shortcode, language dir, game_folder (the second
-/// component of game_prefix, e.g. "eXoDOS"), and the resolved LP game directory path.
-/// The EN config runs VERBATIM against an overlay mount whose `<shortcode>` entry links
-/// to the LP game dir - preserving eXo's authored launch commands, imgmounts, and
-/// utilities. Only when the LP variant's layout is incompatible with the EN autoexec
-/// does it fall back to a generated autoexec.
+/// Rewrite a conf's `.\`-relative host paths to absolute ones. For LP games
+/// (`lp_info`) the EN conf runs verbatim against the overlay mount; only an
+/// incompatible LP layout gets a generated autoexec (§10a).
 fn patch_dosbox_conf(
     conf_path: &std::path::Path,
     working_dir: &std::path::Path,
@@ -814,12 +741,9 @@ fn patch_dosbox_conf(
     // and it keeps the substituted host path free of backslashes that a later
     // reader could mistake for guest-side DOS text.
     let abs_prefix = format!("{}/", working_dir.to_string_lossy()).replace('\\', "/");
-    // A `.\` token is only a host path when the target actually exists - eXo
-    // also writes `.\` GUEST paths resolved on the mounted drive (11th Hour:
-    // `imgmount d ".\cd\11HDISK1.cue"` after `c:` means C:\cd\..., the game
-    // dir's own cd folder; there is no eXo/cd on the host). Rewriting those
-    // produced dead absolute paths, the imgmounts failed silently, and the
-    // game booted without its CDs.
+    // A `.\` token is a host path only when the target exists: eXo also
+    // writes `.\` GUEST paths after a drive switch (11th Hour's
+    // `imgmount d ".\cd\11HDISK1.cue"` means C:\cd on the mounted drive).
     let to_working_dir = |body: &str| {
         // Bare `.\` is guest text for "current directory" (OxydGold passes it
         // as a program argument) - it would resolve to the working dir, which
@@ -836,12 +760,8 @@ fn patch_dosbox_conf(
     };
 
     let patched = if let Some((shortcode, lang_dir, game_folder, game_dir)) = lp_info {
-        // Strategy 1: overlay mount. The EN autoexec is ground truth authored
-        // by eXo; the only real difference for an LP install is WHERE the
-        // game files live. Point every eXoDOS-root reference at a staging dir
-        // whose <shortcode> entry links to the LP game dir and run the config
-        // as written. This also shadows an installed EN variant of the same
-        // game - the link always wins.
+        // Strategy 1: overlay mount - eXo's autoexec runs as written, only
+        // WHERE the files live changes. The link shadows an installed EN copy.
         let real_root = working_dir.join(game_folder);
         let overlay = if game_dir.exists()
             && lp_autoexec_compatible(&content, shortcode, game_dir, &real_root)
@@ -950,19 +870,10 @@ fn patch_dosbox_conf(
     Ok(patched_path)
 }
 
-/// Translate DOSBox-ECE MIDI settings to DOSBox Staging equivalents.
-///
-/// ~1,500 eXoDOS configs carry ECE-style dotted keys in [midi]
-/// (`mt32.romdir`, `fluid.soundfont`, `fluid.*`) that Staging silently
-/// ignores - MT-32 and General-MIDI games then play with wrong or no music.
-/// Staging expects the same settings in dedicated [mt32] / [fluidsynth]
-/// sections, so: capture the ECE values, drop the dotted keys, and append
-/// the Staging sections (unless the config already has them - the ~750
-/// Staging-authored eXoDOS configs pass through unchanged). Also maps
-/// `mididevice = default` (ECE) to Staging's `auto`.
-///
-/// Runs after the path rewriting in patch_dosbox_conf, so captured values
-/// like `.\mt32` are already absolute forward-slash paths.
+/// ECE's dotted `[midi]` keys (`mt32.romdir`, `fluid.soundfont`) become
+/// Staging's `[mt32]` / `[fluidsynth]` sections; `mididevice = default`
+/// becomes `auto`. Confs that already carry the sections pass through.
+/// Runs after path rewriting, so captured paths are absolute.
 fn translate_midi_for_staging(conf: &str) -> String {
     let lower = conf.to_ascii_lowercase();
     let has_ece_keys = lower.contains("mt32.") || lower.contains("fluid.");
@@ -1043,17 +954,9 @@ fn translate_midi_for_staging(conf: &str) -> String {
     result
 }
 
-/// Translate DOSBox-X style IDE controller requests for DOSBox Staging.
-///
-/// 55 eXoWin3x configs enable `[ide, primary]` / `[ide, secondary]` so the
-/// guest OS booted from an HDD image reaches the CD through its own ATAPI
-/// driver (VIDE-CDD.SYS + MSCDEX live inside the image - after `boot` DOSBox's
-/// DOS-level MSCDEX shim is gone). Staging has no `[ide]` section but provides
-/// the same thing as an `-ide` flag on `imgmount ... -t cdrom|iso`, so: when
-/// the section is present, add the flag to CD imgmounts and normalize
-/// DOSBox-X's slot argument (`-ide 2m`) to Staging's bare flag. Measured
-/// (issue #15): without this the guest boots but never sees the CD; with it
-/// the ATAPI drive attaches and CD playback works.
+/// DOSBox-X's `[ide]` section becomes Staging's `-ide` flag on CD imgmounts
+/// (slot form `-ide 2m` normalized): a guest booted from an HDD image reaches
+/// the CD only through its own ATAPI driver (§15).
 fn translate_ide_for_staging(conf: &str) -> String {
     // Comment lines are skipped, same as conf_requests_printer: one eXoWin3x
     // conf carries the whole option documentation as `#` comments.
@@ -1080,11 +983,8 @@ fn translate_ide_for_staging(conf: &str) -> String {
             out.push(line.to_string());
             continue;
         }
-        // Standalone `-ide` flag only: the line holds an absolute REWRITTEN
-        // host path at this point, and a data dir like `/mnt/games-ide/` must
-        // not read as "flag already present" (that would silently disable the
-        // whole translation). `to_ascii_lowercase` never changes byte offsets,
-        // so positions found in `lower` index into `line` directly.
+        // Standalone flag only: a data dir like `/mnt/games-ide/` must not
+        // read as "already present". Lowercasing keeps byte offsets.
         if let Some(pos) = find_ide_flag(&lower) {
             let end = pos + "-ide".len();
             let rest = &line[end..];
@@ -1127,17 +1027,12 @@ fn find_ide_flag(lower: &str) -> Option<usize> {
     None
 }
 
-/// Find the launch command for an LP game by inspecting its directory.
-/// Prefers the launch command named by the EN config's autoexec (when given),
-/// then parses run.bat to extract the actual game executable, since run.bat
-/// itself is a LaunchBox-specific menu script not suitable for DOSBox autoexec.
-/// Returns (subdir, command) if found.
+/// Launch command for an LP game whose layout differs from EN: the EN
+/// autoexec's command if it exists here, else run.bat's target, else an
+/// executable. Returns (subdir, command).
 fn find_lp_launch(game_dir: &std::path::Path, en_conf: Option<&str>) -> Option<(String, String)> {
-    // Strategy 0: the EN autoexec names the real launcher ("cd cobmiss" then
-    // "@cm") - by far the strongest signal, and the only one that works for
-    // games with a bare root-level EXE and no .bat (e.g. Cobra Mission ES:
-    // CM.EXE + INSTALL.EXE, nothing else runnable). Use the first
-    // non-housekeeping command if the referenced program exists in the LP dir.
+    // Strategy 0: the EN autoexec names the launcher - the only signal that
+    // works for a bare root-level EXE without a .bat (Cobra Mission ES).
     if let Some(autoexec) = en_conf.and_then(|c| c.split("[autoexec]").nth(1)) {
         for line in autoexec.lines() {
             let t = line.trim();
@@ -1313,10 +1208,8 @@ fn find_lp_launch(game_dir: &std::path::Path, en_conf: Option<&str>) -> Option<(
         }
     }
 
-    // Strategy 4: Look for a .exe in subdirectories, then the game dir root
-    // (skip utilities and installers). Subdirs first to keep the historical
-    // preference; the root pass catches games like Cobra Mission ES whose
-    // only executable sits at the top level.
+    // Strategy 4: an .exe in a subdirectory, then at the root (skipping
+    // utilities and installers).
     const SKIP_EXE_STEMS: &[&str] = &[
         "install", "setup", "uninst", "config", "cdtest", "showtext",
         // DOS/4GW and protected-mode extenders - not the game itself
@@ -1389,34 +1282,15 @@ fn autoexec_has_launch_cmd(conf: &str) -> bool {
 }
 
 
-/// Resolve the DOSBox Staging binary path.
-/// Tauri's `externalBin` places sidecars at different locations per platform:
-///  - macOS: Exodium.app/Contents/MacOS/dosbox-staging (next to the main binary)
-///  - Windows: <install_dir>/dosbox-staging.exe (next to the main .exe)
-///  - Linux (AppImage/deb): resources/dosbox-staging (inside the resource dir)
-///
-/// So we check `current_exe().parent()` AND `resource_dir()`, then fall back to PATH.
+/// The DOSBox Staging binary: `resource_dir/dosbox-bin/` (Windows, next to
+/// its DLLs), then beside the main executable (macOS, Linux), then the
+/// resource dir, then dev `binaries/`, then PATH.
 fn resolve_dosbox(app: &AppHandle) -> PathBuf {
     use tauri::Manager;
     let bin = if cfg!(windows) { "dosbox-staging.exe" } else { "dosbox-staging" };
 
-    // 1. resource_dir/dosbox-bin/ - the canonical location since v0.6.6 on
-    //    Windows, where the .exe MUST live alongside its bundled DLLs
-    //    (SDL2.dll, vcruntime140.dll, …) plus DOSBox's `resources/` codepage
-    //    folder for Windows DLL search to find them. On macOS/Linux this
-    //    directory only contains a `.placeholder`, so the lookup falls
-    //    through to the externalBin location below.
-    //
-    //    In dev mode resource_dir is src-tauri/, and the staged bundle lives
-    //    one level deeper at src-tauri/resources/dosbox-bin/ (only flattened
-    //    to <resource_dir>/dosbox-bin/ at bundle time). Check both so dev on
-    //    Windows finds the DLL-adjacent .exe instead of falling through to
-    //    the bare externalBin in binaries/, which would fail with missing-DLL
-    //    errors when DOSBox tries to start.
-    // Subdirs to search under resource_dir, in priority order. Bundled layout
-    // (production) flattens to `dosbox-bin/`; dev layout keeps the staged
-    // `resources/dosbox-bin/` source path. Update both if the bundle config
-    // moves the binary directory.
+    // Bundled layout flattens to `dosbox-bin/`, dev keeps
+    // `resources/dosbox-bin/`; on Windows the exe must sit beside its DLLs.
     const DOSBOX_RES_DIRS: &[&str] = &["dosbox-bin", "resources/dosbox-bin"];
     if let Ok(res_dir) = app.path().resource_dir() {
         for sub in DOSBOX_RES_DIRS {
@@ -1466,20 +1340,10 @@ fn resolve_dosbox(app: &AppHandle) -> PathBuf {
     PathBuf::from(bin)
 }
 
-/// Install DOSBox Staging glshaders into the user config dir if missing.
-///
-/// DOSBox aborts at startup with "Fallback shader 'interpolation/bilinear'
-/// not found" unless it finds glshaders in one of its search paths. The
-/// shader pack is bundled as a Tauri resource (`bundle.resources` maps
-/// `resources/dosbox-glshaders` → `glshaders` inside resource_dir). On
-/// macOS that alone is enough: the sidecar searches
-/// `Contents/MacOS/../Resources/glshaders` natively. The copy into the
-/// user config dir here covers Linux/Windows and acts as a fallback.
-///
-/// The presence check targets the mandatory fallback shader file, NOT the
-/// directory: an empty `glshaders/` dir (seen in the wild on macOS, cause
-/// unknown) used to short-circuit the install forever and DOSBox then
-/// aborted on every launch with CRT enabled.
+/// Copy the bundled glshaders into DOSBox's user config dir. Without them
+/// Staging aborts at startup ("Fallback shader 'interpolation/bilinear' not
+/// found"). Checks the fallback shader FILE, not the dir: an empty dir has
+/// been seen in the wild.
 fn ensure_dosbox_shaders(app: &AppHandle) {
     use tauri::Manager;
 
@@ -1637,10 +1501,7 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
         return Err(format!("{} is not installed. Download it first.", game.title));
     }
 
-    // Refuse a second launch while the game is still running. Two emulator
-    // instances on the same VHDs corrupt them (86Box recreates the shared
-    // child mid-flight, DOSBox-X double-mounts the save drive) - and for the
-    // rest of the catalogue a double launch is never what the user meant.
+    // One instance per game: two emulators on the same VHDs corrupt them.
     if running_games()
         .lock()
         .map(|s| s.contains(&running_game_key(&game)))
@@ -1649,10 +1510,8 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
         return Err(format!("'{}' is already running.", game.title));
     }
 
-    // Win9x games boot Windows 95/98 from VHDs inside DOSBox-X or 86Box -
-    // they have their own engine pipeline and none of the Staging conf
-    // machinery below applies (their confs run verbatim, §10a). ScummVM
-    // games have no conf at all: one command line, see scummvm.rs.
+    // Win9x and ScummVM have their own pipelines; the conf machinery below
+    // is DOSBox Staging/ECE only.
     let launcher = crate::commands::collections::collection_def(
         game.torrent_source.as_deref().unwrap_or("eXoDOS"),
     )
@@ -1731,10 +1590,6 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
         (shortcode, ld, game_folder, dir)
     });
 
-    // Engine selection: on Windows, ECE-variant games run eXo's actual
-    // DOSBox ECE build (extracted from util.zip's EXTDOS.zip into
-    // eXo/emulators/dosbox/<variant>/). Everywhere else - and until the
-    // build is on disk - DOSBox Staging is the best-effort fallback.
     let ece_bin = resolve_engine(
         game.dosbox_variant.as_deref(),
         &main_torrent_root,
@@ -1774,11 +1629,7 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
         if use_ece { "DOSBox ECE" } else { "DOSBox Staging" }
     );
 
-    // DOSBox Staging aborts at startup when it can't find glshaders and CRT
-    // is enabled (glshader defaults to crt-auto, which is also OUR default).
-    // Run unconditionally on every platform: the check is a single stat once
-    // installed, and it self-repairs the empty-glshaders-dir state that
-    // bricked launches on fresh macOS installs (v0.8.3).
+    // Every launch: one stat once installed, and it repairs an empty dir.
     ensure_dosbox_shaders(&app);
 
     let dosbox_bin = ece_bin.unwrap_or_else(|| resolve_dosbox(&app));
@@ -1791,11 +1642,7 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
         cmd.arg("-conf").arg(&options_conf);
     }
 
-    // macOS with CRT off: force `output = texture` (SDL hardware renderer, no
-    // shader pipeline) via a last-wins conf fragment. Shaders are bundled at
-    // Contents/Resources/glshaders since 0.8.4 so this is no longer required
-    // to avoid the missing-shader abort, but texture output is the
-    // long-proven macOS path for the non-CRT look, so keep it.
+    // macOS with CRT off: `output = texture`, the proven non-shader path.
     #[cfg(target_os = "macos")]
     {
         if !crt_auto_enabled {
@@ -1806,15 +1653,8 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
         }
     }
 
-    // Global user-preference overrides (all platforms, applied LAST so they win
-    // against per-game and options.conf settings). Always written and always
-    // authoritative - for BOTH the on and off states. Reason: in DOSBox Staging
-    // 0.82+ the default `glshader` is `crt-auto`, and ~90% of eXoDOS per-game
-    // configs don't explicitly set glshader, so without an active "off" override
-    // the user's unchecked CRT toggle would still get crt-auto from Staging's
-    // default. Same logic applies to fullscreen - write the explicit value so
-    // the user's UI state always wins, regardless of what eXoDOS configs or
-    // DOSBox defaults say.
+    // User preferences, applied LAST and written for both states: Staging
+    // defaults glshader to crt-auto, so "off" has to be an explicit value.
     {
         let glshader_val = if crt_auto_enabled { "crt-auto" } else { "sharp" };
         let fullscreen_val = if fullscreen_enabled { "true" } else { "false" };
@@ -1859,11 +1699,9 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
                 }
             }
             if frag.is_empty() {
-                // Nothing to say for this game - drop a fragment an earlier
-                // configuration left behind. Keyed on the fragment, not on the
-                // config being empty: `engine` is stored in the same table but
-                // never written here, so a game left with only that setting
-                // would keep a stale file forever.
+                // Drop a stale fragment. Keyed on the file, not on the
+                // config being empty: `engine` lives there but is never
+                // written here.
                 let _ = std::fs::remove_file(&game_conf_path);
             } else {
                 std::fs::write(&game_conf_path, &frag)
@@ -1876,10 +1714,8 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
     spawn_emulator_and_track(&app, cmd, &dosbox_bin, &game, id)
 }
 
-/// Variables the AppImage runtime and linuxdeploy's GTK/GStreamer hooks export
-/// that point ONLY into `$APPDIR`. Dropped wholesale for emulator children;
-/// unset, each falls back to its spec default, which is what a packaged install
-/// (.deb/.rpm) gives them anyway.
+/// AppImage/linuxdeploy variables that point only into `$APPDIR`. Dropped for
+/// emulator children; unset, each falls back to its default.
 #[cfg(target_os = "linux")]
 const APPIMAGE_ONLY_VARS: &[&str] = &[
     // AppImage runtime / Tauri's AppRun
@@ -1936,20 +1772,9 @@ fn strip_appdir_entries(value: &str, appdir: &str) -> Option<String> {
     }
 }
 
-/// Strip the AppImage's environment from an emulator child.
-///
-/// Our AppImage's AppRun exports `LD_LIBRARY_PATH` plus the GTK/GStreamer/GIO
-/// overrides from linuxdeploy's hooks, and every child inherits them. An
-/// emulator started that way loads a MIX of the AppImage's bundled libraries
-/// (built against Ubuntu 22.04 / glib 2.72) and the host's current ones, which
-/// hangs in library teardown when the emulator window is closed - the process
-/// never exits and the desktop offers to kill it.
-///
-/// Gated on `APPIMAGE` being set, so .deb/.rpm installs (which run against the
-/// host's libraries to begin with) are untouched. The Win9x emulator packs are
-/// themselves sharun-based AppImages that rebuild their own environment on
-/// start, so a clean env is correct for them too; DOSBox Staging, a plain
-/// binary, is the main beneficiary.
+/// Strip the AppImage's environment from an emulator child: with the bundled
+/// `LD_LIBRARY_PATH` inherited, an emulator mixes bundled and host libraries
+/// and hangs in teardown on window close. Gated on `APPIMAGE`.
 #[cfg(target_os = "linux")]
 fn sanitize_appimage_env(cmd: &mut Command) {
     if std::env::var_os("APPIMAGE").is_none() {
@@ -1981,10 +1806,8 @@ struct GameExited {
     id: i64,
 }
 
-/// Platform-correct stdio setup, spawn and child-reaping for an emulator
-/// process. Shared by the Staging/ECE path above and the Win9x engines
-/// (DOSBox-X / 86Box) - the macOS EBADF workarounds and the per-game log
-/// capture must not fork per engine.
+/// Stdio setup, spawn and reaping for every emulator process (Staging, ECE,
+/// DOSBox-X, 86Box, ScummVM).
 pub(crate) fn spawn_emulator_and_track(
     app: &AppHandle,
     mut cmd: Command,
@@ -2019,18 +1842,9 @@ pub(crate) fn spawn_emulator_and_track(
         }
     }
 
-    // Stdio handling differs by platform:
-    //
-    // macOS: Tauri 2 GUI builds were observed returning EBADF from posix_spawn
-    // when stdout/stderr used Stdio::from(File) (dup2-based file_actions). We
-    // null all three streams there. DOSBox Staging on macOS writes its own
-    // logs into ~/Library/Preferences/DOSBox/, so the diagnostic surface is
-    // preserved.
-    //
-    // Linux/Windows: keep the per-game log file capture introduced for Issue
-    // #4 ("started then closed" crashes). On Windows in particular, DOSBox
-    // doesn't write a user-accessible log otherwise, so dropping this would
-    // be a diagnostic regression.
+    // macOS: posix_spawn returns EBADF from a Tauri GUI build when stdio is a
+    // File, so all three streams are null (Staging logs to
+    // ~/Library/Preferences/DOSBox/ itself). Elsewhere: per-game log file.
     #[cfg(target_os = "macos")]
     {
         cmd.stdin(std::process::Stdio::null());
@@ -2066,10 +1880,7 @@ pub(crate) fn spawn_emulator_and_track(
         }
     }
 
-    // macOS-only: force fork+exec instead of posix_spawn via a no-op pre_exec.
-    // posix_spawn was the EBADF source on Tauri 2 GUI builds; fork+exec is more
-    // permissive about parent fd state. Linux doesn't have the bug and would
-    // pay a perf cost from skipping posix_spawn, so we don't apply it there.
+    // macOS: a no-op pre_exec forces fork+exec, dodging the posix_spawn EBADF.
     #[cfg(target_os = "macos")]
     {
         use std::os::unix::process::CommandExt;
@@ -2088,10 +1899,9 @@ pub(crate) fn spawn_emulator_and_track(
         )
     })?;
 
-    // Reap the child (dropped Child handles become zombies on Unix) and track
-    // the running game so uninstall can refuse while the emulator holds its
-    // files open - deleting/renaming a live game dir on Windows fails
-    // per-file and used to silently lose saves through the copy fallback.
+    // Reap the child and track the running game, so uninstall can refuse
+    // while the emulator holds files open (a live rename loses saves on
+    // Windows).
     let run_key = running_game_key(game);
     running_games().lock().map(|mut s| s.insert(run_key.clone())).ok();
     let app = app.clone();
@@ -2207,11 +2017,8 @@ mod tests {
         path
     }
 
-    /// eXoWin3x boots Windows 3.x and hands Program Manager `runexit <prog>`,
-    /// which it resolves over the DOS PATH the autoexec just set. That PATH is
-    /// guest-side text: rewriting its backslashes turned it into
-    /// `path=C:/;z:/;c:/windows/`, which DOS does not resolve, and every such
-    /// game (1,122 of 1,138) died at "Cannot find file 'runexit'".
+    /// The autoexec's `path=C:\;z:\;c:\windows\` is guest text; rewriting
+    /// its backslashes broke 1,122 eXoWin3x games at `runexit`.
     #[test]
     fn patch_dosbox_conf_keeps_guest_dos_paths() {
         let tmp = tempfile::tempdir().unwrap();
@@ -2246,10 +2053,8 @@ mod tests {
         );
     }
 
-    /// 11th Hour (DE) shape: eXo's imgmount lines can be GUEST paths - after
-    /// `c:`, `imgmount d ".\cd\11HDISK1.cue"` means C:\cd\... on the mounted
-    /// drive, and no eXo/cd exists on the host. Rewriting them to absolute
-    /// host paths made every imgmount fail and the game booted without CDs.
+    /// 11th Hour (DE): `imgmount d ".\cd\11HDISK1.cue"` after `c:` is a
+    /// GUEST path - no eXo/cd exists on the host.
     #[test]
     fn patch_dosbox_conf_keeps_guest_imgmount_paths() {
         let tmp = tempfile::tempdir().unwrap();
@@ -2419,10 +2224,7 @@ mod tests {
 
     #[test]
     fn mount_targets_keep_no_trailing_separator() {
-        // `mount c .\eXoDOS\` (1,570 eXoDOS configs, DOOM II among them).
-        // DOSBox strips a trailing BACKSLASH before stat()ing the target on
-        // Windows; our forward slash slips past that, stat fails, and the
-        // game exits into its own `exit` line seconds after opening.
+        // `mount c .\eXoDOS\` (1,570 confs): the trailing separator must go.
         let tmp = tempfile::tempdir().unwrap();
         let working_dir = tmp.path();
         fs::create_dir_all(working_dir.join("eXoDOS/DOOMII")).unwrap();

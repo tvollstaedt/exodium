@@ -13,12 +13,8 @@ use super::collections::COLLECTION_MAP;
 use super::paths::{game_root, is_os_metadata, load_root_folder};
 use super::{DbState, TorrentState};
 
-/// Old per-torrent roots still sitting next to the real one.
-///
-/// Exodium used to give each pack the folder librqbit names after the torrent
-/// (`<data>/eXoWin3x/`, `<data>/eXoWin9x/`), which is not a layout eXo
-/// produces. Everything lives in one root now, so an install made before that
-/// has to be merged - with the user's consent, since it moves their files.
+/// Old per-torrent roots (`<data>/eXoWin9x/`) beside the real one, to be
+/// merged with the user's consent (§2).
 #[derive(Debug, Clone, Serialize)]
 pub struct LayoutMigration {
     /// Folder names still holding games, relative to the data dir.
@@ -40,12 +36,8 @@ fn stray_roots(data_dir: &str) -> Vec<PathBuf> {
         .map(|c| c.inner_folder)
         .collect::<std::collections::BTreeSet<_>>()
         .into_iter()
-        // Three places a per-torrent root can sit. Two are inside the data
-        // dir: beside the game root, and inside it once the data dir IS the
-        // root. The third is BESIDE the data dir - only reachable when the
-        // data dir is the root, because that is the legacy shape whose folders
-        // were created while the data dir was one level up. Scanning a normal
-        // install's parent would mean sweeping the user's home directory.
+        // Beside the root, inside it, and - only when the data dir IS the
+        // root - beside the data dir (never sweep a normal install's parent).
         .flat_map(|name| {
             let mut candidates = vec![PathBuf::from(data_dir).join(name), root.join(name)];
             if root == Path::new(data_dir) {
@@ -136,27 +128,16 @@ pub async fn skip_layout_migration(db_state: State<'_, DbState>) -> Result<(), S
     queries::set_config(&conn, "layout_migration", "skip").map_err(|e| e.to_string())
 }
 
-/// Move every stray root's contents into the single root.
-///
-/// Renames only: the folders sit on one filesystem, so this is instant and
-/// nothing is copied. Anything already present at the destination is left
-/// alone rather than overwritten - a half-finished manual merge must not lose
-/// data. Torrent state is re-derived afterwards by re-initialising the
-/// managers; librqbit re-checks the files in place rather than downloading
-/// them again.
+/// Merge every stray root into the single root by rename. The frontend
+/// re-initialises the managers afterwards; librqbit re-checks in place.
 #[tauri::command]
 pub async fn migrate_layout(
     app: AppHandle,
     db_state: State<'_, DbState>,
     torrent_state: State<'_, TorrentState>,
 ) -> Result<MergeTally, String> {
-    // Stop the torrent engine before touching a single file. librqbit's
-    // session opens (and therefore CREATES) every selected file of a torrent,
-    // so a live session pointed at the old folder re-materializes the whole
-    // tree the instant the merge empties it - measured: 673 files back one
-    // second after the move. Dropping the managers releases the last Arc to
-    // the session; the frontend calls init_download_manager afterwards, which
-    // rebuilds it against the single root.
+    // Managers first: a live session re-creates every selected file the
+    // moment the merge empties the old tree.
     torrent_state.0.write().await.clear();
 
     let data_dir = {
@@ -174,10 +155,8 @@ pub async fn migrate_layout(
     );
     for stray in strays {
         tally.add(merge_tree(&stray, &root)?);
-        // Everything is either moved or a deleted duplicate by now, so what
-        // remains is empty directories - clear them out so the folder is gone
-        // and the prompt has nothing left to find. A folder that still holds
-        // a file (something we did not put there) is kept, deliberately.
+        // Only empty dirs remain; a folder still holding a foreign file is
+        // kept.
         remove_empty_tree(&stray);
         if stray.exists() {
             log::warn!(
@@ -213,17 +192,9 @@ pub async fn migrate_layout(
     Ok(tally)
 }
 
-/// Move `src`'s children into `dst`, descending where both sides have the
-/// same directory so an existing `eXo/` or `Content/` is merged rather than
-/// replaced.
-///
-/// When the same file exists on both sides, **the larger one wins** and the
-/// other is deleted. That is not arbitrary: the loser is almost always a
-/// zero-byte torrent placeholder (librqbit allocates one per file of the
-/// collection) or a half-finished download, and the winner the real archive.
-/// Leaving both behind was the first attempt - it meant the old folders never
-/// disappeared, so the migration prompt came back at every start with nothing
-/// left to do.
+/// Move `src`'s children into `dst`, merging shared directories. On a file
+/// clash the LARGER wins and the other is deleted: the loser is a placeholder
+/// or a partial download, and nothing may be left behind (§2).
 #[derive(Debug, Default, Clone, Copy, Serialize)]
 pub struct MergeTally {
     /// Files that only existed on the old side and were renamed across.
@@ -231,10 +202,7 @@ pub struct MergeTally {
     /// Duplicates resolved - the smaller copy (usually a zero-byte torrent
     /// placeholder) was deleted.
     pub deduped: usize,
-    /// Entries neither side could resolve: a directory facing a file, or the
-    /// reverse. Counted rather than ignored, because "nothing happened and
-    /// nothing was reported" is exactly how the first version of this hid a
-    /// folder that never emptied.
+    /// A directory facing a file, or the reverse: counted, never silent.
     pub skipped: usize,
 }
 

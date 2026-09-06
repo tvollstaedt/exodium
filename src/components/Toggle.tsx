@@ -10,12 +10,8 @@ interface ToggleProps {
   disabled?: boolean;
 }
 
-/** A setting that is on or off.
- *
- *  Switches rather than checkboxes: these apply immediately and change what the
- *  app does, they are not choices collected and submitted later. Wrapping Ark's
- *  Switch keeps the label/hint arrangement identical everywhere - four hand-
- *  written copies had already started drifting apart. */
+/** An on/off setting that applies immediately: Ark's Switch with the
+ *  label/hint arrangement fixed in one place. */
 export function Toggle(props: ToggleProps) {
   return (
     <Switch.Root

@@ -17,11 +17,8 @@ import { showToast } from "./toasts";
 const [installedPacks, setInstalledPacks] = createSignal<Set<string>>(new Set());
 export { installedPacks };
 
-/** Every collection's packs, keyed by collection id. Kept alongside the
- *  installed set because the same sweep already fetched it: consumers that ask
- *  "what could this collection still get?" would otherwise fire their own
- *  request per collection - and a per-view fetch arrives late, which makes the
- *  pack hint pop in after the grid and shift it down. */
+/** Every collection's packs by id, from the same sweep as the installed
+ *  set, so consumers render in the same frame as the grid. */
 const [packsByCollection, setPacksByCollection] = createSignal<Record<string, ContentPackStatus[]>>({});
 export { packsByCollection };
 
@@ -150,10 +147,8 @@ function clearJob(key: string) {
 
 // ── Public actions ───────────────────────────────────────────────────────────
 
-/** Pick up pack jobs the backend starts on its own (the Win9x emulator
- *  auto-queue): the poll loop only watches jobs it knows about, so without
- *  this a backend-initiated download runs invisibly until the next full
- *  refresh. Registered once at app mount. */
+/** Pick up jobs the backend starts itself (emulator auto-queue); the poll
+ *  loop only watches jobs it knows. Registered once at mount. */
 export async function initContentPackEvents() {
   await listen<{ collection: string; pack_id: string; display_name: string }>(
     "content-pack-install-started",
@@ -186,11 +181,7 @@ export async function initContentPackEvents() {
 export async function startContentPackInstall(collection: string, packId: string, displayName?: string) {
   const key = `${collection}:${packId}`;
   if (displayName) { jobLabels[key] = displayName; }
-  // Claim the row synchronously. The first poll is a full second out and the
-  // invoke round-trip sits in front of it, so the click landed on a button
-  // that went on saying "Install" for one to three seconds. cancelContentPackJob
-  // already clears its entry up-front for the same reason - this is that rule
-  // in the other direction.
+  // Claim the row now; the first poll is a second out.
   setActiveJobs((prev) => ({
     ...prev,
     [key]: {

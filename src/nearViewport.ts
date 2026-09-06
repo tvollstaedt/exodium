@@ -1,15 +1,6 @@
-/** Shared "is this element close to the viewport?" observer for the game grid.
- *
- *  `loading="lazy"` only starts fetching once a card is nearly on screen, which
- *  is why covers popped in during scrolling. One IntersectionObserver with a
- *  generous margin lets us start loading roughly two screens ahead instead -
- *  and, unlike dropping lazy loading altogether, it still bounds the work when
- *  the grid holds thousands of cards (a jump-bar jump loads the whole
- *  catalogue into the DOM at once).
- *
- *  A single observer for every card matters: 8,000 individual observers is
- *  itself a scroll-performance problem.
- */
+/** One shared IntersectionObserver for the grid: covers load ~two screens
+ *  ahead (`loading="lazy"` starts too late), and the work stays bounded when
+ *  a jump-bar jump mounts the whole catalogue (§13). */
 
 /** How far outside the viewport a card still counts as "near". ~2 screens at
  *  a typical window height; covers average 24 KB, so prefetching that many is

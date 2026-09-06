@@ -5,14 +5,8 @@ import { isOffline } from "./network";
 const IDLE_MS = 4000;
 /** While bytes are moving the badge is a live readout, so it updates faster. */
 const ACTIVE_MS = 1500;
-/** How long a transfer still counts as running after a sample reads idle.
- *
- *  Rates are sampled, and pieces arrive in bursts: mid-download a single
- *  sample regularly dips under the 1 KB/s floor. Deciding on that sample alone
- *  made the badge swap between the rate readout and plain "Online" every few
- *  seconds, and dropped the poll to IDLE_MS so it took another 4 s to come
- *  back. Long enough to bridge a dip, short enough that a finished download
- *  settles within one idle cycle. */
+/** Grace after an idle sample before a transfer counts as stopped: pieces
+ *  arrive in bursts and a single sample regularly dips to zero. */
 const TRANSFER_GRACE_MS = 8000;
 /** Below this a rate reads as idle - see `formatRate`. */
 const MOVING_BPS = 1024;
@@ -57,10 +51,7 @@ async function poll() {
     setTransferring(active);
     schedule(active ? ACTIVE_MS : IDLE_MS);
   } catch (e) {
-    // A missing manager is normal right after a mode switch; don't spam.
-    // The last reading stays: one failed poll is not evidence that traffic
-    // stopped, and clearing it blanked the badge mid-download. Offline and
-    // stop clear it explicitly, which is when it is genuinely unknown.
+    // Normal right after a mode switch; the last reading stays.
     console.debug("[transfer] stats unavailable:", e);
     schedule(IDLE_MS);
   }

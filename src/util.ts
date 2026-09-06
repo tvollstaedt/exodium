@@ -34,14 +34,8 @@ export async function performUninstall(
   }
 }
 
-/**
- * Discard a game's saves and every in-game change, then unpack it again.
- *
- * The sibling of `performUninstall`, and here for the same reason: both the
- * grid's context menu and the detail panel offer it, and a second copy of the
- * flow drifts in its toast wording and its error handling. The backend returns
- * the success message, so callers only supply the title for the failure case.
- */
+/** Reset a game (§5), shared by the context menu and the panel. The backend
+ *  returns the success message; `title` is for the failure toast. */
 export async function performReset(
   gameId: number,
   setStatus: (s: string) => void,
@@ -93,13 +87,8 @@ export function langBadgeClass(state: number): string {
   return "";
 }
 
-/** Client-side title match for the My Library shelves, which are already in
- *  memory and would otherwise ignore the shared search box entirely.
- *
- *  Matches the merged card's own title AND the titles of its other language
- *  variants (attached by `attach_language_maps`), so searching a German title
- *  finds the English-titled card here the same way the Browse SQL filter does.
- */
+/** Client-side title match for the in-memory shelves, variant titles
+ *  included, like the Browse SQL filter. */
 export function matchesLibraryQuery(
   game: { title?: string | null; sort_title?: string | null; variant_titles?: string | null },
   query: string,

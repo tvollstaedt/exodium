@@ -10,24 +10,13 @@ import { requestSlot, releaseSlot, dropQueued, isActive, type MediaJob } from ".
 import { games, hasMore, fetchMoreGames } from "./games";
 import { isOffline, networkMode } from "./network";
 
-/** The music player.
- *
- *  A game's theme track sits in its GameData archive next to the preview
- *  video and is fetched the same way (see `videos.ts`): fire a backend job,
- *  poll, never block. What this store adds is the player on top - one track
- *  loaded at a time, a "wanted" track that becomes the current one when its
- *  bytes arrive, and the two modes: the theme of the game on screen, or a
- *  shuffle across the whole collection.
- *
- *  Two rules keep it from fighting the rest of the app for the speakers. A
- *  preview video playing WITH sound pauses the music, and a running game
- *  does too; each hands in a reason, and playback resumes only when every
- *  reason is withdrawn. The reasons are a level, not an edge: they are
- *  recorded whether or not anything was playing at the time, so a track that
- *  loads WHILE a game runs stays quiet. A game launched into silence still
- *  starts nothing on exit - that is `userPaused` doing the work, not the
- *  reason set. And the shuffle never starts on its own: opening the app must
- *  not make noise. */
+/** The music player: tracks fetched like videos (job, poll), one loaded
+ *  track, a "wanted" track that becomes current when its bytes arrive, and
+ *  three modes (theme, shuffle, list). Pause reasons (unmuted preview,
+ *  running game) are a LEVEL: recorded whether or not anything played, so a
+ *  track loaded while a game runs stays quiet; `userPaused` keeps a game
+ *  launched into silence silent on exit. The shuffle never starts on its
+ *  own (§14). */
 
 export interface Track {
   /** Where the track came from. Only the GameData theme exists today; an
@@ -122,13 +111,8 @@ const keyOf = (gameId: number) => `${KEY_PREFIX}${gameId}`;
 const requested = new Set<number>();
 
 function put(gameId: number, status: MediaStatus) {
-  // Offline (or for a collection with no torrent manager) the backend answers
-  // "none" instantly - not an inventory answer, so it carries OFFLINE_TOKEN
-  // in `error` (media.rs). Remembering it would blacklist the game for the
-  // rest of the session and, in a queue, spin the walk. So it is recorded
-  // nowhere and forgotten again right after the player has seen it, which
-  // lets a later probe ask once more. `isOffline()` stays as a second guard
-  // for a backend that predates the token.
+  // A "none" with a non-null error is provisional (offline, no session):
+  // remembered nowhere, or the game is blacklisted for the session (§14).
   const provisional = status.phase === "none" && (status.error != null || isOffline());
   setMusicJobs((prev) => ({ ...prev, [gameId]: status }));
   if (!provisional) { noteInIndex(gameId, status.phase); }
@@ -146,11 +130,8 @@ function forgetJob(gameId: number) {
     delete next[gameId];
     return next;
   });
-  // The player may have been waiting on exactly this job. `reconcile` reads
-  // the entry, so with the entry gone nothing would ever answer for it: the
-  // bar sits on "Loading…" for the rest of the session and a queue never
-  // moves again. Every caller that means to keep the wait clears `wanted`
-  // itself first, so reaching here with it still set IS the stranded case.
+  // `wanted` still set here means the player was waiting on this job and
+  // nothing would ever answer: treat it as a dud.
   if (wanted()?.gameId === gameId) {
     clearSkipTimer();
     setWanted(null);
@@ -263,11 +244,8 @@ async function beginFetch(gameId: number) {
 
 // ── Cache index ──────────────────────────────────────────────────────────────
 
-/** What the backend already knows about every game's theme, so a list can
- *  render its play affordances without a probe per row: the ids whose track
- *  is cached, and the ids a finished probe found nothing for. Both sets are
- *  REPLACED on change - a mutated Set is the same object and Solid would not
- *  see it. */
+/** Cached and known-empty theme ids, so list rows need no probe. Replaced,
+ *  never mutated (Solid compares by reference). */
 const [musicCached, setMusicCached] = createSignal<Set<number>>(new Set());
 const [musicNone, setMusicNone] = createSignal<Set<number>>(new Set());
 export { musicCached, musicNone };
@@ -349,10 +327,7 @@ export function playableHint(game: Pick<Game, "id" | "music_file">): boolean {
   return game.music_file != null;
 }
 
-/** Ask for a game's theme without changing what plays. The panel calls this
- *  when autoplay is off, so its row can still offer the track. Answers false
- *  when nothing will come of it, so a caller waiting on the bytes can stop
- *  waiting. */
+/** Fetch a theme without changing what plays; false when nothing will come. */
 export async function requestTheme(gameId: number): Promise<boolean> {
   if (!(await ensureSupportKnown())) { return false; }
   const known = musicJobs()[gameId];
@@ -392,10 +367,7 @@ let listCursor: number | null = null;
 let skipTimer: ReturnType<typeof setTimeout> | undefined;
 /** Bumped per load so a slow URL lookup cannot land on a later track. */
 let loadSeq = 0;
-/** Duds walked past since the last track that actually played. A queue that
- *  finds nothing anywhere (no torrent manager, an exhausted collection) would
- *  otherwise ask the backend for candidates forever; past the cap the walk
- *  simply stops and the bar keeps the last track. */
+/** Duds since the last playable track; past AUTO_SKIP_MAX the walk stops. */
 let autoSkips = 0;
 const AUTO_SKIP_MAX = 5;
 /** Picks this walk has already asked for, so a refill cannot hand back an id
@@ -451,10 +423,8 @@ function want(track: Track) {
   // Asking for a track is an implicit "show me the player".
   setBarHidden(false);
   setWanted(track);
-  // The pick being replaced may still be waiting for a slot; it is nobody's
-  // track any more, so it must not take one. Released only AFTER the new
-  // wanted track is in place: `forgetJob` treats a dropped entry the player
-  // is still waiting on as a dud, and would otherwise skip this very pick.
+  // Release the replaced pick's slot AFTER the new wanted track is in
+  // place, or `forgetJob` reads the drop as a dud.
   if (previous && previous.gameId !== track.gameId && previous.gameId !== upNext?.gameId) {
     releaseQueued(previous.gameId);
   }
@@ -652,10 +622,7 @@ async function refill() {
 
 /** Take the next entry of the running queue as the wanted track. */
 async function advance() {
-  // Offline nothing can be fetched, and the backend answers every pick with
-  // an instant "none" - walking on would spin through the whole catalogue in
-  // one tick. A track already on disk still plays: that goes through
-  // playTheme/playFromList, not through the walk.
+  // Offline every pick answers "none" instantly; the walk would spin.
   if (isOffline()) { return; }
   if (mode() === "list") {
     if (listCursor == null) { return; }
@@ -793,16 +760,9 @@ export function stop() {
 
 // ── Arbitration ──────────────────────────────────────────────────────────────
 
-/** Something else needs the speakers. The reason is recorded whether or not
- *  anything is playing right now - it describes a STATE that lasts (a preview
- *  with sound, a running emulator), and music started while it lasts has to
- *  respect it too. Recording it only when the music was already audible made
- *  the arbitration edge-triggered: pressing ▶ on a theme row over a running
- *  game, or over an unmuted trailer, played straight through it.
- *
- *  Withdrawing a reason that changed nothing still changes nothing: `resumeFrom`
- *  only starts playback when there is a track and the listener has not paused
- *  it themselves, so a game launched into silence starts nothing on exit. */
+/** Something else needs the speakers. Recorded whether or not anything
+ *  plays (a level, not an edge); `resumeFrom` only starts what the listener
+ *  did not pause. */
 export function pauseFor(reason: PauseReason) {
   if (!reasons.has(reason)) {
     reasons.add(reason);
@@ -827,8 +787,7 @@ export function pauseForGame(id: number) {
   pauseFor("game");
 }
 
-/** Withdraw one game's claim. Without an id (an exit event that carries none)
- *  the set cannot be kept honest, so it is dropped whole - the old behaviour. */
+/** Withdraw one game's claim; without an id the whole set is dropped. */
 export function resumeFromGame(id?: number | null) {
   if (id == null) { runningGames.clear(); } else { runningGames.delete(id); }
   if (runningGames.size > 0) { return; }

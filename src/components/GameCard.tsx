@@ -58,10 +58,8 @@ export function GameCard(props: GameCardProps) {
 
   const thumbCandidates = () => thumbnailCandidates(props.game.torrent_source, props.game.thumbnail_key);
 
-  // Reset thumbnail state when the card is reused for a different game
-  // (For-loop key change) or when the tier list itself changes. Removing a
-  // poster pack shortens that list, and a card that had already fallen through
-  // to index 1 then pointed past its end - every tile went blank.
+  // A new game OR a changed tier list restarts the candidate walk (a removed
+  // pack shortens the list under a card's index).
   createEffect(on(
     () => `${props.game.id}|${thumbCandidates().join("|")}`,
     () => { setImgError(false); setThumbIdx(0); },
@@ -79,30 +77,17 @@ export function GameCard(props: GameCardProps) {
     return convertFileSrc(path);
   };
 
-  /** The cover this card is currently showing, kept mounted underneath while a
-   *  REPLACEMENT decodes. Non-null only during that hand-over, which is the
-   *  only moment a cross-fade is wanted: installing a poster pack swaps a
-   *  blurry preview for a sharp one under the user's eyes. A card painting its
-   *  first cover has nothing to dissolve from and must not fade in - that put
-   *  a 350 ms ramp on every tile of every scroll. */
+  /** The outgoing cover, kept underneath while its replacement decodes.
+   *  Non-null only during that hand-over: a first cover must not fade in. */
   const [underSrc, setUnderSrc] = createSignal<string | null>(null);
   const [topLoaded, setTopLoaded] = createSignal(true);
   const crossfading = () => underSrc() !== null;
 
-  // Compare the VALUE, not the dependencies: thumbSrc re-runs whenever any
-  // collection's tier dirs change, so `on(thumbSrc, ...)` fired for every card
-  // in the grid when one pack was installed. Cards whose own cover had not
-  // changed were flagged as loading, faded to 0 - and never came back, because
-  // an unchanged src fires no second load event. That is the "Win9x posters go
-  // blurry when I install DOS, until I reload the library" report.
-  /** Reveal the new cover, but never in the same frame the fade begins.
-   *
-   *  The `<img>` element survives the swap - only its src changes - so adding
-   *  `is-fading-in` sets opacity 0 and `is-loaded` sets it back to 1. A local
-   *  asset can fire `load` before the browser has painted a single frame at 0,
-   *  and a transition whose start value was never rendered simply does not
-   *  run: the poster appeared instantly, exactly as before the cross-fade
-   *  existed. Two frames is the reliable minimum for "has been painted". */
+  // Compare the VALUE: thumbSrc re-runs for every card when any pack lands,
+  // and an unchanged src fires no second load event to come back on.
+  /** Reveal the new cover two frames after the fade begins: a local asset
+   *  can fire `load` before a frame at opacity 0 was painted, and a
+   *  transition whose start was never rendered does not run. */
   const markTopLoaded = () => {
     if (!crossfading() || typeof requestAnimationFrame !== "function") {
       setTopLoaded(true);
@@ -142,16 +127,11 @@ export function GameCard(props: GameCardProps) {
   const langEntries = () => parseLangEntries(props.game);
   const isMultiLang = () => langEntries().length > 1;
 
-  // Read download state - check primary game and any loaded variants.
-  // Tracks WHICH id the state came from: on a merged card the overlay can
-  // show a variant's download, and the cancel button must target that id,
-  // not always the primary (which would no-op).
+  // The live download of the primary or any variant, with its id so Cancel
+  // targets the right row.
   const dlEntry = () => {
     const dl = downloads();
-    // ?.downloading also for the primary: a finished/failed entry lingers in
-    // the store (extras phase, errors are never cleaned up) and would shadow
-    // a variant's LIVE download - and a non-downloading entry is never
-    // rendered here anyway.
+    // A lingering finished/failed entry must not shadow a variant's live one.
     if (props.game.id != null && dl[props.game.id]?.downloading) {
       return { id: props.game.id, state: dl[props.game.id] };
     }
@@ -178,10 +158,7 @@ export function GameCard(props: GameCardProps) {
     if (props.game.id == null) { return; }
     const prev = favorited();
     setFavorited(!prev);
-    // Retrigger CSS animation by flipping off-then-on across a frame - just
-    // setting true-to-true wouldn't restart a keyframe animation already in
-    // flight (e.g. double-click taps). Clear any previously-scheduled
-    // turn-off so a second click within 500ms doesn't clip its own animation.
+    // Off-then-on across a frame restarts a keyframe animation in flight.
     if (favAnimTimeout) { clearTimeout(favAnimTimeout); }
     setFavAnimating(false);
     requestAnimationFrame(() => setFavAnimating(true));
@@ -210,11 +187,8 @@ export function GameCard(props: GameCardProps) {
             src={thumbSrc()!}
             alt=""
             onLoad={markTopLoaded}
-            // ONLY the reveal ends the hand-over. The class sets opacity 0 and
-            // the transition in one go, so the element first fades 1 -> 0 and
-            // that transitionend arrives after 350 ms whether or not the new
-            // cover has decoded - clearing the understudy there left a blank
-            // tile and a hard cut for anything slower than the fade.
+            // Only the reveal ends the hand-over; the fade-out's own
+            // transitionend arrives whether or not the new cover decoded.
             onTransitionEnd={() => { if (topLoaded()) { setUnderSrc(null); } }}
             onError={handleImgError}
           />

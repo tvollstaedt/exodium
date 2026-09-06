@@ -30,15 +30,8 @@ export async function applySeeding(enabled: boolean): Promise<void> {
   }
 }
 
-/** Whether this install still owes an answer about seeding.
- *
- *  Installs made before seeding became opt-in have no `seeding_enabled` key and
- *  used to upload anyway, so their wish is genuinely unknown - guessing either
- *  way is wrong, and `SeedingConsentDialog` asks instead. The backend reads
- *  "unset" as off, so nothing is uploaded while the question is open.
- *
- *  Offline installs are not asked: nothing uploads in that mode either way, so
- *  the question would be noise. It comes up when they first go online. */
+/** Does this install still owe the seeding answer (§11)? Unset key and
+ *  online; the backend reads unset as off meanwhile. */
 export async function needsSeedingConsent(): Promise<boolean> {
   if (isOffline()) { return false; }
   try {

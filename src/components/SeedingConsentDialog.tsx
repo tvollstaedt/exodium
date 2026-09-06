@@ -9,16 +9,8 @@ interface Props {
   onDecide: (enabled: boolean) => Promise<void>;
 }
 
-/** Asks installs made before seeding became opt-in what they actually want.
- *
- *  Those users were uploading without ever having been asked, so neither
- *  answer can be assumed: silently continuing keeps distributing files nobody
- *  agreed to distribute, silently stopping takes away something they may have
- *  been happy to give. New installs get the same question during setup - this
- *  is that question, arriving late.
- *
- *  Not dismissible: it is two buttons, asked once. An unanswered dialog would
- *  have to reappear on every start, which is worse than answering it. */
+/** The setup's seeding question, asked late of installs that predate it
+ *  (§11). Two buttons, not dismissible. */
 export function SeedingConsentDialog(props: Props) {
   const [busy, setBusy] = createSignal<"on" | "off" | null>(null);
   const [error, setError] = createSignal("");

@@ -67,14 +67,9 @@ fn blank_to_none(s: Option<String>) -> Option<String> {
     s.filter(|v| !v.is_empty())
 }
 
-/// Name of the theme track LaunchBox expects in the game's GameData archive.
-///
-/// `MusicPath` is only written when the track is not the default
-/// `Music\MS-DOS\<Title>.mp3` (175 of 7,667 eXoDOS rows, mostly .ogg and
-/// tracker modules); for the rest `MissingMusic=false` is the only signal.
-/// That flag is LaunchBox's DEFAULT, not an inventory: the eXoWin3x catalogue
-/// says "false" for 1,120 games and ships no music at all, so a caller must
-/// treat the result as a hint and let the archive have the last word.
+/// The theme track's file name: `MusicPath`'s basename, else `<Title>.mp3`
+/// when `MissingMusic` is false. A hint only - that flag is LaunchBox's
+/// default, not an inventory (§14).
 fn derive_music_file(title: &str, music_path: Option<&str>, missing_music: Option<&str>) -> Option<String> {
     if let Some(path) = music_path.filter(|p| !p.trim().is_empty()) {
         let name = path.rsplit(['\\', '/']).next().unwrap_or(path).trim();
@@ -88,15 +83,9 @@ fn derive_music_file(title: &str, music_path: Option<&str>, missing_music: Optio
     None
 }
 
-/// Extract shortcode from application_path using a collection-specific path segment.
-///
-/// eXoDOS:   "eXo\eXoDOS\!dos\captlsm\Capitalism (1995).bat"   → segment "!dos" → "captlsm"
-/// eXoDOS:   "eXo\eXoDOS\!dos\!german\SQ5\Space Quest V.bat"   → segment "!dos" → "SQ5"
-/// eXoWin3x: "eXo\eXoWin3X\!win3x\101Dalma\101 Dalmatians (1997).bat" → segment "!win3x" → "101Dalma"
-/// eXoWin9x: "eXo\eXoWin9x\!win9x\1995\Connect4 (1995)\Connect4 (1995).bat"
-///           → segment "!win9x" → "Connect4 (1995)" (the pack has no 8-char
-///           shortcodes; a 4-digit YEAR directory is skipped and the title
-///           directory doubles as the shortcode)
+/// The shortcode: the directory after `segment` in the application_path,
+/// skipping a language dir (`!german`) and a year dir that has a directory
+/// after it (eXoWin9x, where the title dir is the code - §16).
 fn extract_shortcode(app_path: &Option<String>, segment: &str) -> Option<String> {
     let path = app_path.as_ref()?;
     let normalized = path.replace('\\', "/");
@@ -128,13 +117,8 @@ fn extract_year(date_str: &Option<String>) -> Option<i32> {
     date_str.as_ref().and_then(|s| s.get(..4)?.parse().ok())
 }
 
-/// Extract language code from the Series field.
-/// e.g. "Language: DE" → "DE", "Playlist: Roland MT-32; Language: FR" → "FR"
-///
-/// The source data has no standard: the language packs write ISO-style codes,
-/// the main eXoDOS catalog spells the language out ("Language: Japanese").
-/// Normalize the spelled-out names so the badges read uniformly - unknown
-/// values pass through verbatim rather than being guessed at.
+/// The language code from the Series field ("Language: DE"). Spelled-out
+/// names from the main catalog are normalized; unknown values pass through.
 fn extract_language(series: &Option<String>) -> String {
     if let Some(s) = series {
         for part in s.split(';') {

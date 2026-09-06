@@ -50,11 +50,8 @@ const XML_CANDIDATES: &[&str] = &[
     "MS-DOS.xml",
 ];
 
-/// Import games from an eXo metadata ZIP (XODOSMetadata.zip, GLP, etc.).
-/// Searches for MS-DOS.xml inside the archive, parses it, and inserts into the DB.
-///
-/// `shortcode_segment` is the collection-specific path component used to extract
-/// shortcodes from application_path (e.g. "!dos" for eXoDOS).
+/// Import the LaunchBox XML inside an eXo metadata zip. `shortcode_segment`
+/// is the collection's path component before the game dir ("!dos").
 pub fn import_from_zip(
     zip_path: &Path,
     conn: &rusqlite::Connection,

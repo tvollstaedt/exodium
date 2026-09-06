@@ -25,14 +25,9 @@ pub fn game_name_from_app_path(app_path: &str) -> Option<String> {
     Some(name.to_string())
 }
 
-/// Names to look for in a torrent, best first.
-///
-/// eXo names every zip `<Title> (<Year>).zip`, and the launcher bat repeats
-/// that name - so the path is the reliable source. Three GLP games are
-/// catalogued with no ApplicationPath at all (issue #26); for those the plain
-/// title misses the year suffix, leaving them unmatched and therefore
-/// undownloadable, so reconstruct the eXo name from title + year as a
-/// fallback. Both matchers (runtime and generate_db) use this.
+/// Zip names to look for in a torrent, best first: the launcher bat's name
+/// (`<Title> (<Year>)`), else the eXo name rebuilt from title + year (three
+/// GLP rows have no path, issue #26). Shared with generate_db.
 pub fn torrent_search_names(
     title: &str,
     app_path: Option<&str>,
@@ -120,17 +115,9 @@ pub(crate) fn match_torrent_indices(
     Ok(())
 }
 
-/// Torrent files that can ONLY have arrived as a side effect of downloading
-/// `requested`: every piece they occupy is also occupied by a requested file.
-///
-/// A piece is the smallest unit a torrent transfers (8 MiB for eXoDOS), and
-/// most eXoDOS archives are far smaller than that, so fetching one game
-/// physically delivers whichever neighbours share its pieces - complete and
-/// intact, not as fragments. That is why no integrity check can tell the two
-/// apart, and why this is decided from the torrent's geometry instead:
-/// a file none of whose pieces were worth fetching on their own was never
-/// asked for. Files sit in the piece space back to back, so this only ever
-/// catches immediate neighbours.
+/// Files that can only have arrived as a side effect of `requested`: every
+/// piece they occupy belongs to a requested file too (§4). Decided from the
+/// torrent's geometry - the archives themselves are complete and intact.
 fn collateral_file_indices(
     index: &TorrentIndex,
     requested: &std::collections::HashSet<usize>,
@@ -164,14 +151,9 @@ fn collateral_file_indices(
         .collect()
 }
 
-/// Drop library entries for games that were never asked for: their archive is
-/// on disk only because it shared pieces with something that was.
-///
-/// Runs between the two scan passes, because it needs pass 1's verdict (an
-/// extracted directory is proof the user installed it) and has to be done
-/// before pass 2 would confirm the very rows it removes. Support archives
-/// Exodium fetches on the user's behalf count as requested - util.zip alone
-/// carries the last four eXoDOS games along with it.
+/// Drop library entries whose archive is collateral (§4). Runs between the
+/// scan passes: after pass 1's "extracted = installed" verdict, before pass 2
+/// would confirm the rows. Support archives count as requested.
 fn clear_collateral_library_entries(
     db: &std::sync::Mutex<rusqlite::Connection>,
     data_dir: &str,
@@ -213,11 +195,8 @@ fn clear_collateral_library_entries(
         ];
         for (suffix, trace) in support {
             let Some(f) = index.find_by_suffix(suffix) else { continue };
-            // Extracted already, or still arriving: bytes on disk are enough.
-            // Waiting for the trace would leave the neighbours of a util.zip
-            // that is still downloading unexplained - which is exactly when
-            // they show up. These archives are far too large to be collateral
-            // themselves.
+            // Bytes on disk are enough: a util.zip still downloading is
+            // exactly when its neighbours appear.
             let started = std::fs::metadata(torrent_root.join(&f.path))
                 .map(|m| m.len() > 0)
                 .unwrap_or(false);
@@ -309,39 +288,21 @@ fn scan_torrent_indices() -> std::collections::HashMap<&'static str, TorrentInde
     out
 }
 
-/// Scan the eXoDOS directory tree and mark games whose files exist on disk as
-/// installed.  Returns the number of rows updated.
-///
-/// `adopt_from_disk` decides whether a bare archive may CREATE a library
-/// entry. It must be false for the automatic scan at startup: a download
-/// delivers whichever neighbours share its pieces, so "an archive is here"
-/// is not the same as "the user wanted this game", and treating it as such
-/// filled libraries with games nobody asked for. It is true where the disk
-/// IS the answer the user asked for - importing an existing eXo installation,
-/// pointing Exodium at another folder, or pressing Rescan after copying games
-/// in by hand.
+/// Mark games whose files are on disk as installed; returns rows updated.
+/// `adopt_from_disk` lets a bare archive CREATE a library entry - true for
+/// import, Rescan and a data-dir change, never for the startup scan (§4).
 pub(crate) fn scan_installed_games_with_db(
     db: &std::sync::Mutex<rusqlite::Connection>,
     data_dir: &str,
     adopt_from_disk: bool,
 ) -> Result<usize, String> {
-    // Each collection's extracted game data lives under its own tree
-    // (<data_dir>/<inner_folder>/<game_prefix>):
-    //   eXo/eXoDOS/<shortcode>/           - English (eXoDOS)
-    //   eXo/eXoDOS/!german/<shortcode>/   - German LP (GLP; !polish/!spanish alike)
-    //   eXo/eXoWin3x/<shortcode>/         - eXoWin3x
-    //   eXo/eXoWin9x/<year>/<title dir>/  - eXoWin9x (year_subdirs)
-    //
-    // Note: the shortcode_segment dirs (eXo/eXoDOS/!dos/ etc.) contain only
-    // config/script files and are ALWAYS present - the '!' filter below keeps
-    // them from counting as installs.
+    // Game dirs: eXo/eXoDOS/[<lang>/]<shortcode>, eXo/eXoWin3x/<shortcode>,
+    // eXo/eXoWin9x/<year>/<title dir>. The `!`-prefixed config dirs always
+    // exist and never count.
     let game_base = game_root(data_dir).join("eXo").join("eXoDOS");
 
-    // Refuse to scan a data dir that holds no collection tree at all. The
-    // scan starts by clearing every installed flag, so running it against a
-    // missing folder - an unmounted external drive, a path typo, a move that
-    // has not finished - would report the whole library as gone and invite a
-    // re-download of hundreds of gigabytes.
+    // No collection tree at all (unmounted drive, typo): refuse, or the
+    // flag reset below reports the whole library gone.
     if !COLLECTION_MAP.iter().any(|c| {
         game_root(data_dir)
             .join(c.game_prefix)
@@ -352,12 +313,8 @@ pub(crate) fn scan_installed_games_with_db(
         ));
     }
 
-    // Reset installed flags before the scan so that games whose extracted
-    // directory was removed are correctly flipped back to "not installed".
-    // in_library is left alone: it is sticky by design (set on download
-    // start, cleared on uninstall/cancel) - wiping it here removed the
-    // "My Games" progress card of any download that was still in flight
-    // when the user triggered a rescan.
+    // Reset installed (a removed dir must flip back); in_library is sticky
+    // and holds the progress card of a download in flight.
     {
         let conn = db.lock().map_err(|e| e.to_string())?;
         conn.execute_batch("UPDATE games SET installed = 0")
@@ -466,11 +423,8 @@ pub(crate) fn scan_installed_games_with_db(
     // Collateral archives are dropped from the library BEFORE pass 2, which
     // would otherwise confirm the very rows this removes.
     let indices = scan_torrent_indices();
-    // An imported eXo installation IS its library: the games arrived as
-    // archives, not as downloads, so "no piece of this was worth fetching on
-    // its own" describes every one of them. Running the cleanup there took
-    // games the user owns out of My Games on the first start after the import,
-    // and no later automatic scan could put them back.
+    // An imported installation IS its library: every archive there reads
+    // as collateral, so the cleanup never runs on it.
     let disk_is_library = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         queries::get_config(&conn, "library_from_disk")
@@ -500,14 +454,9 @@ pub(crate) fn scan_installed_games_with_db(
         );
     }
 
-    // Pass 2: detect downloaded-but-not-extracted game ZIPs → mark as installed + in_library.
-    // All eXoDOS game ZIPs live at game_base/<title with year>.zip regardless of collection.
-    // This mirrors LaunchBox behavior where games stay as ZIPs until first launch.
-    //
-    // IMPORTANT: Only match ZIPs to non-LP (base) collections.  LP collections (GLP, PLP, SLP)
-    // may share English titles with eXoDOS games; including them in the HashMap would cause
-    // title collisions where an EN ZIP incorrectly marks an LP game as installed.
-    // LP games are only considered installed when their extracted directory exists (Pass 1).
+    // Pass 2: zips not yet extracted (LaunchBox unpacks on first launch).
+    // Base collections only - an LP row sharing the EN title would otherwise
+    // be marked installed by the EN zip; LP installs need their dir (pass 1).
     if game_base.is_dir() {
         // Build lookup: zip_stem → game_id, restricted to non-LP collections.
         let lp_sources: Vec<String> = COLLECTION_MAP
@@ -516,11 +465,8 @@ pub(crate) fn scan_installed_games_with_db(
             .map(|c| c.id.to_string())
             .collect();
         let lp_placeholders = lp_sources.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
-        // Candidates are every not-yet-matched non-LP game. Filtering on
-        // in_library too made the scan NON-IDEMPOTENT: the first run sets it,
-        // so the second run no longer considered those rows and reported a
-        // smaller number - and any game that exists only as a ZIP quietly lost
-        // its installed flag (observed: 112, then 67, then 63).
+        // Every not-yet-matched base-collection row; filtering on in_library
+        // here made the scan non-idempotent (test: rescanning_is_idempotent).
         let intent_filter = if adopt_from_disk { "" } else { "AND in_library = 1 " };
         let zip_query = format!(
             "SELECT id, title, application_path FROM games \
@@ -576,12 +522,8 @@ pub(crate) fn scan_installed_games_with_db(
                             Ok(m) => m.len(),
                             Err(_) => return false,
                         };
-                        // Lenient where measuring is impossible or wrong:
-                        // without a parsed torrent there is nothing to compare
-                        // against (and flipping every ZIP-only game to "not
-                        // installed" would invite a re-download), and an
-                        // imported tree may legitimately hold repacked
-                        // archives the bundled torrent never described.
+                        // No torrent to measure against, or an import that
+                        // may hold repacked archives: size cannot decide.
                         if lenient_sizes {
                             return len >= 1024;
                         }
@@ -644,11 +586,8 @@ pub(crate) fn scan_installed_games_with_db(
         }
     }
 
-    // Library entries whose files are not here. Sticky in_library is right
-    // for a game you uninstalled, but after a folder move it also describes
-    // games whose data was left behind - and a screen of unexplained
-    // "Incomplete" badges reads as a bug in the app rather than a
-    // half-finished move.
+    // Library entries without files: after a folder move these are games
+    // left behind, and the count feeds the warning.
     let orphaned: i64 = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         conn.query_row(
@@ -670,13 +609,8 @@ pub(crate) fn scan_installed_games_with_db(
     Ok(total)
 }
 
-/// Re-scan the eXoDOS directory tree to detect games already downloaded to disk.
-/// Returns the count of games updated.
-///
-/// `adopt` (default false) hands the disk the authority to add games to the
-/// library - see `scan_installed_games_with_db`. The startup scan omits it;
-/// the Rescan button and a data-directory change pass true, because there the
-/// user is asking what is in the folder.
+/// Re-scan the game root. `adopt` (Rescan button, data-dir change) lets the
+/// disk add games to the library; the startup scan passes false.
 #[tauri::command]
 pub async fn scan_installed_games(
     db_state: State<'_, DbState>,
@@ -726,10 +660,7 @@ mod scan_tests {
     use super::*;
 
 
-    /// Rescanning must answer the same thing every time. It did not: the ZIP
-    /// pass skipped rows whose in_library flag the previous run had set, so
-    /// repeated scans reported ever fewer games (112, 67, 63) and ZIP-only
-    /// installs silently lost their installed flag.
+    /// A second scan must report the same games as the first.
     #[test]
     fn rescanning_is_idempotent() {
         let dir = std::env::temp_dir().join(format!("exodium_scan_{}", std::process::id()));
@@ -799,10 +730,8 @@ mod scan_tests {
             .index as i64
     }
 
-    /// The geometry that produces phantom installs: a piece is 8 MiB and most
-    /// eXoDOS archives are smaller, so fetching one file delivers whichever
-    /// neighbours share its pieces. A file with a piece of its own was asked
-    /// for and must never be mistaken for a side effect.
+    /// A file with a piece of its own was asked for; only a file whose every
+    /// piece is shared is collateral.
     #[test]
     fn only_files_sharing_every_piece_count_as_collateral() {
         let piece = 1000u64;
@@ -892,10 +821,8 @@ mod scan_tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// An imported eXo installation is its own library: the games arrived as
-    /// archives, so "no piece of this was worth fetching" describes all of
-    /// them. Cleaning up there took games the user owns out of My Games on the
-    /// first start after the import.
+    /// An imported installation is never cleaned: every archive there would
+    /// read as collateral.
     #[test]
     fn an_imported_library_is_never_treated_as_collateral() {
         let dir = std::env::temp_dir().join(format!("exodium_imported_{}", std::process::id()));
@@ -1006,10 +933,8 @@ pub async fn uninstall_game(
     };
 
     if !game.installed && !game.in_library {
-        // Idempotent cleanup: the UI legitimately offers Uninstall for
-        // half-states (incomplete download, failed extraction) where the
-        // flags are already clear but files may exist on disk. Proceed and
-        // clean whatever is there instead of erroring.
+        // Half-states (incomplete download, failed extraction) offer
+        // Uninstall with clear flags: clean whatever is there.
         log::info!(
             "uninstall_game: {} not marked installed - cleaning up leftovers anyway",
             game.title
@@ -1042,12 +967,8 @@ pub async fn uninstall_game(
         .and_then(crate::commands::library::game_name_from_app_path)
         .unwrap_or_else(|| game.title.clone());
 
-    // Determine THIS variant's game directory:
-    // EN: <game_prefix>/<shortcode>/   LP: <game_prefix>/<lang_dir>/<shortcode>/
-    // eXoWin9x: <game_prefix>/<year>/<title dir>/
-    // Never probe other languages' dirs - the old first-existing probe over
-    // all lang dirs made "uninstall the DE variant" back up and delete the
-    // EN install when both were on disk.
+    // THIS variant's dir only - probing other language dirs deleted the EN
+    // install when uninstalling DE.
     let rel_game_dir =
         collection_rel_game_dir(source, &shortcode, game.application_path.as_deref());
     // Save backup lives NEXT TO the game dir (`.../!save/<shortcode>`), which
@@ -1069,12 +990,8 @@ pub async fn uninstall_game(
     let deleted_rels: Vec<String> = tauri::async_runtime::spawn_blocking(move || {
         if let Some(ref dir) = game_dir {
             if dir.exists() {
-                // Back up the entire game directory (preserves saves, configs,
-                // etc.). LP backups live under the language dir so uninstalling
-                // one variant can't clobber another's backup; extract_game_zip's
-                // restore probes both the lang-scoped and the legacy shared
-                // location. For eXoWin9x the whole dir includes the game's own
-                // VHD, which is where its saves live.
+                // Whole-dir backup (§5), lang-scoped so variants cannot
+                // clobber each other's; `extract_game_zip` restores it.
                 let save_dir = torrent_root.join(&rel_save_dir);
                 if save_dir.exists() {
                     let _ = std::fs::remove_dir_all(&save_dir);
@@ -1097,10 +1014,7 @@ pub async fn uninstall_game(
             }
         }
 
-        // Track which ZIPs actually got deleted (torrent-relative paths) so
-        // the caller can reset piece bookkeeping in exactly the torrents
-        // that tracked them. Only THIS variant's ZIP - the old all-languages
-        // sweep deleted neighbor variants' downloads too.
+        // Only THIS variant's zip; deleted paths feed the ledger reset below.
         let zip_rels = vec![rel_zip];
         let mut deleted_rels: Vec<String> = Vec::new();
         for rel in &zip_rels {
@@ -1128,12 +1042,8 @@ pub async fn uninstall_game(
     .await
     .map_err(|e| e.to_string())?;
 
-    // Deleted ZIPs' pieces are still marked "had" in librqbit's fastresume
-    // state; a later re-download would report 100% instantly with no file on
-    // disk (stuck-download loop). All collections overlay one root, so a
-    // deleted ZIP may be tracked by a torrent OTHER than this game's source
-    // (e.g. a GLP uninstall also removes the EN ZIP). Reset exactly the
-    // torrents that tracked a deleted path.
+    // Reset the ledger of every torrent that tracked a deleted zip (a GLP
+    // uninstall also removes the EN zip) - see `invalidate_after_file_delete`.
     let managers: Vec<(String, std::sync::Arc<crate::torrent::manager::DownloadManager>)> = {
         let guard = torrent_state.0.read().await;
         guard.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
@@ -1204,23 +1114,10 @@ pub async fn uninstall_game(
     Ok(format!("Uninstalled: {}", game.title))
 }
 
-/// Put a game back into the state it had right after installing: drop the
-/// extracted directory AND its save backup, then unpack the ZIP again.
-///
-/// Uninstall deliberately KEEPS user data (§5) - it renames the game dir to
-/// `!save/<shortcode>` and `extract_game_zip` restores it on the next
-/// install - so "uninstall, then reinstall" cannot produce a clean slate.
-/// This is the operation that can.
-///
-/// It matters beyond savegames for eXoWin9x, where the game's own VHD is
-/// mounted as D: and holds the guest's filesystem: Windows clears that
-/// volume's FAT "clean shutdown" bit on the first write and only restores it
-/// on a proper shutdown, so a session ended by closing the emulator window
-/// leaves it dirty and the next boot runs ScanDisk. Replacing the VHD with
-/// the one from the ZIP is the only way back to a pristine volume.
-///
-/// The ZIP is validated BEFORE anything is deleted - a torrent placeholder
-/// or a half-downloaded archive must not cost the user their install.
+/// Back to the freshly-installed state: delete the game dir AND its `!save`
+/// backup, then unpack again. Uninstall keeps user data (§5), so this is the
+/// only clean slate - and the only way to a pristine Win9x VHD. The zip is
+/// validated BEFORE anything is deleted.
 #[tauri::command]
 pub async fn reset_game_data(db_state: State<'_, DbState>, id: i64) -> Result<String, String> {
     let (game, data_dir) = {

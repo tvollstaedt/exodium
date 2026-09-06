@@ -13,11 +13,8 @@ use super::collections::{asset_fallback, collection_def};
 use super::paths::{game_root, path_to_fwd_slash, RESOURCE_DIR};
 use super::DbState;
 
-/// Get the Tier 0 preview directory for a collection.
-/// Checks multiple platform-specific layouts because Tauri's bundle.resources
-/// placement varies: macOS uses Contents/Resources/, Linux deb uses
-/// /usr/lib/<pkg>/, AppImage uses <mount>/usr/lib/<pkg>/, Windows flat-installs
-/// into the install directory.
+/// The Tier 0 preview dir for a collection; probes every layout Tauri's
+/// bundle.resources produces per platform.
 #[tauri::command]
 pub async fn get_preview_dir(collection: String) -> Result<String, String> {
     // Dev mode: direct from repo tree.
@@ -115,11 +112,7 @@ pub async fn get_poster_dir(
     Err("Poster directory not found".to_string())
 }
 
-/// Metadata payload for a single game.
-///
-/// Manuals are deferred to v2 (they live inside individual game ZIPs, not
-/// XODOSMetadata.zip) so `manual_path` / `manual_kind` are always None today -
-/// kept in the struct to avoid a future breaking frontend change.
+/// A game's gallery images (originals plus 160 px thumbnails) and manual.
 #[derive(Debug, Serialize)]
 pub struct GameMetadata {
     pub manual_path: Option<String>,
@@ -135,12 +128,8 @@ pub struct GameMetadata {
 /// px, so 160 covers 2x displays with room to spare.
 const THUMB_MAX_EDGE: u32 = 160;
 
-/// Where cached gallery thumbnails live. Inside the content dir so a factory
-/// reset that clears content also clears the cache.
-///
-/// NOT a dotted directory: Tauri's asset-protocol scope glob does not match
-/// hidden path components, so `.thumbcache` was silently denied for every
-/// image (202 denials in one session) while `content/posters` worked.
+/// The gallery thumbnail cache, under `content/` so a factory reset clears
+/// it. Not a dotted name: the asset-scope glob skips hidden components.
 fn gallery_cache_dir(data_dir: &str) -> PathBuf {
     PathBuf::from(data_dir).join("content").join("thumbcache")
 }
@@ -287,12 +276,7 @@ fn prune_gallery_cache(cache_dir: &Path, max_bytes: u64) {
     );
 }
 
-/// Category-priority for the gallery strip. Ordered by typical visual impact
-/// and resolution quality in LaunchBox's database: 3D box renders lead (1-2 MB
-/// PNGs at 1500-2000 px), then the authentic 2D box art (smaller JPGs), then
-/// back/spine/disc packaging, screenshots, fanart, advertisements, posters,
-/// and the long tail. Folder names match XODOSMetadata.zip's `Images/MS-DOS/`
-/// tree exactly.
+/// Gallery order, best art first. Names match the pack's `Images/<platform>/`.
 const IMAGE_CATEGORY_ORDER: &[&str] = &[
     "Box - 3D",
     "Box - Front",
@@ -331,10 +315,8 @@ fn strip_trailing_suffix_num(stem: &str) -> &str {
     stem
 }
 
-/// Recursively walk a category directory, collecting image files whose
-/// (suffix-stripped, normalized) stem equals `target_norm`. Depth-limited to
-/// 3 levels to handle `<category>/<region>/file` nesting without ever going
-/// off into pathological trees.
+/// Images under a category dir whose normalized stem is `target_norm`, up
+/// to 3 levels deep (`<category>/<region>/file`).
 fn collect_matches_recursive(
     dir: &Path,
     depth: usize,
@@ -363,10 +345,8 @@ fn collect_matches_recursive(
         let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
         let base_stem = strip_trailing_suffix_num(stem);
         if normalize_alnum(base_stem) == target_norm {
-            // Tauri's asset protocol can't serve files whose names start with
-            // '.' (dots are treated as path-traversal components in the URL).
-            // Rename them on first encounter - only affects 2 games in the
-            // entire eXoDOS collection ("...A Personal Nightmare", ".386 Spys").
+            // The asset protocol cannot serve dot-prefixed names; rename on
+            // first encounter (two games).
             let serve_path = if path.file_name()
                 .and_then(|n| n.to_str())
                 .is_some_and(|n| n.starts_with('.'))
@@ -388,11 +368,8 @@ fn collect_matches_recursive(
     }
 }
 
-/// Scan the installed metadata content pack for a game's image assets.
-/// Walks `<install_dir>/Images/MS-DOS/<category>/` folders and collects every
-/// file whose (suffix-stripped, normalized) stem equals the normalized game
-/// title. Returns empty images (not an error) when the pack isn't installed -
-/// the frontend renders a Media section only if something is present.
+/// A game's gallery from the installed metadata pack. Empty, not an error,
+/// without the pack.
 #[tauri::command]
 pub async fn get_game_metadata(
     db_state: State<'_, DbState>,
@@ -421,11 +398,7 @@ fn scan_game_metadata(
 ) -> Result<GameMetadata, String> {
     let base = PathBuf::from(data_dir).join("content").join("metadata");
 
-    // LP collections fall back to their base collection's metadata if their own
-    // pack isn't installed (mirrors get_poster_dir). Both are checked so an
-    // LP-installed user still picks up eXoDOS box art when no LP pack exists.
-    // A collection with its own game tree gets no fallback - its games are not
-    // in the other pack, and a same-title hit would show the wrong art.
+    // Own pack first, then the base collection's (`asset_fallback`).
     let mut roots: Vec<PathBuf> = vec![base.join(collection)];
     roots.extend(asset_fallback(collection).map(|c| base.join(c)));
 
@@ -476,11 +449,8 @@ fn scan_game_metadata(
         images.extend(paths);
     }
 
-    // Resolve manual. Lookup order:
-    //   1. Torrent root (downloaded game extracted manual)
-    //   2. Content metadata pack for this collection (ships manuals without download)
-    //   3. eXoDOS metadata pack as LP fallback (LP packs share EN manuals)
-    //   4. Lazy-extract from GameData ZIP (legacy path before metadata packs)
+    // Manual: extracted in the game root, the metadata pack (own, then
+    // fallback collection), else pulled out of the GameData zip.
     let torrent_root = game_root(data_dir);
     let (resolved_manual, manual_kind) = if let Some(mp) = manual_path {
         let normalized = mp.replace('\\', "/");
@@ -534,12 +504,8 @@ fn manual_kind_from_path(path: &Path) -> &'static str {
     }
 }
 
-/// Extract a single manual file from a GameData ZIP on first access.
-/// GameData ZIPs live at `<torrent_root>/Content/GameData/<collection>/<Title (Year)>.zip`
-/// and contain `Manuals/MS-DOS/<Title (Year)>.{pdf,txt,doc}`.
-///
-/// `manual_rel` is the forward-slash-normalized ManualPath from the XML
-/// (e.g. "Manuals/MS-DOS/Capitalism (1995).pdf").
+/// Extract one manual (`manual_rel`, e.g. `Manuals/MS-DOS/<Title>.pdf`) from
+/// the game's GameData zip on first access.
 fn extract_manual_from_gamedata(
     torrent_root: &Path,
     collection: &str,
@@ -770,10 +736,7 @@ mod gallery_cache_tests {
         assert!(tw <= THUMB_MAX_EDGE && th <= THUMB_MAX_EDGE, "got {}x{}", tw, th);
         // Aspect ratio preserved (thumbnail() fits inside the box).
         assert_eq!(sw / sh, tw / th);
-        // Absolute, not a ratio against the source: a synthetic gradient PNG
-        // compresses far better than the pack's real box art, so a ratio test
-        // would measure the fixture instead of the thumbnail. On real assets
-        // this comes out around 5 KB (measured: a 2.7 MB gallery -> 39 KB).
+        // Absolute bound: a ratio would measure the synthetic fixture.
         let thumb_bytes = std::fs::metadata(&thumb).unwrap().len();
         assert!(thumb_bytes < 30_000, "thumbnail too large: {} bytes", thumb_bytes);
         let _ = std::fs::remove_dir_all(&dir);
@@ -896,11 +859,8 @@ mod gallery_cache_tests {
 mod real_pack_tests {
     use super::*;
 
-    /// Opt-in check against a REAL installed metadata pack, because synthetic
-    /// fixtures cannot model what actually costs time here: eXo's box art is
-    /// photographic PNGs up to 18 MB, which compress and decode nothing like a
-    /// generated test image.
-    ///
+    /// Against a REAL metadata pack (18 MB photographic PNGs decode nothing
+    /// like a fixture):
     ///   EXODIUM_REAL_DATA_DIR=/path/to/data cargo test real_pack -- --ignored --nocapture
     #[test]
     #[ignore]

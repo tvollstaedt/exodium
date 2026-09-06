@@ -2,25 +2,10 @@ import { createSignal } from "solid-js";
 import { startGameVideo, getVideoStatus, cancelGameVideo, videoPlaybackSupported, type VideoStatus } from "../api/tauri";
 import { requestSlot, releaseSlot, isActive, activeCount, queuedCount, type MediaJob } from "./mediaQueue";
 
-/** Preview-video state per game.
- *
- *  The video is streamed out of the game's GameData archive, which can take a
- *  minute when the torrent is cold - so this mirrors the downloads store: fire
- *  and poll, never block the panel.
- *
- *  Closing the panel does NOT stop a fetch; the point of the feature is that
- *  the video is simply there next time. But each fetch is a torrent stream with
- *  its own 32 MB lookahead, and several at once fight over the same peers, so
- *  only MAX_CONCURRENT run at a time.
- *
- *  Anything over the limit WAITS - it is never dropped. An earlier version
- *  deleted the evicted entry, and the panel then showed nothing at all, which
- *  reads as "this game has no video". A queued fetch keeps its place and says
- *  so. Giving up a slot is cheap either way: librqbit writes fetched pieces
- *  into the archive on disk, so resuming finds them locally.
- *
- *  The slots themselves live in `mediaQueue` and are shared with the theme
- *  tracks, which come out of the same archives over the same kind of stream. */
+/** Preview-video state per game: fire a backend job, poll, never block.
+ *  Closing the panel keeps a fetch running. Over the cap a fetch is queued,
+ *  never dropped (a missing entry reads as "no video"); slots are shared
+ *  with theme tracks in `mediaQueue`. */
 const [videos, setVideos] = createSignal<Record<number, VideoStatus>>({});
 export { videos };
 
@@ -43,14 +28,8 @@ export function getVideoState(gameId: number): VideoStatus | undefined {
 }
 
 function put(gameId: number, status: VideoStatus) {
-  // Offline (or for a collection with no torrent manager) the backend answers
-  // "none" instantly - the archive was never opened, so that is not an
-  // inventory answer. It says so by carrying OFFLINE_TOKEN in `error`
-  // (media.rs: phase "none" plus a non-null error). Keeping it would blacklist
-  // the game for the rest of the session - `requestVideo` refuses to ask
-  // twice - so the preview would stay missing after the app went back online.
-  // It is recorded and forgotten again, which shows the panel nothing (not an
-  // error, not a retry button) and lets the next open probe once more.
+  // A "none" with a non-null error is provisional (offline, no session):
+  // shown once, then forgotten, or the game is blacklisted for the session.
   const provisional = status.phase === "none" && status.error != null;
   setVideos((prev) => ({ ...prev, [gameId]: status }));
   if (provisional) { forgetVideo(gameId); }
@@ -147,20 +126,13 @@ async function beginFetch(gameId: number) {
   }, POLL_MS);
 }
 
-/** Ask for a game's video. Runs now if a slot is free (or if this is the game
- *  on screen), waits otherwise. */
-/** null until the one-time probe answers; the panel uses this to explain WHY
- *  there is no preview rather than silently showing none. */
+/** Set once the one-time probe says no; the panel explains why. */
 const [playbackUnsupported, setPlaybackUnsupported] = createSignal(false);
 export { playbackUnsupported as videoPlaybackUnsupported };
 
 let supportKnown: Promise<boolean> | null = null;
 function ensurePlaybackSupportKnown(): Promise<boolean> {
-  // An unreachable probe must not disable previews on the platforms that have
-  // no problem - only an explicit "no" does.
-  // Only an explicit "no" disables the feature. A missing command, an odd
-  // payload or a failed invoke must not switch previews off on the platforms
-  // that have no problem.
+  // Only an explicit "no" disables previews; a failed probe does not.
   supportKnown ??= videoPlaybackSupported()
     .then((ok) => { const unsupported = ok === false; setPlaybackUnsupported(unsupported); return !unsupported; })
     .catch(() => true);

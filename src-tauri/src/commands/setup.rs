@@ -21,10 +21,7 @@ use super::collections::{collection_def, CollectionDef, COLLECTION_MAP};
 /// Config value of `network_mode` that keeps the torrent engine shut down.
 pub(crate) const OFFLINE_MODE: &str = "offline";
 
-/// True when the user picked "offline" during setup (or later in Settings):
-/// no librqbit session is created, nothing is downloaded, nothing is shared.
-/// A missing key means "live" so installs from before this setting keep
-/// behaving as they did.
+/// Offline mode (§11): no librqbit session at all. Unset means live.
 pub(crate) fn is_offline(db: &std::sync::Mutex<rusqlite::Connection>) -> bool {
     db.lock()
         .ok()
@@ -43,10 +40,7 @@ pub(crate) fn seeding_enabled(db: &std::sync::Mutex<rusqlite::Connection>) -> bo
         == Some("1")
 }
 
-/// The user's transfer caps in KB/s as `(upload, download)`, `None` meaning
-/// unlimited. Anything unparseable or zero reads as unlimited: a stored "0"
-/// would otherwise mean "throttle to nothing", which is not a setting the UI
-/// can offer back out again.
+/// Transfer caps in KB/s as `(upload, download)`; junk and 0 read as unlimited.
 pub(crate) fn rate_limits(db: &std::sync::Mutex<rusqlite::Connection>) -> (Option<u32>, Option<u32>) {
     let read = |key: &str| -> Option<u32> {
         let conn = db.lock().ok()?;
@@ -89,10 +83,8 @@ pub struct CollectionInfo {
 pub async fn get_available_collections(
     db_state: State<'_, DbState>,
 ) -> Result<Vec<CollectionInfo>, String> {
-    // NULL torrent_source rows (a handful of unmatched variants and the pack
-    // sentinel) are deliberately NOT attributed to eXoDOS: the grid's
-    // collection filter can't reach them, so counting them would make the
-    // shelf number disagree with the grid it opens.
+    // NULL torrent_source rows are not counted: the grid's collection
+    // filter cannot reach them.
     let counts: std::collections::HashMap<String, i64> = {
         let conn = db_state.lock()?;
         let mut stmt = conn
@@ -118,11 +110,7 @@ pub async fn get_available_collections(
         .collect())
 }
 
-/// Return the directory where Exodium writes its log file. Served from the
-/// `LOG_DIR` cache populated in `lib.rs::run` to avoid re-resolving via
-/// `app.path().app_log_dir()` at command time - that round-trip was observed
-/// failing silently on shipped Windows builds while the setup-time call
-/// succeeded.
+/// The log dir, from the `LOG_DIR` cache (see there).
 #[tauri::command]
 pub async fn get_log_dir(app: AppHandle) -> Result<String, String> {
     if let Some(dir) = LOG_DIR.get() {
@@ -137,11 +125,7 @@ pub async fn get_log_dir(app: AppHandle) -> Result<String, String> {
     Ok(dir.to_string_lossy().into_owned())
 }
 
-/// Open the log folder in the user's file explorer. Bypasses the frontend's
-/// `getLogDir() + openPath()` two-step which was observed leaving the UI
-/// "Resolving…" forever in shipped Windows builds - by doing both lookup
-/// and open server-side, the UI just calls one command and either succeeds
-/// or sees the error.
+/// Open the log folder in the file explorer, lookup and open in one command.
 #[tauri::command]
 pub async fn open_log_folder(app: AppHandle) -> Result<(), String> {
     let dir = match LOG_DIR.get() {
@@ -186,18 +170,8 @@ pub struct TorrentInfo {
     pub metadata_size: u64,
 }
 
-/// Decide if a torrent_root looks like a fresh install - i.e. either missing
-/// or contains nothing that librqbit needs to validate against. We use this
-/// to gate the empty-bitfield pre-seed: if the user pointed Exodium at a
-/// directory full of existing game data, we must let librqbit do its real
-/// validation pass rather than tell it "everything is missing" (which would
-/// trigger a re-download of complete files).
-///
-/// Dotfiles (e.g. `.eXoDOS_configs_extracted` markers we drop into the
-/// torrent_root after extracting bundled DOSBox configs) are NOT torrent
-/// content and must be ignored - otherwise the second app launch would see
-/// our own markers and refuse to seed, defeating the optimisation for users
-/// who haven't actually downloaded any games yet.
+/// Nothing librqbit would need to validate: gates the empty-bitfield seed.
+/// Exodium's own dotfile markers do not count as content.
 fn torrent_root_looks_empty(torrent_root: &Path) -> bool {
     let iter = match std::fs::read_dir(torrent_root) {
         Err(_) => return true, // doesn't exist or unreadable → safe to seed
@@ -213,16 +187,9 @@ fn torrent_root_looks_empty(torrent_root: &Path) -> bool {
     true
 }
 
-/// Pre-seed `<persistence_dir>/<info_hash>.bitv` files with `ceil(piece_count/8)`
-/// zero bytes for each enabled collection where (a) the .bitv doesn't already
-/// exist and (b) the data directory looks fresh.
-///
-/// librqbit's `JsonSessionPersistenceStore::BitVFactory::load(info_hash)` reads
-/// this file directly by info_hash - it does not require an entry in
-/// `session.json`. With a present, all-zero bitfield, `validate_fastresume`
-/// accepts "I have 0 pieces" without iterating any pieces, and the slow
-/// `initial_check` pass is skipped entirely. Net effect: first download on a
-/// fresh install starts in seconds instead of 5–10 minutes on Windows.
+/// Write an all-zero `<info_hash>.bitv` per enabled collection when the root
+/// is fresh: librqbit then accepts "0 pieces" and skips the initial check
+/// (minutes on Windows).
 fn seed_fastresume_bitvs(
     persistence_dir: &Path,
     collections: &[&str],
@@ -330,11 +297,8 @@ pub async fn init_download_manager(
     crate::commands::media::prune_video_cache(&data_dir);
     crate::commands::media::prune_music_cache(&data_dir);
 
-    // Offline mode: no session, no torrents, no swarm traffic - the app is a
-    // launcher for whatever is already on disk. Bundled emulator configs are
-    // still extracted; they are shipped with Exodium, not with the torrent.
-    // Managers were cleared above, so a live -> offline switch at runtime
-    // drops the last Arc to the session and shuts librqbit down.
+    // Offline: no session. The bundled configs are still extracted, and
+    // the cleared managers dropped the last Arc to a previous session.
     if is_offline(&db_state.0) {
         extract_all_bundled_configs(&collections, metadata_dir.as_ref(), &data_path);
         log::info!("Offline mode: torrent engine not started (data_dir: {})", data_dir);
@@ -368,13 +332,9 @@ pub async fn init_download_manager(
         if let Ok(torrent_path) = bundled_torrent_path(col.torrent_file) {
             match DownloadManager::new_with_session(Arc::clone(&session), &torrent_path, &data_path, &persistence_dir) {
                 Ok(mgr) => {
-                    // Record which torrent this install was built against.
-                    // Nothing reads it today - the catalogue update check was
-                    // removed until there is a migration that keeps a user's
-                    // library (issue #18) - but it has to be captured NOW: once
-                    // a newer bundled torrent ships, the old baseline is gone
-                    // and the comparison can never be made retroactively.
-                    // Write-if-absent for the same reason.
+                    // Which torrent this install was built against, write-
+                    // if-absent. Unread until the catalogue migration exists
+                    // (issue #18), but unrecoverable later.
                     match TorrentIndex::infohash(&torrent_path) {
                         Ok(hash) => {
                             match db_state.0.lock() {
@@ -436,10 +396,8 @@ pub async fn init_download_manager(
     Ok(count > 0)
 }
 
-/// Extract a collection's bundled emulator-config ZIP into the torrent root,
-/// once (a lock file marks success). Called for every enabled collection in
-/// BOTH network modes - an offline install still needs the DOSBox configs
-/// that would otherwise arrive with the torrent.
+/// Extract a collection's bundled config zip into the root once (marker
+/// file). Both network modes: offline installs need the confs too.
 fn extract_bundled_configs(col: &CollectionDef, metadata_dir: Option<&PathBuf>, torrent_root: &Path) {
     let (Some(cfg_zip), Some(md)) = (col.configs_zip, metadata_dir) else {
         return;
@@ -472,32 +430,17 @@ fn extract_bundled_configs(col: &CollectionDef, metadata_dir: Option<&PathBuf>, 
     }
 }
 
-/// Apply the persisted seeding preference to a freshly created session.
-/// Push the stored transfer preferences into a freshly created session.
-///
-/// Sharing is OPT-IN: only an explicit "1" lifts the upload cap, anything else
-/// (including an unset key) caps upload at 1 KB/s. Uploading copyrighted
-/// material is a legal risk in some jurisdictions, so it must never start
-/// without consent. The user's own caps ride along, because a new session
-/// starts unlimited in both directions and would otherwise ignore them until
-/// the next time Settings was touched.
+/// Push the stored seeding consent and caps into a fresh session, which
+/// starts unlimited. Seeding is opt-in: only "1" lifts the cap (§11).
 fn apply_transfer_preferences(session: &Arc<librqbit::Session>, db_state: &State<'_, DbState>) {
     let seeding = seeding_enabled(&db_state.0);
     let (up_kbps, down_kbps) = rate_limits(&db_state.0);
     crate::torrent::manager::apply_session_limits(session, seeding, up_kbps, down_kbps);
 }
 
-/// Drop session torrents whose persisted output folder is not the current game
-/// root. Adopting them via hydrate_from_session would report progress against
-/// files librqbit writes to the OLD location - extraction probes the new one
-/// and loops on "100% but ZIP missing" forever.
-///
-/// The test is EXACT, not "somewhere under the data dir": every torrent is
-/// added with `output_folder = game_root`, so any other value is stale by
-/// definition. The looser check let the pre-single-root layout survive - a
-/// torrent persisted with `<data>/eXoWin9x` sat inside the data dir, passed,
-/// and librqbit re-created its whole file tree there seconds after the layout
-/// migration had merged it away.
+/// Drop persisted torrents whose output folder is not EXACTLY the game root
+/// (§2): librqbit keeps the folder a torrent was added with, and adopting
+/// one would write to the old tree while extraction probes the new.
 async fn evict_mismatched_session_torrents(
     session: &Arc<librqbit::Session>,
     persistence_dir: &Path,
@@ -519,10 +462,8 @@ async fn evict_mismatched_session_torrents(
         return;
     };
 
-    // Normalize for comparison: strip Windows \\?\ long-path prefix, unify
-    // slashes (output folders are written with to_long_path on Windows),
-    // trim trailing separators, and case-fold on case-insensitive platforms
-    // (C:\Games vs c:\games must not read as a mismatch).
+    // Strip the `\\?\` prefix, unify slashes, trim separators, case-fold on
+    // case-insensitive platforms.
     let normalize = |p: &str| {
         let s = p
             .trim_start_matches(r"\\?\")
@@ -618,11 +559,8 @@ pub async fn factory_reset(
         }
     };
 
-    // Quiesce librqbit BEFORE deleting files: spawned tasks hold Arcs that
-    // keep the session's writers alive past the map clear, and a live writer
-    // can re-create files after the wipe - leaving a piece ledger that
-    // claims data which no longer exists ("100% but ZIP missing" on the
-    // next setup).
+    // Stop the session BEFORE deleting: a live writer re-creates files
+    // after the wipe and the ledger then claims data that is gone.
     if let Some(mgr) = session_mgr {
         mgr.shutdown_session().await;
     }
@@ -652,10 +590,8 @@ pub async fn factory_reset(
         if !dir.is_empty() {
             let base = std::path::Path::new(&dir);
             let root = game_root(&dir);
-            // Normally the root is a folder INSIDE the data dir, so it can go
-            // whole. On a legacy install the two are the same directory - the
-            // one the user picked - and removing it would take the folder
-            // itself with it. Delete the two trees eXo puts there instead.
+            // Root == data dir on a legacy install: delete eXo's two trees,
+            // never the folder the user picked.
             let targets: Vec<PathBuf> = if root == base {
                 vec![base.join("eXo"), base.join("Content")]
             } else {
@@ -691,11 +627,8 @@ pub async fn factory_reset(
         }
     }
 
-    // Fastresume cache: clear it ONLY when the data was deleted too. The
-    // ledger describes the torrent bytes on disk - after a delete it's stale
-    // and would mislead librqbit, but in keep-data mode it's still accurate,
-    // and clearing it forced the next download into a full multi-minute
-    // revalidation of ~14k files (the exact hang the seeding avoids).
+    // The ledger describes bytes on disk: stale after a delete, still
+    // accurate in keep-data mode (clearing it costs a full revalidation).
     if delete_game_data {
         match app.path().app_data_dir() {
             Ok(config_dir) => {
@@ -728,13 +661,8 @@ pub async fn get_default_data_dir() -> Result<String, String> {
     Ok(home)
 }
 
-/// Whether a directory holds nothing Exodium would recognise as game data.
-///
-/// "Change game folder" POINTS Exodium at a folder, it does not move anything
-/// into one - so an empty target is the signature of the misunderstanding: the
-/// user meant to relocate their library and is about to end up with an empty
-/// view and their games still on the old disk. OS metadata does not count as
-/// content; a Finder visit is not an install.
+/// Holds nothing Exodium recognises as game data (OS metadata aside). An
+/// empty "Change game folder" target usually means the user expected a move.
 #[tauri::command]
 pub async fn data_dir_is_empty(path: String) -> Result<bool, String> {
     let dir = PathBuf::from(&path);
@@ -789,12 +717,8 @@ pub async fn setup_start(
     let torrent_path = bundled_torrent_path("eXoDOS.torrent")?;
     let data_path = PathBuf::from(&data_dir);
 
-    // Same session root as init_download_manager (app config dir, NOT the
-    // data dir). The old data-dir session split the piece ledger from the
-    // main flow: fastresume earned during setup was invisible afterwards
-    // (forcing a full ~14k-file revalidation on the first game download) and
-    // its data-dir persistence was cleaned by neither factory_reset nor
-    // eviction, leaving stale ledgers behind.
+    // Same session root as init_download_manager (app config dir), or the
+    // ledger earned here is invisible afterwards.
     let config_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let persistence_dir = fastresume_dir(&config_dir);
     seed_fastresume_bitvs(&persistence_dir, &["eXoDOS"], &data_path);
@@ -1065,10 +989,7 @@ pub async fn setup_from_local(
     let data_path = PathBuf::from(&data_dir);
     let persistence_dir = fastresume_dir(&config_dir);
 
-    // Same fastresume seed as init_download_manager - see notes there. This
-    // path is hit by `setup_from_local`, where the data_dir often already
-    // contains pre-extracted games, so the seed is a no-op except for
-    // truly empty cases. That's the correct behavior.
+    // No-op unless the root is truly empty (imports usually are not).
     let collection_ids: Vec<&str> = COLLECTION_MAP.iter().map(|c| c.id).collect();
     seed_fastresume_bitvs(&persistence_dir, &collection_ids, &data_path);
 
@@ -1112,11 +1033,8 @@ pub async fn setup_from_local(
         }
     }
 
-    // Backfill any LP collections that are absent from the DB.
-    // This happens when the DB was originally built from XODOSMetadata.zip (EN only) by the
-    // old setup path.  The bundled .xml.gz files always include all LP catalogs, so we import
-    // whichever collections are missing and then run match_torrent_indices to wire up
-    // torrent_source / game_torrent_index.
+    // Import collections the DB lacks (an EN-only DB from the old setup
+    // path), then match their torrent indices.
     if let Ok(metadata_dir) = bundled_metadata_dir() {
         for (col_id, torrent_index) in &torrent_indices {
             let col = match collection_def(col_id) {
@@ -1166,29 +1084,17 @@ pub async fn setup_from_local(
             }
         }
 
-        // Populate thumbnail_key for every game whose row got its hash wiped
-        // by `import_bundled_metadata`'s clear_games() + XML re-import above.
-        // Without this the library would show no covers after first-run setup
-        // even though the bundled preview pack has everything. Shared helper
-        // in db::populate_thumbnail_keys uses the same hash function as
-        // gen_thumbnails.py and generate_db.rs.
+        // The re-import above wiped thumbnail_key; without this no covers.
         {
             let conn = db_state.lock()?;
             db::populate_thumbnail_keys(&conn).map_err(|e| e.to_string())?;
         }
 
-        // Backfill shortcodes, dosbox_conf and has_thumbnail for LP games that lack them.
-        // PLP and SLP XMLs use a path format without the "!dos/<shortcode>" segment, so their
-        // shortcodes (and derived dosbox_conf) come out as NULL after import.  Mirror the same
-        // two-step approach as generate_db.rs: exact EN title match first.
-        // This is idempotent - rows already having values are unaffected.
+        // LP rows without a `!dos/<shortcode>` path (PLP, SLP) inherit
+        // shortcode and dosbox_conf from their EN game, like generate_db.
         let conn = db_state.lock()?;
-        // Every LP↔EN match is family-scoped (CLAUDE.md §1): titles and
-        // shortcodes repeat across pack families, and an unscoped match hands
-        // an LP row another family's shortcode - which orphans it from its
-        // variant group. There is deliberately NO thumbnail_key copy here:
-        // db::propagate_lp_thumbnail_keys below owns that rule, and a second
-        // copy of it drifted from the first once already.
+        // Family-scoped (§1). No thumbnail_key copy here:
+        // propagate_lp_thumbnail_keys owns that rule.
         let same = db::queries::same_group("en", "games");
         let fam_en = db::queries::family_expr("en");
         let fam_g = db::queries::family_expr("games");
@@ -1243,14 +1149,8 @@ pub async fn setup_from_local(
         ));
         log::info!("LP shortcode/dosbox_conf/has_thumbnail/thumbnail_key backfill complete");
 
-        // Pass 3: pull shortcodes for LP-exclusive games from the bundled static DB.
-        // metadata/exodium.db (built by generate_db.rs) contains 100% shortcode coverage
-        // including LP-exclusive games with no EN equivalent (via generate_shortcode()).
-        // Passes 1 & 2 only matched titles present in the EN catalog; this covers the rest.
-        //
-        // ATTACH and DETACH are issued as separate calls so DETACH always runs even when an
-        // UPDATE fails - execute_batch stops at the first error, which would leave lp_static
-        // attached for the lifetime of the connection if DETACH were part of the same batch.
+        // Pass 3: LP-exclusive shortcodes from the bundled DB. DETACH is a
+        // separate call so it runs even when the UPDATE fails.
         let static_db = metadata_dir.join("exodium.db");
         if static_db.exists() {
             let path_esc = static_db.to_string_lossy().replace('\'', "''");
@@ -1312,12 +1212,6 @@ pub async fn setup_from_local(
         // might have added new rows without keys) get their own-title hash.
         db::populate_thumbnail_keys(&conn).map_err(|e| e.to_string())?;
 
-        // Final pass: match LP titles to EN via canonical form (article-
-        // stripped, word-numbers-as-digits, etc.) and overwrite LP's
-        // thumbnail_key with EN's. Catches the ~575 LP games whose auto-
-        // generated shortcode diverged from EN but whose titles are clearly
-        // the same game (e.g. PL "Legend of Kyrandia Book 2" ↔ EN
-        // "The Legend of Kyrandia: Book Two").
         db::propagate_lp_thumbnail_keys(&conn).map_err(|e| e.to_string())?;
     }
 

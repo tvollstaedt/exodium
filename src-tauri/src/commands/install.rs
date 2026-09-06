@@ -15,10 +15,8 @@ use super::collections::{collection_game_prefix, collection_rel_game_dir, collec
 use super::games::game_op_lock;
 use super::{DbState, TorrentState};
 
-/// Per-game (last_retry_at, attempts) for stuck-download recovery in
-/// `get_download_progress`. Module-scoped so the success branch can clear
-/// the entry once the ZIP appears, preventing a stale counter from
-/// surfacing a premature error if the same game gets stuck again.
+/// Per-game (last_retry_at, attempts) for the stuck-download nudge in
+/// `get_download_progress`; cleared once the zip appears.
 static RETRY_STATE: OnceLock<
     Mutex<std::collections::HashMap<i64, (std::time::Instant, u32)>>,
 > = OnceLock::new();
@@ -78,10 +76,8 @@ pub async fn download_game(
     let is_win9x_collection = crate::commands::collections::collection_def(source)
         .is_some_and(|c| c.launcher == crate::commands::collections::Launcher::Win9x);
 
-    // Win9x games need the shared support payload (parent OS VHDs +
-    // emulators) from utilWin9x.zip before they can launch; queued further
-    // down with the first Win9x game download, but the disk preflight has to
-    // budget it here (2.5 GB zip + 2.5 GB inner temp + ~2.5 GB extracted).
+    // The Win9x support payload is queued below; the disk preflight has to
+    // budget it here (zip + inner temp + extracted, ~7.5 GB).
     let win9x_support_missing = is_win9x_collection
         && !crate::commands::win9x::win9x_support_ready(
             &manager.torrent_root(),
@@ -93,11 +89,8 @@ pub async fn download_game(
         queries::get_config(&conn, "data_dir").ok().flatten()
     };
 
-    // On macOS/Linux the emulator itself is a content pack; queue it with
-    // the download the same way the support files are. Resolver-gated, so a
-    // PATH/Flatpak/system install (or an already-installed pack) never pays
-    // for it - and Windows never needs it (eXo's EXTWin9x.zip carries both
-    // builds). None also when the manifest has no installable source yet.
+    // macOS/Linux: the emulator pack rides along, resolver-gated so a
+    // system install never pays for it.
     let win9x_emulator_pack = if is_win9x_collection && !cfg!(windows) {
         let dd = data_dir.clone().unwrap_or_default();
         crate::commands::win9x::emulator_pack_for_variant(game.dosbox_variant.as_deref())
@@ -117,11 +110,8 @@ pub async fn download_game(
         None
     };
 
-    // Disk-space preflight: refusing upfront beats a multi-GB torrent (plus
-    // ~equal-sized extraction) failing halfway with a partial install. Runs
-    // BEFORE set_in_library so a refusal doesn't leave a phantom "My Games"
-    // entry. Downloaded bytes on disk are credited ONCE (they only reduce
-    // the remaining download; the extraction target still needs full size).
+    // Disk preflight before set_in_library, so a refusal leaves no phantom
+    // entry. Bytes already on disk reduce the download, not the extraction.
     if let Some(size) = game.download_size {
         if let Some(dir) = data_dir.as_deref() {
             let on_disk = manager
@@ -194,11 +184,8 @@ pub async fn download_game(
             }
         }
 
-        // Music support: the MT-32 ROMs + SoundCanvas soundfont live in
-        // eXo/util/util.zip (~630 MB; NOT in !DOSmetadata.zip, which is
-        // configs only). Fetch it once, when a game whose config actually
-        // requests MIDI is downloaded - ~1/3 of the catalog does; the rest
-        // never pays the download.
+        // MT-32 ROMs and soundfont (util.zip, ~630 MB) fetched once, with
+        // the first game whose conf requests MIDI.
         let mt32_dir = main_mgr.torrent_root().join("eXo/mt32");
         let needs_midi_assets = !mt32_dir.exists()
             && game_requests_midi(&main_mgr.torrent_root(), game.dosbox_conf.as_deref());
@@ -306,13 +293,8 @@ pub async fn get_download_progress(
         }
     }
 
-    // Disk-based completion fallback: librqbit's in-memory file_progress can
-    // stall short of total_bytes for files that are in fact fully written to
-    // disk - observed when multiple parallel downloads share a torrent and
-    // the per-file stat lags behind actual assembly. The bug manifests as
-    // "Waiting for last pieces..." forever, only recovering on app restart
-    // (when session state is reloaded from disk). If the target file exists
-    // with the expected size, trust the disk over the stats.
+    // librqbit's per-file stat can stall short of total for a file fully
+    // on disk ("Waiting for last pieces..." forever): trust the disk size.
     if let Some(ref mut p) = progress {
         if !p.finished && p.total_bytes > 0 && p.progress >= 0.99 {
             if let Some(zip_path) = manager.file_output_path(game_idx) {
@@ -404,12 +386,8 @@ pub async fn get_download_progress(
                         };
 
                         tauri::async_runtime::spawn(async move {
-                            // Serialize against uninstall/launch/download of the
-                            // same game. Without this, Uninstall during a multi-GB
-                            // extraction renames the half-extracted dir into !save
-                            // (garbage backup) and the extractor then re-creates the
-                            // dir and re-marks the game installed AFTER uninstall
-                            // cleared the flag.
+                            // Under the game lock: an uninstall mid-extraction
+                            // would back up a half-extracted dir.
                             let op_lock = game_op_lock(game_id);
                             let _op_guard = op_lock.lock().await;
                             // Re-check: uninstall/cancel may have removed the ZIP
@@ -455,13 +433,10 @@ pub async fn get_download_progress(
                         });
                     }
                 } else {
-                    // ZIP not on disk despite torrent reporting 100%.
-                    // Common cause: pieces covering this file were received as a side effect of
-                    // downloading a neighboring file, but librqbit never assembled the pieces
-                    // into the output file. A plain re-select is a no-op when librqbit's view
-                    // of the file is "already complete", so we toggle the selection - deselect,
-                    // briefly yield, then re-add - to nudge librqbit into re-evaluating the file.
-                    // Throttled to one attempt every 5 seconds to avoid spamming the session.
+                    // 100% but no zip: the pieces arrived with a neighbour
+                    // and were never assembled. Toggle the selection
+                    // (deselect, yield, re-add) to make librqbit look again;
+                    // one attempt per 5 s.
                     log::warn!(
                         "Download reports 100% but ZIP missing: {}. Re-requesting file assembly.",
                         zip_path.display()
@@ -472,10 +447,8 @@ pub async fn get_download_progress(
                     // and surface an error so the UI stops polling forever and the user
                     // can take action (cancel + re-download).
                     const MAX_ATTEMPTS: u32 = 60;
-                    // Returns (attempts_so_far, did_increment_this_poll). The counter only
-                    // ticks every 5 s; in-between polls observe the same value with
-                    // did_increment=false, so error/recovery decisions stay stable across
-                    // every poll instead of flickering with the throttle window.
+                    // (attempts, ticked): the counter moves once per 5 s, so
+                    // the polls in between see a stable value.
                     let (attempts, ticked) = retry_state().lock()
                         .map(|mut map| {
                             // Prune stale entries (>2 minutes idle) to bound memory.
@@ -552,10 +525,8 @@ pub async fn cancel_download(
         // deselect it when no other in-flight download still needs it.
         let gamedata_idx = match game.gamedata_torrent_index {
             Some(gd) => {
-                // in_library alone (not installed=0): a variant whose game
-                // ZIP already extracted may still be fetching this GameData.
-                // Over-retention for long-installed variants is harmless -
-                // their GameData is complete anyway.
+                // in_library, not installed=0: an extracted variant may still
+                // be fetching this GameData.
                 let still_needed: i64 = conn
                     .query_row(
                         "SELECT COUNT(*) FROM games \
@@ -617,10 +588,8 @@ pub async fn cancel_download(
     Ok(())
 }
 
-/// In-flight + failure-backoff guard for the !DOSmetadata.zip extraction.
-/// Without it, every 1 Hz progress poll during the (long) extraction spawned
-/// another overlapping full extraction - and a corrupt ZIP retried forever.
-/// State: (in_flight, last_failure).
+/// (in_flight, last_failure) for the !DOSmetadata.zip extraction: one at a
+/// time, and a corrupt zip is not retried every poll.
 static DOSMETA_EXTRACT: OnceLock<Mutex<(bool, Option<std::time::Instant>)>> = OnceLock::new();
 
 fn dosmeta_state() -> &'static Mutex<(bool, Option<std::time::Instant>)> {
@@ -873,10 +842,8 @@ pub(crate) fn extract_game_zip(zip_path: &std::path::Path, dest: &std::path::Pat
     archive.extract(dest)?;
     log::info!("Extracted: {} -> {}", zip_path.display(), dest.display());
 
-    // Restore saves if available
-    // Saves are at !save/<shortcode>/ which could be:
-    // - In dest itself (e.g., dest = .../eXo/eXoDOS/, saves at .../eXo/eXoDOS/!save/SQ5/)
-    // - Or relative to the game dir's grandparent for LP games
+    // Restore `!save/<shortcode>` from beside the game dir or one level up
+    // (the legacy shared location).
     if let Some(sc) = shortcode {
         let game_dir = dest.join(&sc);
         // Search for !save in dest and parent directories

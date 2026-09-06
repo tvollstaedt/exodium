@@ -13,11 +13,8 @@ export async function getFavoriteGames(): Promise<Game[]> {
   return result.games;
 }
 
-// Bumped with the gameId whenever a game's installed/in_library state changes
-// (download-install complete, uninstall). Consumers (Library shelves, detail
-// panel) watch this to refresh derived views that come from separate DB
-// queries. The value is `{ id, ts }` so Solid treats every change as distinct
-// even when the same game is uninstalled-then-reinstalled in rapid succession.
+// Bumped when a game's installed/in_library state changes; `{ id, ts }` so
+// every change is distinct.
 const [lastGameLibraryChange, setLastGameLibraryChange] =
   createSignal<{ id: number; ts: number } | null>(null);
 export { lastGameLibraryChange };
@@ -82,10 +79,7 @@ export async function fetchGames() {
   }
 }
 
-/// Re-fetch every already-loaded row in one request and swap the list in
-/// place. For background changes (install finished, uninstall) - a plain
-/// fetchGames() would reset infinite scroll to page 1 and yank the user's
-/// Browse position while they're reading.
+/// Re-fetch every loaded row in place (fetchGames() would reset the scroll).
 export async function refreshLoadedGames() {
   const count = games().length;
   if (count === 0) {

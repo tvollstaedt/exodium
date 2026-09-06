@@ -34,10 +34,7 @@ export function Lightbox(props: LightboxProps) {
 
   const clampIdx = (i: number) => Math.max(0, Math.min(i, count() - 1));
 
-  // Jump to the start entry ONLY when the lightbox opens. A plain effect
-  // also tracked count() here, and count changes while open - the preview
-  // video finishing its probe adds entry 0 - which snapped the view back to
-  // the start entry mid-browsing.
+  // Jump to the start entry on open only; count() changes while open.
   createEffect(on(() => props.open, (open) => {
     if (open) {
       setIdx(clampIdx(props.startIndex));
@@ -45,10 +42,7 @@ export function Lightbox(props: LightboxProps) {
     }
   }));
 
-  // When the video lands while the lightbox is open, every image shifts one
-  // entry to the right - follow the shift so the SAME image stays on screen.
-  // Effect-accumulator carries the previous value; `on(..., { defer })` can't
-  // (its skipped first run never records prevInput).
+  // A video landing shifts every image right by one; follow it.
   createEffect((had: boolean) => {
     const has = hasVideo();
     if (has !== had && props.open) {

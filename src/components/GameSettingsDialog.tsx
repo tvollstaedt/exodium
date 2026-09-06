@@ -19,10 +19,8 @@ export function GameSettingsDialog(props: GameSettingsDialogProps) {
   const [customConf, setCustomConf] = createSignal<string>("");
   const [saving, setSaving] = createSignal(false);
   const [saveError, setSaveError] = createSignal<string>("");
-  /** Whether ECE COULD run this game here (platform + extracted build), which
-   *  is what decides whether the choice is offered. Asking what actually runs
-   *  would hide the control as soon as someone picks Staging, leaving no way
-   *  back to eXo's choice. */
+  /** ECE could run this game here (decides whether the choice is offered;
+   *  the override is ignored so Staging does not hide the way back). */
   const [eceIsDefault, setEceIsDefault] = createSignal(false);
   /** ...and what would run it with the choice currently in the dialog, which
    *  is what the shader note has to reflect - switching the engine has to take

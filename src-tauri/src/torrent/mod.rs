@@ -97,10 +97,8 @@ impl TorrentIndex {
         self.files.iter().find(|f| f.path.ends_with(suffix))
     }
 
-    /// Find the game ZIP and optional GameData ZIP for a given game title.
-    /// Game title format: "Capitalism (1995)"
-    /// Game ZIP path: "eXo/eXoDOS/Capitalism (1995).zip"
-    /// GameData ZIP path: "Content/GameData/eXoDOS/Capitalism (1995).zip"
+    /// The game zip (`eXo/eXoDOS/<Title (Year)>.zip`) and, if any, its GameData
+    /// zip (`Content/GameData/eXoDOS/…`).
     pub fn find_game_files(
         &self,
         game_title: &str,
@@ -108,14 +106,8 @@ impl TorrentIndex {
         let game_zip = format!("{}.zip", game_title);
         let gamedata_prefix = "Content/GameData/eXoDOS/";
 
-        // Anchor the match on a path boundary: a bare ends_with would let
-        // "Billiards (1993).zip" match "eXo/eXoDOS/4 Balls Billiards (1993).zip"
-        // (34 such collisions across the bundled torrents).
-        //
-        // Case-insensitive: eXo authored the launcher bats and the zips on a
-        // case-insensitive filesystem and they disagree in places ("I can be a
-        // Dinosaur Finder (1997).bat" vs "I Can be a ... .zip"), which left
-        // such games permanently unmatched.
+        // Anchored on a path boundary ("Billiards" must not match "4 Balls
+        // Billiards") and case-insensitive (bat and zip disagree in places).
         let game_zip_anchored = format!("/{}", game_zip);
         let game = self.files.iter().find(|f| {
             (f.path.eq_ignore_ascii_case(&game_zip)

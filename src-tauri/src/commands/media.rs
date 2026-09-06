@@ -1,22 +1,6 @@
-//! Game preview videos and theme tracks.
-//!
-//! eXoDOS ships one MP4 per game inside that game's `GameData/<Title>.zip`,
-//! next to the manual, and for about half the games one theme track under
-//! `Music/MS-DOS/`. Those archives run from 2 MB to 1.1 GB, so playing a
-//! 2.5 MB preview must not mean fetching the archive: `torrent::zip_range`
-//! reads the archive's directory from its tail, then only the video's own
-//! bytes, over a torrent stream that fetches pieces on demand. Measured on the
-//! real catalogue: 27 MB pulled out of a 1163 MB archive.
-//!
-//! Fetching runs as a background job because a torrent read can block for a
-//! minute waiting for peers, and the panel starts one automatically when a game
-//! is opened - so it must be pollable and cancellable, exactly like downloads.
-//!
-//! Resolution order, cheapest first:
-//!   1. the extracted cache from a previous call
-//!   2. the archive already on disk (installed game, or a partial download
-//!      that happens to cover the video)
-//!   3. the torrent stream
+//! Preview videos and theme tracks, read out of `GameData/<Title>.zip` by
+//! seeking (`torrent::zip_range`, §14) as pollable, cancellable background
+//! jobs. Resolution: cache, archive on disk, torrent stream.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -37,12 +21,8 @@ use super::{DbState, TorrentState};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct VideoStatus {
-    /// "probing" | "fetching" | "ready" | "none" | "error"
-    ///
-    /// The split matters for the UI: "probing" means we are reading the
-    /// archive's index and do not yet know whether a video exists at all, so
-    /// there is nothing honest to announce. Only "fetching" means a video was
-    /// found and its bytes are on the way.
+    /// "probing" (index read, existence unknown) | "fetching" | "ready" |
+    /// "none" | "error"
     pub phase: String,
     /// 0..1 while fetching.
     pub progress: f64,
@@ -52,11 +32,8 @@ pub struct VideoStatus {
     pub error: Option<String>,
 }
 
-/// The `error` token that marks a phase "none" which is NOT an inventory
-/// answer: no torrent session exists (offline mode), so the archive was never
-/// asked at all. "none" is otherwise permanent and the frontend caches it, so
-/// this has to stay distinguishable - and it is a stable token the frontend
-/// keys on (`phase == "none" && error != null`), not a message to show.
+/// `error` token on a provisional "none": no session (offline), so the
+/// archive was never asked. The frontend keys on it and does not cache.
 pub const OFFLINE_TOKEN: &str = "offline";
 
 impl VideoStatus {
@@ -119,12 +96,8 @@ impl Default for MusicState {
     }
 }
 
-/// What is being pulled out of a GameData archive. The preview video and the
-/// theme track sit in the same zip and travel the same road - index from the
-/// archive's tail, one entry by offset, a file in the cache, a marker when
-/// there is nothing - so the kind is a parameter of one pipeline rather than
-/// a second copy of it. Only the finder, the cache folder and the file naming
-/// differ.
+/// Which entry of a GameData archive: one pipeline, parameterised by the
+/// finder, the cache dir and the file naming.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MediaKind {
     Video,
@@ -149,15 +122,8 @@ impl MediaKind {
         PathBuf::from(data_dir).join("content").join(name)
     }
 
-    /// Marks an archive as having no entry of this kind.
-    ///
-    /// Whether a game has one is only knowable from the archive's own index,
-    /// which sits at the end of a file in the torrent - so the answer costs a
-    /// piece download (8 MB), every time, for a game that turns out to have
-    /// nothing. The catalogue cannot help: its `MissingVideo` flag said "true"
-    /// for 16 of the 24 sampled games that do have one, and `MissingMusic` is
-    /// LaunchBox's default rather than an inventory. So the answer is written
-    /// down and the question asked once per archive, ever.
+    /// Marker for "this archive has no such entry": the question costs one
+    /// piece per archive and the catalogue's flags are unreliable (§14).
     fn marker(self, data_dir: &str, collection: &str, file_index: usize) -> PathBuf {
         let ext = match self {
             MediaKind::Video => "novideo",
@@ -287,15 +253,9 @@ fn prune_media_cache(kind: MediaKind, data_dir: &str, max_bytes: u64) {
 
 // ── Resolution ───────────────────────────────────────────────────────────────
 
-/// The GameData archive that holds a game's extras: (torrent file index,
-/// collection id).
-///
-/// Extras live in the English archive only: EVERY localized row has a NULL
-/// gamedata index (DE 484/484, ES 413/413, PL 56/56), so a German selection
-/// would otherwise report "nothing here" for a game that has a video and a
-/// theme. The sibling lookup stays within the pack family: shortcodes are
-/// unique per family, not globally, so an unqualified match would hand a
-/// Win3x game the DOS game's archive when the codes collide.
+/// The GameData archive with a game's extras: (torrent index, collection).
+/// Localized rows have none of their own, so it is the EN sibling's, looked
+/// up within the pack family (§1, §14).
 pub(crate) fn resolve_gamedata(conn: &rusqlite::Connection, game: &crate::models::Game) -> (Option<i64>, String) {
     if let Some(idx) = game.gamedata_torrent_index {
         return (
@@ -542,12 +502,8 @@ async fn fetch_entry(
     Ok(Some(path))
 }
 
-/// A stream waits for pieces indefinitely, and pieces nobody seeds never
-/// arrive - one such game would otherwise hold a slot for the whole session
-/// (observed: AH-3 ThunderStrike sat in "fetching" for 20 minutes). Both reads
-/// get a deadline; the directory's is shorter because it is a few kilobytes
-/// from the archive's tail, so slowness there means the pieces are unavailable
-/// rather than large.
+/// A stream waits for unseeded pieces forever, so both reads have deadlines;
+/// the directory is a few KB, so slowness there means unavailable.
 const DIRECTORY_TIMEOUT: Duration = Duration::from_secs(45);
 const ENTRY_TIMEOUT: Duration = Duration::from_secs(300);
 
@@ -622,32 +578,16 @@ where
     Ok(Some((bytes, entry.name.clone())))
 }
 
-/// Whether mounting a `<video>` element is SAFE on this system.
-///
-/// On Linux the webview plays media through GStreamer, and a missing
-/// `autoaudiosink` does not degrade gracefully: WebKit's pipeline setup hits a
-/// NULL instance ("GStreamer element autoaudiosink not found", then
-/// g_signal_connect_data assertion failures) and the WebKitWebProcess wedges -
-/// the whole app freezes the moment a preview starts. The frontend asks this
-/// once and simply never mounts a video when the answer is no; a fetched
-/// preview nobody can watch is wasted torrent traffic anyway.
-///
-/// The .deb/.rpm declare the GStreamer packages as dependencies, so this
-/// mainly guards the AppImage - which needs the OPPOSITE probe: linuxdeploy
-/// bundles the GStreamer core (a WebKit dependency), and plugins only load
-/// into the core they were built against, so the host's plugins are invisible
-/// to the app's WebKit no matter what gst-inspect says. Only plugins bundled
-/// next to that core (bundleMediaFramework) count there.
+/// Is mounting a `<video>` SAFE here? On Linux a missing GStreamer
+/// `autoaudiosink` wedges the WebKit process. Inside the AppImage only the
+/// plugins bundled next to its GStreamer core count (§14).
 #[tauri::command]
 pub async fn video_playback_supported() -> bool {
     #[cfg(target_os = "linux")]
     {
         static SUPPORTED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
         *SUPPORTED.get_or_init(|| {
-            // Two independent requirements, and each fails differently:
-            // no autoaudiosink wedges the WebKit process outright, no H.264
-            // decoder plays an eternally black rectangle. Both mean the
-            // preview feature should stand down and say why.
+            // No audio sink wedges WebKit, no H.264 decoder plays black.
             let (audio, h264) = if let Some(lib) = appimage_bundled_gst_lib() {
                 let plugins = lib.join("gstreamer-1.0");
                 (
@@ -683,20 +623,15 @@ pub async fn video_playback_supported() -> bool {
     true
 }
 
-/// The lib dir of an AppImage that carries its own GStreamer core, when
-/// running inside one. APPDIR is exported by the AppRun hooks (also for an
-/// extracted tree); the core check guards the day bundling stops, at which
-/// point the host probe below becomes the right question again.
+/// The AppImage's lib dir when it carries its own GStreamer core.
 #[cfg(target_os = "linux")]
 fn appimage_bundled_gst_lib() -> Option<std::path::PathBuf> {
     let lib = std::path::PathBuf::from(std::env::var_os("APPDIR")?).join("usr/lib");
     lib.join("libgstreamer-1.0.so.0").exists().then_some(lib)
 }
 
-/// Whether GStreamer offers any of the named elements, or - when gst-inspect
-/// is not installed - whether any of the named plugin files exists in the
-/// usual multiarch homes. Erring towards "no" is the safe direction: a
-/// skipped preview beats a frozen app or a black box.
+/// Any of the named elements via gst-inspect, else any of the plugin files
+/// in the multiarch dirs. "No" is the safe error.
 #[cfg(target_os = "linux")]
 fn gst_has_any(elements: &[&str], plugin_files: &[&str]) -> bool {
     let mut inspect_ran = false;
@@ -774,12 +709,9 @@ pub struct MusicCandidate {
     pub music_file: String,
 }
 
-/// Random games whose archive is expected to hold a playable theme, for the
-/// shuffle queue. The hint column is the catalogue's word; an archive that
-/// answered "nothing here" before is skipped via its marker so a stale hint
-/// costs one piece, ever. `gamedata_torrent_index IS NOT NULL` is what makes
-/// this "the whole eXoDOS family": localized rows carry no archive of their
-/// own and would only duplicate their English game.
+/// Random games whose archive should hold a playable theme (catalogue hint,
+/// minus archives whose marker says otherwise). EN rows only: localized
+/// rows have no archive of their own.
 #[tauri::command]
 pub async fn music_shuffle_candidates(
     db_state: State<'_, DbState>,
@@ -840,11 +772,9 @@ pub struct MusicCacheIndex {
 /// A cache file's `(collection, gamedata file index)` - what its name encodes.
 type CacheKey = (String, i64);
 
-/// Split a music cache directory into the keys it answers for: the tracks it
-/// holds, and the archives it recorded as empty.
-///
-/// The stem is `<collection>_<index>` and collection ids carry underscores of
-/// their own (`eXoDOS_GLP`), so only the LAST one separates the two.
+/// The cache dir's keys: cached tracks and archives recorded as empty. Stems
+/// are `<collection>_<index>`; collection ids carry underscores, so split at
+/// the LAST one.
 fn scan_music_cache(dir: &Path) -> (Vec<CacheKey>, Vec<CacheKey>) {
     let (mut cached, mut none) = (Vec::new(), Vec::new());
     let Ok(entries) = std::fs::read_dir(dir) else {
@@ -925,11 +855,8 @@ pub struct MusicSupport {
     pub ogg: bool,
 }
 
-/// Which theme formats the webview can play. Same reasoning as
-/// `video_playback_supported`: on Linux the answer is GStreamer's, and inside
-/// an AppImage only the bundled plugins count. Per format rather than one
-/// flag, so a missing vorbis decoder only skips the .ogg candidates instead
-/// of standing the feature down.
+/// Which theme formats play here (per format: a missing vorbis decoder only
+/// skips .ogg). Same GStreamer rules as `video_playback_supported`.
 #[tauri::command]
 pub async fn music_playback_supported() -> MusicSupport {
     #[cfg(target_os = "linux")]
@@ -1168,20 +1095,10 @@ mod tests {
 
 // ── Localhost media server (Linux) ───────────────────────────────────────────
 //
-// WebKitGTK's media player cannot pull media out of a custom URI scheme
-// handler: a <video> whose src is served through one ends with
-// MEDIA_ERR_SRC_NOT_SUPPORTED / networkState NO_SOURCE (measured on WebKitGTK
-// 2.52 with a minimal harness - the same file plays fine from file://).
-// Images are unaffected, so the asset protocol stays for those; only <video>
-// sources go through this 127.0.0.1 HTTP server, whose responses tower-http's
-// ServeFile answers with proper Range support (GStreamer seeks).
-//
-// URLs carry an opaque per-session token instead of a path: the HTTP side
-// never parses paths, an unknown token is a 404, and only files the backend
-// itself registered (after the same under-the-data-dir check the asset scope
-// enforces) are reachable. Bound to 127.0.0.1; other local processes can
-// fetch registered previews, which is the same exposure any local media
-// server has.
+// WebKitGTK cannot play media through a custom URI scheme, so <video> and
+// <audio> sources are served from 127.0.0.1 with Range support (§14). URLs
+// carry an opaque per-session token; only files the backend registered
+// (same under-the-data-dir check as the asset scope) are reachable.
 
 /// Token -> file map plus the lazily-started server's port. The map sits
 /// behind its own Arc because the axum router holds a clone of it.

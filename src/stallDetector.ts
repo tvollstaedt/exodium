@@ -1,12 +1,8 @@
 import { createSignal, createEffect, onCleanup } from "solid-js";
 
-/** Seconds of no movement before a progress bar switches to the indeterminate
- *  sweep. Deliberately long: torrent file progress lands one whole piece at a
- *  time, so a healthy download is bursty - several flat seconds, then a jump.
- *  At the original 3s the bar oscillated between the real value and the sweep
- *  for the entire download. 15s matches STALL_HINT_SECS in stores/downloads.ts,
- *  so the sweep starts at the same moment the status text says "waiting for
- *  peers…" instead of contradicting it. */
+/** Flat time before a progress bar sweeps. Long, because progress lands one
+ *  whole piece at a time; equals STALL_HINT_SECS in stores/downloads.ts so
+ *  the sweep and the "waiting for peers" text agree. */
 export const STALL_MS = 15000;
 
 /** Signal that flips true when `value` hasn't changed for `stallMs`, and back

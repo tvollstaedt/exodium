@@ -68,11 +68,8 @@ function App() {
   /** Set once the user declined, so Settings can still offer the merge. */
   const [layoutSkipped, setLayoutSkipped] = createSignal(false);
 
-  /** Move the old folders, then rebuild everything derived from them.
-   *
-   *  Blocking on purpose (see the overlay below): it renames thousands of
-   *  entries and re-checks the library afterwards, and a launcher that looks
-   *  idle while doing that invites a second click. */
+  /** Merge the old folders and rebuild what derives from them. Blocking on
+   *  purpose: an idle-looking launcher invites a second click. */
   const [migrateStep, setMigrateStep] = createSignal("");
   const runLayoutMigration = async () => {
     setMigrating(true);
@@ -115,10 +112,7 @@ function App() {
   };
 
   onMount(() => {
-    // Suppress the webview's native right-click menu app-wide (Inspect,
-    // Reload, ... don't belong in a launcher). Component-level custom menus
-    // (GameCard) hook the same event and render their own UI, unaffected.
-    // Kept enabled in dev so Inspect Element stays reachable.
+    // No native context menu in production; components render their own.
     if (!import.meta.env.DEV) {
       const suppress = (e: MouseEvent) => {
         // Editable fields keep the native menu - it carries cut/copy/paste.
@@ -132,11 +126,8 @@ function App() {
   });
 
   onMount(async () => {
-    // Linux may run WebKit's fallback renderer: lib.rs still disables the
-    // DMA-BUF path on NVIDIA/X11, which is what the AppImage always is (see
-    // CLAUDE.md §17). Backdrop blur is a per-frame CPU repaint there, and the
-    // renderer in use is not observable from here, so main.css drops it for
-    // all of Linux under this class.
+    // Linux may be on WebKit's software renderer (§17), where backdrop blur
+    // is a per-frame CPU repaint; main.css drops it under this class.
     if (navigator.userAgent.includes("Linux")) {
       document.documentElement.classList.add("soft-render");
     }
@@ -172,12 +163,8 @@ function App() {
         // long as the app does.
         startTransferPolling();
         loadSeeding();
-        // Re-check what is actually on disk. Install flags are stored per
-        // game, so anything that moved, was deleted or was added behind the
-        // app's back (a folder moved to another drive, a manual copy) would
-        // otherwise stay wrong until the user found the button in Settings.
-        // The backend refuses to run when the data dir holds no collection at
-        // all, so an unmounted drive cannot wipe the library.
+        // Re-check the disk: install flags are per game and go stale behind
+        // the app's back. The backend refuses an empty data dir.
         scanInstalledGames().then(() => fetchGames()).catch(() => {});
         // Installs made before the single-root layout keep their games in
         // per-collection folders. Ask before touching them - it moves files.
@@ -214,10 +201,8 @@ function App() {
     loadSeeding();
     if (!isOffline()) { checkForAppUpdate(); }
 
-    // Show the welcome modal if the user hasn't seen it yet - but never in
-    // offline mode: it exists to offer downloads, which the user just declined.
-    // `welcome_seen` stays unwritten, and the startup path above re-offers it on
-    // the first online session; the packs are in Settings either way.
+    // Welcome modal once, never offline (it offers downloads); unwritten
+    // `welcome_seen` re-offers it on the first online session.
     const welcomeSeen = await getConfig("welcome_seen");
     if (welcomeSeen !== "1" && !isOffline()) {
       setShowWelcomeModal(true);
@@ -231,11 +216,8 @@ function App() {
   const handleChangeDataDir = async () => {
     const selected = await open({ title: "Select new data directory", directory: true });
     if (!selected) return;
-    // An EMPTY target is the signature of the misreading this setting invites:
-    // Change points Exodium at a folder, it never moves anything into one. Ask
-    // before leaving someone with an empty library and their games still on
-    // the old disk. Only worth asking if they HAVE anything to leave behind -
-    // a user with nothing downloaded is just choosing where to start.
+    // An empty target usually means the user expected a move: ask, but only
+    // when there is something to leave behind.
     const [targetEmpty, currentEmpty] = await Promise.all([
       dataDirIsEmpty(selected).catch(() => false),
       dataDir() ? dataDirIsEmpty(dataDir()).catch(() => true) : Promise.resolve(true),
@@ -247,12 +229,8 @@ function App() {
     await applyDataDir(selected);
   };
 
-  /** Everything derived from the old location has to be rebuilt, and the
-   *  install flags most of all: they are per-game rows in the database, so
-   *  after a change every game still claims to live at the old path and Play
-   *  fails with "not installed" until something re-checks the disk. Doing that
-   *  here (and reporting the count) also answers the question the user
-   *  actually has at this moment - did it find my games? */
+  /** Persist the dir and rebuild what derives from it; the rescan's count
+   *  answers "did it find my games?". */
   const applyDataDir = async (selected: string) => {
     await setConfig("data_dir", selected);
     setDataDir(selected);
@@ -288,11 +266,8 @@ function App() {
   const [showResetDialog, setShowResetDialog] = createSignal(false);
   const [deleteGameData, setDeleteGameData] = createSignal(false);
 
-  // Global launch-time overrides (persisted via DB config table, read by the
-  // Rust launch_game command, layered as a last-wins -conf fragment).
-  // Initial values MUST mirror the backend defaults in launch_game (unset
-  // global_glshader means crt-auto there), so the UI is truthful even
-  // before loadGameDefaults resolves.
+  // Global launch overrides; initial values mirror launch_game's defaults
+  // (unset global_glshader = crt-auto) so the UI is right before the load.
   const [crtAuto, setCrtAuto] = createSignal(true);
   const [defaultFullscreen, setDefaultFullscreen] = createSignal(false);
 
@@ -485,11 +460,7 @@ function App() {
     setShowResetDialog(false);
     setDeleteGameData(false);
     setResetError("");
-    // Block the UI immediately so the user doesn't see a stale Library frame
-    // while the reset (which may take seconds - DB clear + recursive deletes
-    // for game folders + content packs) runs to completion. Closing the
-    // settings dialog FIRST then setting `resetting()` puts the overlay over
-    // whatever was behind the dialog (Library or Setup).
+    // Close the dialog first, then overlay whatever was behind it.
     setShowSettings(false);
     setResetting(true);
     console.log("[reset] calling factoryReset, deleteGameData=", doDelete);
@@ -507,12 +478,8 @@ function App() {
     }
   };
 
-  /** One button for three states: with a track loaded it toggles the bar,
-   *  with none it starts the shuffle - which is the only way music ever
-   *  begins without a game on screen. */
-  // A pick still being fetched counts as a player: the bar is already up
-  // showing it, so the button toggles that bar instead of stacking a second
-  // shuffle behind the first.
+  /** With a track loaded (or being fetched) the button toggles the bar,
+   *  otherwise it starts the shuffle. */
   const musicLoaded = () => currentTrack() != null || wantedTrack() != null;
 
   const musicButtonLabel = () => {

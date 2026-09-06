@@ -17,22 +17,9 @@ pub enum DbError {
 
 pub type DbResult<T> = Result<T, DbError>;
 
-/// Version of the bundled game catalog. Bump whenever the bundled
-/// exodium.db ships materially different catalog data (new eXoDOS torrent,
-/// corrected torrent indices, ...). At startup, an installed DB whose
-/// `catalog_version` config is older gets its catalog rows refreshed from
-/// the bundled DB via `refresh_catalog` - user state is preserved.
-/// History: 1 = pre-versioning (0.6.x), 2 = path-anchored torrent indices,
-/// 3 = curated playlists shipped in the bundled DB, 4 = eXoWin3x,
-/// 5 = case-insensitive torrent matching (recovers games whose bat and zip
-/// disagree in case, e.g. "I Can be a Dinosaur Finder"), 6 = eXoWin9x,
-/// 7 = rating_votes ("Top rated" orders by vote count inside a star bucket),
-/// 8 = pack sentinels dropped, family-scoped LP shortcodes/keys, normalized
-/// language codes, 9 = LP rows linked to their EN game by canonical title
-/// (they inherit its dosbox.conf and could not launch without it),
-/// 10 = Spanish/Polish rows carry eXo's own directory code and config path,
-/// which also merges them into their English game's card, 11 = music_file
-/// hint (theme track name from LaunchBox MusicPath/MissingMusic).
+/// Version of the bundled catalog. Raise BEFORE `pnpm run gen-db` (the
+/// artefact stamps itself); an installed DB behind it is refreshed at
+/// startup by `refresh_catalog`, user state preserved. History in git.
 pub const CATALOG_VERSION: i64 = 12;
 
 /// Open (or create) the Exodium database at the given path.
@@ -67,15 +54,10 @@ fn table_columns(conn: &Connection, table: &str) -> DbResult<Vec<String>> {
     Ok(cols)
 }
 
-/// Refresh catalog data from a newer bundled DB while preserving user state.
-///
-/// Rows are matched on `application_path` (unique in practice; the few rows
-/// with an empty path fall back to title+language). Matched rows are updated
-/// in place so `games.id` stays stable and `game_config` FKs remain valid. Rows new in the bundled catalog are inserted with clean
-/// user state; installed rows that vanished from the catalog are kept and
-/// logged (their torrent indices may be stale).
-///
-/// Returns (updated, inserted).
+/// Refresh catalog columns from a newer bundled DB, user state preserved.
+/// Rows match on `application_path` (title+language when empty) and are
+/// updated in place, so `games.id` and `game_config` stay valid; new rows
+/// are inserted, vanished ones kept. Returns (updated, inserted).
 pub fn refresh_catalog(conn: &mut Connection, bundled_db: &Path) -> DbResult<(usize, usize)> {
     conn.execute(
         "ATTACH DATABASE ?1 AS cat",
@@ -95,11 +77,8 @@ pub fn refresh_catalog(conn: &mut Connection, bundled_db: &Path) -> DbResult<(us
             .map(|c| c.as_str())
             .collect();
 
-        // The rows-match rule: by application_path when the catalog row has
-        // one, by title+language otherwise. IMPORTANT: this must stay split
-        // into separate equality-joined statements - a single OR'd predicate
-        // defeats the query planner and turns each statement into a 9k x 9k
-        // nested scan (~70 s of frozen startup, measured).
+        // Two equality-joined statements, never one OR'd predicate: that
+        // defeats the planner (9k x 9k scan, ~70 s at startup).
         let tx = conn.unchecked_transaction()?;
 
         // Equality joins need an index to be cheap; the games table has none
@@ -166,16 +145,9 @@ pub fn refresh_catalog(conn: &mut Connection, bundled_db: &Path) -> DbResult<(us
             );
         }
 
-        // ── Curated playlist sync ─────────────────────────────────────
-        // Curated rows are catalog content with nothing user-owned hanging
-        // off them, so the sync is a plain rebuild: drop them all (their
-        // memberships cascade) and re-insert from the bundled catalog.
-        // UNIQUE is (kind, name), so a user playlist sharing a curated name
-        // can never collide - no OR IGNORE, no skipped lists, and a failure
-        // here is a real bug that should fail the refresh loudly.
-        // kind='user' playlists are never touched. The membership remap goes
-        // through application_path (title+language for empty-path rows) -
-        // same keys, same planner-friendly split as the games sync above.
+        // Curated playlists are catalog content: drop and re-insert (UNIQUE
+        // is per kind, so user lists never collide). Memberships remap by
+        // the same keys as the games sync.
         tx.execute_batch("DELETE FROM playlists WHERE kind = 'curated';")?;
         tx.execute(
             "INSERT INTO playlists (name, kind, slug, description)
@@ -207,12 +179,8 @@ pub fn refresh_catalog(conn: &mut Connection, bundled_db: &Path) -> DbResult<(us
             [],
         )?;
 
-        // Stamp the version OF THE BUNDLED DB, not the code constant: during
-        // development the code can be ahead of a not-yet-regenerated bundled
-        // catalog, and stamping the constant would mark that stale import as
-        // current forever (seen live: CATALOG_VERSION 6 shipped hours before
-        // the v6 exodium.db - installs that started in between imported zero
-        // eXoWin9x rows and never refreshed again).
+        // Stamp the BUNDLED DB's version, not the constant: a stale artefact
+        // must not mark itself current (see CATALOG_VERSION).
         let bundled_version: String = tx
             .query_row(
                 "SELECT value FROM cat.config WHERE key = 'catalog_version'",
@@ -230,13 +198,8 @@ pub fn refresh_catalog(conn: &mut Connection, bundled_db: &Path) -> DbResult<(us
     })();
 
     let _ = conn.execute("DETACH DATABASE cat", []);
-    // The bundled artefact can carry stale LP thumbnail keys (its generator
-    // matched across pack families), and the row copy above just wrote them
-    // over whatever migrate() fixed at startup. Re-link after every refresh,
-    // or the catalog update resurrects the broken covers it was meant to fix.
-    // Log-only: the version stamp is already committed above, so an Err here
-    // would make the caller skip enable_new_collections with no retry on the
-    // next start - and migrate() re-runs both helpers anyway.
+    // Re-link LP keys after the row copy; log-only, since the stamp is
+    // committed and migrate() re-runs both anyway.
     if result.is_ok() {
         if let Err(e) = populate_thumbnail_keys(conn) {
             log::warn!("post-refresh thumbnail key populate failed: {e}");
@@ -368,14 +331,8 @@ fn migrate(conn: &Connection) -> DbResult<()> {
         "CREATE INDEX IF NOT EXISTS idx_playlist_games_game ON playlist_games(game_id)",
     )?;
 
-    // Name uniqueness is per KIND, not global: identity for curated rows is
-    // the slug, for user rows the name. A global UNIQUE(name) let a user
-    // playlist collide with a curated one, which made the curated sync in
-    // refresh_catalog either skip lists silently or fail the whole refresh.
-    // Rebuild the table when it still carries the old constraint (its
-    // CREATE sql lacks "UNIQUE (kind"). Copying preserves ids, so
-    // playlist_games FKs stay valid; foreign_keys is toggled off so the
-    // DROP doesn't trip the child table's references.
+    // UNIQUE(kind, name), not UNIQUE(name): rebuild a table still carrying
+    // the old constraint. Copying keeps ids; foreign_keys off for the DROP.
     let playlists_sql: String = conn
         .query_row(
             "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'playlists'",
@@ -402,20 +359,8 @@ fn migrate(conn: &Connection) -> DbResult<()> {
         )?;
     }
 
-    // Force thumbnail_key recomputation whenever the hash or canonical-matcher
-    // algorithms change. Bumped on every release that alters:
-    //   - title_thumbnail_key() (the hash function itself), or
-    //   - title_canonical() (LP↔EN propagation rule)
-    // Bump history:
-    //   v1 - initial content-addressed (title.trim().lowercase().whitespace-collapse)
-    //   v2 - stripped-alnum hash + basic article drop
-    //   v3 - marketing-modifier drop + British/American spelling folds
-    //   v4 - stop-word prepositions + standalone "1"/"i" dropped
-    //
-    // Without this check, existing users keep their old thumbnail_key values
-    // and the new canonical matcher never runs against them - bundled files
-    // use current hashes, DB rows use old hashes, every card 404s.
-    //   v5 - shortcode-based propagation added to propagate_lp_thumbnail_keys
+    // Bump whenever title_thumbnail_key() or title_canonical() changes, or
+    // existing rows keep old keys and every card 404s.
     const CURRENT_HASH_VERSION: &str = "5";
     let stored_version: Option<String> =
         queries::get_config(conn, "thumbnail_hash_version").ok().flatten();
@@ -427,33 +372,17 @@ fn migrate(conn: &Connection) -> DbResult<()> {
         conn.execute_batch("UPDATE games SET thumbnail_key = NULL")?;
     }
 
-    // Populate any NULL thumbnail_key values from the title hash. Handles:
-    //   (1) existing v0.2.x DBs that just got the column added,
-    //   (2) any row whose thumbnail_key got wiped by a re-import, and
-    //   (3) the version-bump recompute above.
     populate_thumbnail_keys(conn)?;
 
-    // Ensure LP variants share their EN primary's cover art even when shortcode
-    // matching didn't link them (divergent auto-generated shortcodes for the
-    // "same" game). Runs after populate so every row has a key to potentially
-    // overwrite.
     propagate_lp_thumbnail_keys(conn)?;
 
     if stored_version.as_deref() != Some(CURRENT_HASH_VERSION) {
         queries::set_config(conn, "thumbnail_hash_version", CURRENT_HASH_VERSION)?;
     }
 
-    // Backfill manual_path from bundled XML for DBs that were built before the
-    // ManualPath field was added. Runs once: checks if ANY row has a non-NULL
-    // manual_path; if zero, reads all bundled .xml.gz files and updates matching
-    // rows by title. Idempotent - subsequent calls find rows populated and skip.
     populate_manual_paths(conn)?;
 
-    // Purge pack sentinel rows ("! eXoDOS" / "! eXoWin9x" with a root-level
-    // Setup bat) that older imports let through - the XML filter only knew the
-    // pathless eXoWin3x shape. They sat at the very top of every sort under
-    // "All Collections". refresh_catalog never deletes rows, so existing
-    // installs need this even after the regenerated catalog drops them.
+    // Pack sentinel rows from older imports; refresh_catalog never deletes.
     let purged = conn.execute(
         "DELETE FROM games
          WHERE sort_title LIKE '!%'
@@ -465,10 +394,8 @@ fn migrate(conn: &Connection) -> DbResult<()> {
         log::info!("Removed {} pack sentinel rows", purged);
     }
 
-    // Normalize spelled-out language names left by older imports (the main
-    // eXoDOS catalog writes "Language: Japanese" where the packs write codes).
-    // Mirrors import::xml::normalize_language; a catalog refresh also carries
-    // the corrected values, but a DB already stamped current never refreshes.
+    // Spelled-out language names from older imports (import::xml has the
+    // same table).
     conn.execute_batch(
         "UPDATE games SET language = CASE language
             WHEN 'ENGLISH' THEN 'EN' WHEN 'GERMAN' THEN 'DE'
@@ -605,15 +532,8 @@ fn extract_xml_value(line: &str, tag: &str) -> Option<String> {
     }
 }
 
-/// SHA-256(alnum-only lowercase title)[:16] - must match the Python and
-/// generate_db.rs binary implementations exactly, or filename lookup misses.
-///
-/// The normalization is deliberately aggressive: lowercase, then keep only
-/// ASCII alphanumerics. This means "3-K Trivia" and "3K Trivia" and
-/// "3, K. Trivia!" all hash to the same filename - punctuation variants
-/// across XML / zip / image filenames merge automatically.
-/// Lowercase + strip to ASCII alphanumeric only. Shared by the thumbnail hash
-/// and the metadata image-file matcher in `commands::setup`.
+/// Lowercase, ASCII alphanumerics only: the thumbnail-key input and the
+/// gallery file matcher. Must match gen_thumbnails.py exactly.
 pub fn normalize_alnum(s: &str) -> String {
     s.to_lowercase()
         .chars()
@@ -628,20 +548,9 @@ fn title_thumbnail_key(title: &str) -> String {
     hash[..16].to_string()
 }
 
-/// Aggressive title canonicalization used only for LP↔EN matching (not for
-/// filename hashing). Produces a stable "fingerprint" that survives the
-/// common cross-language title drift we see in eXoDOS LP catalogues:
-///   - leading articles dropped ("The Legend of..." → "Legend of...")
-///   - English word-numbers folded into digits ("Book Two" → "Book 2")
-///   - Roman numerals folded into digits ("Settlers II" → "Settlers 2")
-///   - all non-alphanumerics stripped, lowercased
-///
-/// Example: "The Legend of Kyrandia: Book Two - The Hand of Fate" and
-/// "Legend of Kyrandia Book 2 - The Hand of Fate" both produce
-/// "legendofkyrandiabook2thehandoffate".
-///
-/// Only the leading article is stripped (not every occurrence) so subtitles
-/// like "The Hand of Fate" inside a longer title stay intact.
+/// Title fingerprint for LP<->EN matching only: articles and stop words
+/// dropped, word- and Roman numerals folded to digits, alphanumerics kept.
+/// "The Legend of Kyrandia: Book Two" and "Legend of Kyrandia Book 2" agree.
 pub fn title_canonical(title: &str) -> String {
     let t = title.trim().to_lowercase();
 
@@ -654,25 +563,9 @@ pub fn title_canonical(title: &str) -> String {
         ("viii", "8"), ("ix", "9"),
     ];
 
-    // Tokens to drop entirely - they're noise when matching LP↔EN titles:
-    //   - articles: "the", "a", "an" (LaunchBox's ", The" suffix convention)
-    //   - stop-word prepositions/conjunctions that LP packs include or omit
-    //       inconsistently: "in", "of", "and", "to", "for", "on"
-    //   - "first in series" markers - LP packs often add "1"/"i" where EN
-    //       has no number (the first game's sequel is "2" but the first
-    //       itself is unnumbered). Standalone "1" and "i" drops, higher
-    //       numbers stay (they distinguish "Larry 2" from "Larry 3").
-    //   - structural connectors: "part", "book", "chapter", "volume", "episode"
-    //   - marketing modifiers: "enhanced", "version", "edition", "gold",
-    //       "deluxe", "special", "cd", "cdrom", "vga", "ega", "collectors",
-    //       "limited", "talkie", "sci", "remake"
-    //   - British/American spelling noise is folded below (not dropped)
-    //
-    // Dropping these is deliberately aggressive - we accept the occasional
-    // false positive (e.g. two unrelated games whose canonical forms collide
-    // because all differentiating words were stopwords) in exchange for
-    // catching the bulk of LP title drift. Game titles distinctive enough to
-    // matter have multiple content words.
+    // Deliberately aggressive: a rare collision is the price for catching
+    // LP title drift. Standalone "1"/"i" go (LP packs number the first
+    // game), higher numbers stay ("Larry 2" vs "Larry 3").
     const DROP_TOKENS: &[&str] = &[
         "the", "a", "an",
         "in", "of", "and", "to", "for", "on",
@@ -719,24 +612,12 @@ pub fn title_canonical(title: &str) -> String {
     rejoined.chars().filter(|c| c.is_alphanumeric()).collect()
 }
 
-/// For each LP game, find an EN game with a matching *canonical* title and
-/// copy its thumbnail_key. Catches the cases where shortcode-based matching
-/// fails (LP-generated shortcodes that diverge from EN) but the titles are
-/// clearly the same game modulo article/numeral/punctuation differences.
-///
-/// Idempotent: running twice makes no further changes.
+/// Give every LP row its EN game's thumbnail_key: by shortcode first, then
+/// by canonical title. Family-scoped (§1), idempotent.
 pub fn propagate_lp_thumbnail_keys(conn: &Connection) -> DbResult<()> {
-    // Both passes are family-scoped (§1 in CLAUDE.md): shortcodes AND titles
-    // repeat across pack families (eXoWin9x carries "Gabriel Knight 2 - The
-    // Beast Within"), and an unscoped match hands an LP row a key whose file
-    // only exists in the OTHER family's poster pack - the detail panel then
-    // 404s into the placeholder for that variant.
     let same = queries::same_group("en", "games");
 
-    // Pass 1: shortcode-based - most reliable, catches cases like
-    // "Space Quest V - The Next Mutation" (DE) ↔ "Space Quest V: Roger Wilco
-    // The Next Mutation" (EN) where the titles diverge too much for canonical
-    // matching but the shortcode (SQ5) is shared.
+    // Pass 1: shared shortcode (SQ5 links titles canonical matching cannot).
     let shortcode_updated: usize = conn.execute(
         &format!(
             "UPDATE games SET thumbnail_key = (
@@ -758,10 +639,8 @@ pub fn propagate_lp_thumbnail_keys(conn: &Connection) -> DbResult<()> {
         [],
     )?;
 
-    // Pass 2: canonical-title matching - catches LP games with divergent
-    // shortcodes but recognizably-same titles. Keyed per (family, canonical),
-    // and rows pass 1 already matched are excluded: the shortcode link is the
-    // stronger signal, and this pass used to overwrite it on every start.
+    // Pass 2: canonical title, per family, rows pass 1 matched excluded -
+    // the shortcode link is the stronger signal.
     let mut en_map: std::collections::HashMap<(String, String), String> =
         std::collections::HashMap::new();
     let fam = queries::family_expr("games");
@@ -1119,10 +998,8 @@ mod tests {
     fn lp_thumbnail_key_propagation_is_family_scoped() {
         let dir = tempfile::tempdir().unwrap();
         let (_, conn) = mk_db(dir.path(), "fam.db");
-        // The Gabriel Knight 2 constellation: the DE row's title canonicalizes
-        // to the Win9x EN row's title, while its shortcode links it to the DOS
-        // family's EN row. Pass 2 used to overwrite pass 1 with the Win9x key,
-        // whose file only exists in the Win9x poster pack.
+        // Gabriel Knight 2: the DE title canonicalizes to the Win9x EN row,
+        // the shortcode links it to the DOS one. The shortcode must win.
         conn.execute_batch(
             "INSERT INTO games (title, language, shortcode, torrent_source, thumbnail_key) VALUES
                ('The Beast Within: A Gabriel Knight Mystery', 'EN', 'GK2', 'eXoDOS', 'en_dos_key'),

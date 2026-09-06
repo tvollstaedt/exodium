@@ -1,12 +1,7 @@
 import { createConfigSignal, KEY_LIST_CODEC } from "./configSignal";
 
-/**
- * Compatibility notes the user has told us they have read.
- *
- * Dismissal is keyed by the note's KIND, not by game: "tuned for DOSBox ECE"
- * is the same sentence on ~2,000 titles, and answering it once per game would
- * be a worse experience than not offering it at all.
- */
+/** Dismissed panel notes, keyed by KIND (the ECE note is the same sentence
+ *  on ~2,000 titles). */
 const dismissed = createConfigSignal<string[]>(
   "dismissed_notes",
   [],

@@ -26,10 +26,7 @@ pub struct Game {
     pub language: String,
     pub shortcode: Option<String>,
     pub available_languages: Option<String>,
-    /// Titles of the OTHER language variants in this group, unit-separated.
-    /// Lets a client-side search over already-loaded rows match a localized
-    /// title, the way the Browse SQL filter does. None for single-variant
-    /// games.
+    /// Unit-separated titles of the other variants, for client-side search.
     pub variant_titles: Option<String>,
     pub torrent_source: Option<String>,
     pub in_library: bool,
@@ -50,10 +47,7 @@ pub struct Game {
     /// ISO 8601 timestamp (UTC) of the last time the game was launched.
     /// Used for ordering only - convert to local time if displaying to user.
     pub last_played: Option<String>,
-    /// Hint that the game's GameData archive carries a theme track, and its
-    /// file name (e.g. "Capitalism (1995).mp3"): the basename of LaunchBox's
-    /// MusicPath, or `<Title>.mp3` when MissingMusic is false. The archive is
-    /// the truth - the name is never resolved as a path, only its extension
-    /// decides whether the track is worth probing (tracker modules are not).
+    /// Theme-track file name hint from LaunchBox; only its extension is used
+    /// (is it worth probing?), the archive decides (§14).
     pub music_file: Option<String>,
 }

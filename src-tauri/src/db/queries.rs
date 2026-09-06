@@ -164,12 +164,8 @@ pub struct GameFilter<'a> {
     pub with_music: bool,
 }
 
-/// SQL expression yielding a row's pack family: its collection's base id, so
-/// the four eXoDOS language packs share one family and a collection with its
-/// own game tree forms its own. Built from COLLECTION_MAP - adding a pack
-/// needs no SQL edit here.
-/// `pub` (not `pub(crate)`) because the generate_db example builds the bundled
-/// catalog with the same family rule - a private copy there drifted once.
+/// SQL for a row's pack family (its collection's base id), built from
+/// COLLECTION_MAP. `pub` for generate_db, which needs the same rule.
 pub fn family_expr(alias: &str) -> String {
     // Only the packs that resolve elsewhere need an arm; a CASE without a match
     // yields NULL, so COALESCE lets every other collection stand for itself.
@@ -195,12 +191,7 @@ pub(crate) fn playable_music_sql(alias: &str) -> String {
     )
 }
 
-/// Do two rows belong to the same multi-language group?
-///
-/// Shortcodes are unique per pack family, NOT globally: eXoWin3x reuses ten
-/// eXoDOS codes for unrelated games ("EarthQue" is Earthquest under DOS and
-/// Eyewitness Earth Quest under Win3x). Pairing on the shortcode alone would
-/// merge those into one card and hide the other game from the catalogue.
+/// Same multi-language group: equal shortcode AND same family (§1).
 pub fn same_group(a: &str, b: &str) -> String {
     format!(
         "{a}.shortcode = {b}.shortcode AND {fa} = {fb}",
@@ -211,10 +202,8 @@ pub fn same_group(a: &str, b: &str) -> String {
     )
 }
 
-/// One grid row per game: rows sharing a shortcode (within one pack family)
-/// are one multi-language group, represented by its primary row (EN preferred,
-/// lowest id as tiebreak). Rows without a shortcode stand alone.
-/// All consumers must alias the table as `g` (FROM games g).
+/// The group's primary row (EN preferred, lowest id); shortcode-less rows
+/// stand alone. Table must be aliased `g`.
 fn primary_row_condition() -> String {
     format!(
         "(g.shortcode IS NULL OR g.id = (
@@ -224,10 +213,8 @@ fn primary_row_condition() -> String {
     )
 }
 
-/// Build WHERE clause from filters. Filters are evaluated against EVERY
-/// variant of a group (EXISTS subquery), so searching a localized title or
-/// filtering an LP collection still surfaces the merged primary card - see
-/// CLAUDE.md "Multi-language games are merged".
+/// WHERE clause; filters run against EVERY variant of a group (EXISTS), so a
+/// localized title or an LP collection still surfaces the merged card (§3).
 fn build_where_clause(f: &GameFilter) -> (String, Vec<Box<dyn rusqlite::types::ToSql>>) {
     let mut variant_conds = Vec::new();
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -255,13 +242,8 @@ fn build_where_clause(f: &GameFilter) -> (String, Vec<Box<dyn rusqlite::types::T
     let mut conditions = vec![primary_row_condition()];
 
     if f.with_music {
-        // Its OWN EXISTS, not part of variant_conds: the hint sits on the EN
-        // row (localized rows all carry a NULL gamedata_torrent_index) while
-        // the collection filter matches the LP row, so requiring ONE variant
-        // to satisfy both would empty the GLP/PLP/SLP shelves. "Some variant
-        // of this card has a playable hint" is also the honest question -
-        // playback resolves to the EN sibling's archive anyway
-        // (media::resolve_gamedata).
+        // Its OWN EXISTS: the hint sits on the EN row while a collection
+        // filter matches the LP row; one EXISTS for both emptied the shelves.
         conditions.push(format!(
             "EXISTS (SELECT 1 FROM games w \
              WHERE (w.id = g.id OR (g.shortcode IS NOT NULL AND {})) \
@@ -272,13 +254,8 @@ fn build_where_clause(f: &GameFilter) -> (String, Vec<Box<dyn rusqlite::types::T
     }
 
     if let Some(pid) = f.playlist_id {
-        // Top-level condition, NOT part of the per-variant EXISTS: curated
-        // membership sits almost entirely on EN rows while e.g. the
-        // collection filter matches LP rows, so requiring one variant to
-        // satisfy both would empty the grid (GLP + "Games with MT-32"
-        // returned 3 of 218 groups). Driving from playlist_games also makes
-        // the query O(members) instead of a full-catalog scan: each member
-        // maps to its group's primary row id, and g must be one of them.
+        // Top-level, not per-variant (membership sits on EN rows), and
+        // driven from playlist_games: O(members), not a catalog scan.
         params.push(Box::new(pid));
         conditions.push(format!(
             "g.id IN (SELECT CASE WHEN m.shortcode IS NULL THEN m.id ELSE (
@@ -303,31 +280,23 @@ fn build_where_clause(f: &GameFilter) -> (String, Vec<Box<dyn rusqlite::types::T
     (format!(" WHERE {}", conditions.join(" AND ")), params)
 }
 
-// Alphabetical order MUST use the same expression the section keys and the
-// frontend's groupKey() use (COALESCE(sort_title,title)): ordering by bare
-// title while sectioning by sort_title scattered "The X"/"X 2"-style games
-// into fake mid-alphabet sections, and the jump bar scrolled to those.
+// Must match the section keys and the frontend's groupKey(), or the jump
+// bar lands in fake sections.
 const TITLE_ORDER: &str = "COALESCE(sort_title, title) COLLATE NOCASE";
 
 fn order_clause(sort_by: &str) -> String {
     match sort_by {
         "year_asc" => format!("ORDER BY COALESCE(year, 9999) ASC, {TITLE_ORDER} ASC"),
         "year_desc" => format!("ORDER BY COALESCE(year, 0) DESC, {TITLE_ORDER} ASC"),
-        // Star bucket first (keeps the section labels monotonic), then vote
-        // count: eXoDOS carries 185 games at a flat 5.0 from a single vote,
-        // and raw-rating order put that wall of one-vote entries above every
-        // widely-rated classic.
+        // Star bucket, then votes: 185 one-vote 5.0s would otherwise lead.
         "rating" => format!(
             "ORDER BY CAST(ROUND(COALESCE(rating, -1)) AS INTEGER) DESC, \
              COALESCE(rating_votes, 0) DESC, COALESCE(rating, -1) DESC, {TITLE_ORDER} ASC"
         ),
         "title_desc" => format!("ORDER BY {TITLE_ORDER} DESC"),
         "genre" => format!("ORDER BY COALESCE(genre, 'zzz') ASC, {TITLE_ORDER} ASC"),
-        // List-view column sorts (#21). Unknowns last via a leading boolean
-        // key, NOT a text sentinel: NOCASE folds ASCII only and compares
-        // bytes, so multibyte names ("Åkesoft", "Ère Informatique" - both in
-        // the catalogue) collate AFTER any 'zzzz' and ended up stranded
-        // behind the unknown block.
+        // Unknowns last via a boolean key, not a text sentinel: NOCASE
+        // compares bytes, so "Åkesoft" sorts after 'zzzz'.
         "developer" => format!(
             "ORDER BY (developer IS NULL OR developer = ''), developer COLLATE NOCASE ASC, {TITLE_ORDER} ASC"
         ),
@@ -393,10 +362,8 @@ pub fn fetch_games_filtered(
     Ok(games)
 }
 
-/// Populate `available_languages` ("EN:0,DE:2" - state 0=available,
-/// 1=in_library, 2=installed; EN first, then alphabetical) for every game
-/// whose shortcode has more than one language variant. Single-variant games
-/// keep None so the frontend renders no badge.
+/// `available_languages` ("EN:0,DE:2"; 0 available, 1 in_library, 2
+/// installed; EN first) for multi-variant groups, None otherwise.
 fn attach_language_maps(conn: &Connection, games: &mut [Game]) -> DbResult<()> {
     let shortcodes: Vec<&str> = games
         .iter()
@@ -578,15 +545,8 @@ pub fn get_section_keys(conn: &Connection, f: &GameFilter) -> DbResult<Vec<Strin
     }
 
     if f.sort_by == "genre" {
-        // The `genre` column stores semicolon-joined values like
-        // "Action;Adventure;RPG", and individual entries can contain
-        // " / "-delimited parent/child like "Sports / Baseball". For the
-        // jumpbar we collapse to just the parent so users see ~15 top-level
-        // categories (matches the parent rows in the genre filter dropdown)
-        // instead of dozens of subgenre permutations.
-        // IMPORTANT: use only the FIRST entry's parent - Library.tsx's
-        // sectionKey() does the same, and a key derived from a later entry
-        // would appear in the jumpbar with no section to scroll to.
+        // First entry's parent genre only ("Sports / Baseball" -> Sports),
+        // exactly what Library.tsx's sectionKey() derives.
         let mut seen = std::collections::BTreeSet::new();
         for entry in raw {
             let first = entry.split(';').next().unwrap_or("");
@@ -601,10 +561,8 @@ pub fn get_section_keys(conn: &Connection, f: &GameFilter) -> DbResult<Vec<Strin
     Ok(raw)
 }
 
-/// Fetch installed games - one card per game: variants sharing a shortcode
-/// collapse to a single row (EN preferred AMONG INSTALLED variants, so a
-/// DE-only install shows its playable DE row, not the uninstalled EN one).
-/// Language badges on the card carry the per-variant states.
+/// Installed games, one row per group, EN preferred AMONG INSTALLED
+/// variants (a DE-only install shows its DE row).
 pub fn fetch_installed_games(conn: &Connection) -> DbResult<Vec<Game>> {
     let sql = format!(
         "SELECT {} FROM games g WHERE g.installed = 1 AND (g.shortcode IS NULL OR g.id = (
@@ -713,22 +671,11 @@ pub fn get_all_game_config(
 }
 
 // ── Playlists ──────────────────────────────────────────────────────────
-//
-// Two kinds share the same tables: kind='curated' rows ship inside the
-// bundled catalog DB (seeded by generate_db, re-synced by refresh_catalog)
-// and are read-only; kind='user' rows are created in-app and never touched
-// by catalog updates.
+// kind='curated' ships in the bundled catalog (re-synced by refresh_catalog,
+// read-only); kind='user' is created in-app and never touched by updates.
 
-/// All playlists with their visible-card count.
-///
-/// One grid card per shortcode group, so the count is the number of
-/// DISTINCT groups among the playlist's members - equivalent to counting
-/// primary rows that pass the Browse EXISTS-over-variants filter, but
-/// O(members) instead of O(all games x playlists). The naive primary-row
-/// formulation took ~4s over the full catalog and, called from the create
-/// flow while the 5s shelf polling queued behind the same DB mutex,
-/// stretched "Saving..." into the tens of seconds.
-/// ('#' can't appear in a shortcode, so the id fallback key can't collide.)
+/// All playlists with their card count: DISTINCT groups among the members,
+/// O(members) - the primary-row formulation took ~4 s per call.
 pub fn fetch_playlists(conn: &Connection) -> DbResult<Vec<crate::models::Playlist>> {
     let sql = "SELECT pl.id, pl.name, pl.kind, pl.description,
             (SELECT COUNT(DISTINCT COALESCE(m.shortcode, 'id#' || m.id))
@@ -807,10 +754,7 @@ pub fn set_playlist_membership(
             params![playlist_id, game_id],
         )?;
     } else {
-        // Group-wide, mirroring fetch_game_playlist_ids: the membership row
-        // may sit on a sibling variant (added from a shelf that rendered the
-        // installed LP row), and an exact-id DELETE would silently no-op
-        // while the checkmark keeps coming back.
+        // Group-wide: the membership row may sit on a sibling variant.
         conn.execute(
             &format!(
                 "DELETE FROM playlist_games WHERE playlist_id = ?1 AND game_id IN (
@@ -928,10 +872,8 @@ mod tests {
         assert!(!fetched.favorited);
     }
 
-    /// My Library filters already-loaded rows client-side, so the localized
-    /// titles have to travel with the merged row - otherwise searching the
-    /// German name works in Browse (SQL, across variants) and silently fails
-    /// on the library tab.
+    /// My Library filters loaded rows client-side, so the variant titles
+    /// have to travel with the merged row.
     #[test]
     fn merged_rows_carry_their_variant_titles() {
         let conn = open_test_db();
@@ -962,10 +904,7 @@ mod tests {
         assert_eq!(solo.variant_titles, None);
     }
 
-    /// The list order and the section keys must derive from the SAME
-    /// expression (COALESCE(sort_title, title)). Ordering by bare title while
-    /// sectioning by sort_title scattered "The X"-style games into fake
-    /// mid-alphabet sections and the jump bar scrolled to those.
+    /// Order and section keys derive from the same expression.
     #[test]
     fn title_sort_follows_sort_title() {
         let conn = open_test_db();
@@ -1038,10 +977,8 @@ mod tests {
         assert_eq!(w3x_variants[0].title, "Eyewitness Virtual Reality: Earth Quest");
     }
 
-    /// The list view's column sorts (#21): games without a developer/size
-    /// sort last in BOTH directions instead of clumping at the top - and a
-    /// multibyte name must not land behind the unknown block (NOCASE compares
-    /// bytes, so a text sentinel like 'zzzz' put "Åkesoft" after it).
+    /// Unknown developer/size sorts last in both directions, and a
+    /// multibyte name does not land behind the unknown block.
     #[test]
     fn column_sorts_put_unknown_values_last() {
         let conn = open_test_db();
@@ -1332,10 +1269,7 @@ mod tests {
         assert_eq!(playlists.iter().find(|p| p.name == "Backlog").unwrap().game_count, 1);
         assert_eq!(count_games_filtered(&conn, &f).unwrap(), 1);
 
-        // Removal is GROUP-wide, mirroring the lookup: the membership rows
-        // sit on both variants, removing via the EN id must clear the DE
-        // row too - otherwise a checkmark unchecked from the merged card
-        // silently comes back.
+        // Removal is group-wide, like the lookup.
         set_playlist_membership(&conn, pid, en_id, false).unwrap();
         assert_eq!(fetch_game_playlist_ids(&conn, en_id).unwrap(), Vec::<i64>::new());
         assert_eq!(fetch_game_playlist_ids(&conn, de_id).unwrap(), Vec::<i64>::new());

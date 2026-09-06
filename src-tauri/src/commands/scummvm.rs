@@ -1,20 +1,7 @@
-//! eXoScummVM launch pipeline.
-//!
-//! There is no per-game conf in this pack. eXo runs every title through ONE
-//! bat (`launch_svm.bat`) that looks the game up in an index
-//! (`util/scummvm.txt`: `<dir>;<engine:gameid | target>;<build>\scummvm.exe`)
-//! and assembles a single ScummVM command line. This module does the same:
-//! the bundled copy of that index (`metadata/scummvm.txt`) names the game id
-//! and the ScummVM build the game is pinned to, the game's own directory tree
-//! names the platform variant (`platform.txt`, `menu.txt`, `video.txt`,
-//! `sound.txt`, ...), and the pinned build's `scummvm.ini` (bundled under
-//! `metadata/scummvm_ini/`) carries the targets 44 games launch by name.
-//!
-//! eXo pins seven builds because games break across ScummVM releases (its
-//! readme keeps "5 or 6 old versions" for exactly that). On Windows those
-//! builds come out of the torrent's `utilSVM.zip`; on macOS/Linux each is a
-//! content pack. Until a pack is installed, a `scummvm` on PATH (or the
-//! Flatpak) runs the game with whatever version it is - the panel says so.
+//! eXoScummVM launch pipeline (§18): no per-game conf. The bundled index
+//! (`metadata/scummvm.txt`) names game id and pinned build, the game dir's
+//! control files name the variant, the build's ini carries named targets.
+//! Seven pinned builds; a system ScummVM runs the game unpinned.
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -387,11 +374,8 @@ fn hide_console(cmd: &mut std::process::Command) {
 #[cfg(not(windows))]
 fn hide_console(_cmd: &mut std::process::Command) {}
 
-/// Ask ScummVM whether it recognises the game data before launching it. A
-/// launch with unrecognised data does NOT fail: ScummVM logs a warning and
-/// opens its own launcher GUI, which from Exodium's side looks like a game
-/// that started - so the check has to happen up front. Placeholders and
-/// piece fragments (see `extract_before_launch`) land here too.
+/// `--detect` before launching: unrecognised data does NOT fail a launch,
+/// ScummVM opens its own launcher GUI instead.
 fn detect(resolved: &Resolved, ini: &Path, run_dir: &Path, game_id: &str, grant: &Path) -> Result<(), String> {
     let (mut cmd, _) = resolved.cmd.command(grant);
     hide_console(&mut cmd);

@@ -35,14 +35,8 @@ const IconUp = () => (
   </svg>
 );
 
-/** The top bar's single network/activity pill: offline state, live transfer
- *  rates, and - while anything is downloading - a progress chip with a count.
- *
- *  One component for all of it because they answer one question ("is the app
- *  doing network work, and how is it going?") and previously lit up as TWO
- *  adjacent pills for the same event. Clicking opens the downloads sheet,
- *  which also carries the peer/share status line and the network-settings
- *  shortcut that used to be split between a tooltip and the pill's click. */
+/** The top bar's network pill: offline state, transfer rates, and a
+ *  progress chip while anything downloads. Click opens the downloads sheet. */
 export function ActivityBadge(props: Props) {
   const [showSheet, setShowSheet] = createSignal(false);
   const [speeds, setSpeeds] = createSignal<Record<string, string>>({});
@@ -62,11 +56,8 @@ export function ActivityBadge(props: Props) {
       if (!job.finished && job.phase === "downloading") {
         const id = `cp:${key}`;
         const prev = prevSnapshot[id];
-        // Hold the baseline until the byte counter actually moves. Torrent
-        // progress lands in whole pieces, so a 2 s window regularly sees no
-        // change at all; re-basing every tick made the label read 0 and drop
-        // out, then reappear on the next piece. Holding it lets the window
-        // grow instead, which averages the real rate over the gap.
+        // Hold the baseline until bytes move: progress lands in whole pieces,
+        // and re-basing every tick read 0 between them.
         const advanced = !prev || job.downloaded_bytes > prev.bytes;
         newSnapshot[id] = advanced ? { bytes: job.downloaded_bytes, time: now } : prev;
         if (prev) {
@@ -159,23 +150,15 @@ export function ActivityBadge(props: Props) {
   };
 
   const s = () => transferStats();
-  /** Is a download running? Rates alone are the wrong question for the badge:
-   *  they are sampled, they dip to zero between piece bursts, and they say
-   *  nothing while a finished torrent is being assembled. Anchoring the
-   *  readout to the actual jobs keeps it on screen for the whole download
-   *  instead of blinking in and out with the sampling. */
+  /** Anchored to jobs, not rates: rates dip to zero between piece bursts. */
   const busy = () => totalCount() > 0;
 
   // `isTransferring` (sticky, see stores/transfer.ts) covers traffic with no
   // job behind it - seeding, or a preview video being streamed.
   const moving = () => !!s() && (busy() || isTransferring());
 
-  /** What "Online" actually means right now.
-   *
-   *  A rate of zero is ambiguous - sharing switched off and nobody requesting
-   *  look identical - so the sharing state comes first, and the peer count
-   *  carries the rest: connections are a standing state, transfer is
-   *  event-driven, so peers can prove liveness when the rates cannot. */
+  /** Status line: sharing state first (a zero rate is ambiguous), then the
+   *  peer count, which proves liveness when rates cannot. */
   const peers = (n: number) => `${n} peer${n === 1 ? "" : "s"}`;
 
   const statusLine = () => {

@@ -33,23 +33,13 @@ import { matchesLibraryQuery } from "../util";
 
 type Tab = "library" | "browse";
 
-/** Merge fresh DB results into an existing shelf list, preserving the previous
- *  object reference for any game whose state flags didn't change. This keeps
- *  <For>'s reference-based keying stable: unchanged cards don't remount (no
- *  flicker), only cards whose state flipped get re-rendered with new data.
- *
- *  Previously these shelves guarded refresh on ID-set equality - that missed
- *  the case where a pre-favorited game becomes installed: same IDs, different
- *  state, no refresh, stale card. */
+/** Merge fresh rows into a shelf list, keeping the object of every game
+ *  whose state did not change so `<For>` does not remount its card. */
 function mergeShelfList(prev: Game[], fresh: Game[]): Game[] {
   const prevById = new Map(prev.map(g => [g.id, g]));
   return fresh.map(f => {
     const old = prevById.get(f.id);
-    // available_languages is part of the equality check because a variant
-    // of a multi-lang game (e.g. DE) can transition independently of the
-    // primary row (EN) - its state shows up in the primary's badges via
-    // available_languages like "EN:0,DE:2". Without this, shelf cards
-    // display stale language badges after installing a sibling variant.
+    // available_languages counts: a sibling variant's state lives there.
     if (old
       && old.installed === f.installed
       && old.in_library === f.in_library
@@ -95,11 +85,8 @@ export function Library() {
   // from the right (forward), "left" from the left (backward). Drives the
   // CSS animation on the freshly mounted tab pane.
   const [tabSlideDir, setTabSlideDir] = createSignal<"right" | "left">("right");
-  // The directional class carries `will-change`, so it has to come off once
-  // the slide has finished - otherwise the compositor layer is retained for
-  // the pane's whole lifetime (#24). The check on `target` matters:
-  // animationend bubbles, and a child's animation ending mid-slide would
-  // otherwise strip the pane's own animation while it is still moving.
+  // The directional class carries `will-change`; drop it after the slide
+  // (#24). animationend bubbles, hence the `target` check.
   const [tabSlideDone, setTabSlideDone] = createSignal(false);
   const tabPaneClass = () => tabSlideDone() ? "tab-pane" : `tab-pane tab-pane-${tabSlideDir()}`;
   const onTabSlideEnd = (e: AnimationEvent) => {
@@ -141,11 +128,8 @@ export function Library() {
     }
   });
 
-  // Whenever a game's installed/in_library state changes (download completes
-  // or uninstall finishes), refresh the shelves and re-sync the detail panel.
-  // The shelves come from separate DB queries, so fetchGames() alone isn't
-  // enough. detailGame() can hold an object that no longer matches reality
-  // - fetch the fresh row directly by id to be sure.
+  // Library change: refresh the shelves (separate queries) and re-fetch
+  // the detail panel's row by id.
   createEffect(() => {
     const change = lastGameLibraryChange();
     if (!change) { return; }
@@ -164,10 +148,8 @@ export function Library() {
     }
   });
 
-  // "Back to top" appears on UPWARD scroll only, well below the (non-sticky)
-  // collection shelf - scrolling up is the signal the user wants to get back
-  // to something above; while reading downwards the button stays out of the
-  // way. A small delta filter keeps trackpad jitter from flickering it.
+  // "Back to top" on upward scroll only, below the shelf; a delta filter
+  // against trackpad jitter.
   const [showBackToTop, setShowBackToTop] = createSignal(false);
   let lastScrollTop = 0;
   const onLibraryScroll = () => {
@@ -204,13 +186,8 @@ export function Library() {
         return "★".repeat(Math.max(0, n)) + "☆".repeat(Math.max(0, 5 - n));
       }
       case "genre": {
-        // genre is a semicolon-joined list ("Action;Adventure;RPG") whose
-        // entries can themselves carry " / "-delimited parent/child
-        // ("Sports / Baseball"). Sections + jumpbar both key on the
-        // *parent* of the FIRST entry so games collapse into ~15 top-level
-        // categories - matches the genre filter's tree view and what
-        // get_section_keys returns server-side. split() always yields at
-        // least one element, so direct [0] indexing is safe.
+        // Parent of the FIRST genre entry ("Sports / Baseball" -> Sports),
+        // same as get_section_keys server-side.
         const raw = game.genre ?? "";
         const first = raw.split(";")[0].trim();
         const parent = first.split(" / ")[0].trim();
@@ -249,10 +226,7 @@ export function Library() {
     }
   };
 
-  // Keep the jump bar in sync with the search box: SearchBar triggers
-  // fetchGames() itself, but section keys come from a separate query and
-  // otherwise go stale (clicking a stale key force-loads all games and then
-  // finds no section to scroll to). Runs on mount too.
+  // Section keys come from a separate query and go stale with the search.
   createEffect(() => {
     searchQuery();
     refreshSectionKeys();
@@ -274,10 +248,7 @@ export function Library() {
       return String((label.match(/★/g) || []).length);
     }
     if (label === "Unrated") { return "?"; }
-    // Year: "1992" stays "1992" (4 chars fits)
-    // Genre: truncate long names for jump bar - keep enough chars to
-    // distinguish prefix-sharing genres ("Board Game" vs "Boats", "Puzzle"
-    // vs "Puzzle-Solving"). 14 chars covers the bulk of eXoDOS taxonomy.
+    // 14 chars keeps prefix-sharing genres apart ("Puzzle" / "Puzzle-Solving").
     if (label.length > 14) { return label.slice(0, 13) + "…"; }
     return label;
   };
@@ -286,11 +257,8 @@ export function Library() {
     const scroll = () => {
       const el = document.querySelector<HTMLElement>(`[data-section-label="${CSS.escape(label)}"]`);
       if (!el || !libraryRef) { return; }
-      // .grid-separator is position:sticky, so its bounding rect reports the
-      // stuck position (~separatorTop) once its section has been scrolled past
-      // - measuring it directly would make scrollBy a no-op. Measure the
-      // adjacent .game-grid sibling (in normal flow) and back out the
-      // separator's rendered height to land the letter at the sticky slot.
+      // The separator is sticky and reports its stuck position; measure the
+      // grid sibling and back out the separator's height.
       const grid = el.nextElementSibling as HTMLElement | null;
       const anchor = grid ?? el;
       const rect = anchor.getBoundingClientRect();
@@ -311,25 +279,13 @@ export function Library() {
     }
   };
 
-  // Build a hierarchical option list from the flat genre vocabulary. eXoDOS
-  // uses " / " to separate parent/child genres (e.g. "Sports / Baseball").
-  // We sort everything alphabetically, then for each group emit the parent
-  // header (synthesizing one if all that exist are children) followed by
-  // its children at depth 1, indented in the dropdown via Select's depth
-  // class. Selecting a parent filters by its prefix (the existing
-  // `genre LIKE '%...%'` matcher already covers the subgenre rows).
+  // Parent/child genre tree from " / " entries; a parent is synthesized
+  // when only children exist, and selecting it filters by prefix (LIKE).
   const genreOptions = createMemo(() => {
     const flat = genres();
     type Opt = { value: string; label: string; depth?: number; triggerLabel?: string };
     const result: Opt[] = [{ value: "", label: "All Genres" }];
 
-    // Group by first segment. Standalone genres (no " / ") still create a
-    // group with an empty children array, so they render as a depth-0 row
-    // with no nested entries - same shape as a parent that has children
-    // but listed alone in the dropdown. If a parent header only exists via
-    // its children (e.g. "Sports / Baseball" without bare "Sports") we
-    // still synthesize it; selecting it works because the backend's
-    // LIKE '%...%' matcher covers all subgenres.
     const groups = new Map<string, string[]>();
     for (const g of flat) {
       const idx = g.indexOf(" / ");
@@ -397,10 +353,8 @@ export function Library() {
     refreshSectionKeys();
   };
 
-  // The jukebox lives on the rows, so turning the filter on switches to the
-  // list - transiently, because that is the chip's doing and not a change of
-  // the user's saved preference. Turning it off only undoes the switch if the
-  // chip made it: a list the user picked (or picked since) stays.
+  // The chip switches to the list transiently (the ▶ lives on rows) and
+  // only switches back if it made the switch (§14).
   let prevViewMode: ViewMode = "grid";
   const toggleWithMusic = () => {
     if (withMusic()) {
@@ -455,12 +409,8 @@ export function Library() {
   });
 
   // ── Search on My Library ────────────────────────────────────────────────
-  // The search box lives in the app's top bar and is visible on both tabs, but
-  // it only drove the Browse query - typing while on My Library did nothing.
-  // These shelves are already fully in memory, so the filter is a local title
-  // match instead of another round trip. Matching is on the merged card's own
-  // title; a localized variant title (the German name of an EN-titled card) is
-  // not searchable here, unlike Browse where the backend checks every variant.
+  // Shelves are in memory, so the shared search box filters them locally
+  // (`matchesLibraryQuery`, variant titles included).
   const librarySearch = () => searchQuery().trim();
   const filterShelf = (list: Game[]) => {
     const q = librarySearch();
@@ -483,10 +433,7 @@ export function Library() {
     shownRecent().length > 0 || shownFavorites().length > 0
     || shownInstalled().length > 0 || shownPlaylists().length > 0;
 
-  // My Library jump bar: one entry per rendered shelf, playlist shelves
-  // included - the shelf list can outgrow a screen, and scrolling past
-  // three fixed shelves to reach a playlist gets old fast. Tracks the
-  // search-filtered lists so it never points at a shelf that isn't there.
+  // My Library jump bar: one entry per rendered (search-filtered) shelf.
   const libraryShelves = createMemo<{ key: string; label: string }[]>(() => {
     const shelves: { key: string; label: string }[] = [];
     if (shownRecent().length > 0) { shelves.push({ key: "recent", label: "Recent" }); }
@@ -548,11 +495,8 @@ export function Library() {
   };
 
   const handleFavoriteChanged = (id: number, favorited: boolean) => {
-    // NOTE: do NOT call updateGameFavorited here. That creates a new object in
-    // games() via spread, which forces <For> to unmount/remount the card whose
-    // star was just clicked - visible as a flicker (thumb reloads, etc).
-    // The card already tracks favorited state optimistically in its own signal;
-    // games() will heal on the next refetch.
+    // Not updateGameFavorited: a new object remounts the card (flicker).
+    // The card tracks the state itself; games() heals on the next fetch.
     if (!favorited) {
       setFavoriteGames(prev => prev.filter(g => g.id !== id));
     } else {
@@ -572,10 +516,8 @@ export function Library() {
   };
 
   onMount(() => {
-    // Interval, observer, and onCleanup MUST register synchronously: after the
-    // first `await` in an async onMount the reactive owner is gone, so a late
-    // onCleanup never runs and the interval/observer leak (and stack up across
-    // factory-reset remounts).
+    // Register synchronously: after the first await in onMount the owner is
+    // gone and onCleanup never runs.
     const observer = new IntersectionObserver(
       (entries) => {
         // hasFetched guards the initial mount: hasMore defaults to true, and
@@ -623,10 +565,8 @@ export function Library() {
               count: infoMap[id]?.game_count ?? 0,
             }))
             .sort((a, b) => a.id === "eXoDOS" ? -1 : b.id === "eXoDOS" ? 1 : 0);
-          // "All" (empty id = backend's no-collection-filter) leads the shelf:
-          // one place to search the entire catalogue across collections. No
-          // game count on it - summing the per-collection row counts would
-          // double-count merged language variants and disagree with the grid.
+          // "All" (empty id) leads the shelf, without a count: summing rows
+          // would double-count merged variants.
           if (cols.length > 1) {
             cols.unshift({
               id: "",
@@ -665,10 +605,7 @@ export function Library() {
     applyFilter(setSortBy)(next);
   };
 
-  // The grid cannot represent the column-only sorts: its Select has no such
-  // entry (Ark then renders the bare placeholder), groupKey() yields no
-  // sections and the jump bar goes empty. Fall back to the default sort
-  // instead of leaving the grid in an order none of its controls can show.
+  // The grid has no entry for the list's column sorts; fall back.
   const switchView = (mode: "grid" | "list") => {
     applyViewMode(mode);
     if (mode === "grid" && !sortOptions.some((o) => o.value === sortBy())) {

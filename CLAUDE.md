@@ -1317,5 +1317,9 @@ name); poster pack.
 - **Tauri invoke args are camelCase in JS**, snake_case in Rust. `getGames(page, perPage)` → `invoke("get_games", { page, perPage })`. This is in memory as `feedback_tauri_args`.
 - **SolidJS**: use `createSignal` + derived getters, not `createMemo` unless the computation is expensive. Stores for cross-component state.
 - **Don't add comments to untouched code.** Only comment genuinely non-obvious logic in code you're changing.
+- **Comments state the contract and the invariant, not the history.** A
+  function doc is at most four lines; measurements, incidents and rejected
+  alternatives go to `docs/DECISIONS.md` or the numbered sections of this
+  file, referenced as `(§N)`. No "used to", "an earlier version", "observed".
 - **Small, focused edits.** Don't refactor beyond the ask. The codebase has been iterated on heavily and most choices are deliberate.
 - **When in doubt about a design decision, check this file first** - most recurring questions are answered above.
