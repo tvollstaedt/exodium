@@ -22,6 +22,10 @@ const EOCD_SIGNATURE: u32 = 0x0605_4b50;
 const CENTRAL_FILE_SIGNATURE: u32 = 0x0201_4b50;
 const LOCAL_FILE_SIGNATURE: u32 = 0x0403_4b50;
 const ZIP64_EOCD_LOCATOR_SIGNATURE: u32 = 0x0706_4b50;
+const ZIP64_EOCD_SIGNATURE: u32 = 0x0606_4b50;
+const ZIP64_EXTRA_ID: u16 = 0x0001;
+/// A corrupt directory size must not turn into a multi-GB allocation.
+const MAX_DIRECTORY_BYTES: u64 = 64 * 1024 * 1024;
 
 const METHOD_STORE: u16 = 0;
 const METHOD_DEFLATE: u16 = 8;
@@ -41,6 +45,64 @@ fn u16_at(buf: &[u8], off: usize) -> u16 {
 
 fn u32_at(buf: &[u8], off: usize) -> u32 {
     u32::from_le_bytes([buf[off], buf[off + 1], buf[off + 2], buf[off + 3]])
+}
+
+fn u64_at(buf: &[u8], off: usize) -> u64 {
+    let mut b = [0u8; 8];
+    b.copy_from_slice(&buf[off..off + 8]);
+    u64::from_le_bytes(b)
+}
+
+/// The directory's (entry count, size, offset) from the zip64 EOCD record.
+/// The locator sits right before the EOCD and names the record's offset;
+/// the record itself can be anywhere, so it is one more seek.
+async fn zip64_directory_location<R>(
+    reader: &mut R,
+    tail: &[u8],
+    eocd: usize,
+) -> anyhow::Result<(u64, u64, u64)>
+where
+    R: AsyncRead + AsyncSeek + Unpin,
+{
+    let locator = eocd
+        .checked_sub(20)
+        .filter(|&i| u32_at(tail, i) == ZIP64_EOCD_LOCATOR_SIGNATURE)
+        .context("zip64 sizes in the EOCD but no zip64 locator before it")?;
+    let record_offset = u64_at(tail, locator + 8);
+    reader.seek(std::io::SeekFrom::Start(record_offset)).await?;
+    let mut record = [0u8; 56];
+    reader.read_exact(&mut record).await.context("reading zip64 EOCD record")?;
+    if u32_at(&record, 0) != ZIP64_EOCD_SIGNATURE {
+        bail!("no zip64 EOCD record at offset {}", record_offset);
+    }
+    Ok((u64_at(&record, 32), u64_at(&record, 40), u64_at(&record, 48)))
+}
+
+/// Replace the 0xFFFFFFFF fields of a central entry with the values from its
+/// zip64 extra field (0x0001), which carries only the fields that overflowed,
+/// in spec order: uncompressed size, compressed size, local header offset.
+fn apply_zip64_extra(extra: &[u8], sizes: (u64, u64, u64)) -> (u64, u64, u64) {
+    let (mut uncompressed, mut compressed, mut offset) = sizes;
+    let mut pos = 0usize;
+    while pos + 4 <= extra.len() {
+        let id = u16_at(extra, pos);
+        let end = pos + 4 + u16_at(extra, pos + 2) as usize;
+        if end > extra.len() {
+            break;
+        }
+        if id == ZIP64_EXTRA_ID {
+            let mut p = pos + 4;
+            for field in [&mut uncompressed, &mut compressed, &mut offset] {
+                if *field == 0xFFFF_FFFF && p + 8 <= end {
+                    *field = u64_at(extra, p);
+                    p += 8;
+                }
+            }
+            break;
+        }
+        pos = end;
+    }
+    (uncompressed, compressed, offset)
 }
 
 /// Parse the central directory. `file_len` is the archive's total size, which
@@ -66,17 +128,16 @@ where
         .find(|&i| u32_at(&tail, i) == EOCD_SIGNATURE)
         .context("no end-of-central-directory record - not a zip?")?;
 
-    let entry_count = u16_at(&tail, eocd + 10) as u64;
-    let cd_size = u32_at(&tail, eocd + 12) as u64;
-    let cd_offset = u32_at(&tail, eocd + 16) as u64;
-
-    // ZIP64 archives park the real values in a separate record. eXoDOS zips top
-    // out around 1.1 GB so this should never fire; fail loudly rather than read
-    // garbage offsets if it ever does.
+    let mut entry_count = u16_at(&tail, eocd + 10) as u64;
+    let mut cd_size = u32_at(&tail, eocd + 12) as u64;
+    let mut cd_offset = u32_at(&tail, eocd + 16) as u64;
+    // zip64 (the 36 GB media-pack archives): the real values sit in a
+    // separate record.
     if cd_offset == 0xFFFF_FFFF || cd_size == 0xFFFF_FFFF || entry_count == 0xFFFF {
-        let has_locator = (0..=tail.len().saturating_sub(4))
-            .any(|i| u32_at(&tail, i) == ZIP64_EOCD_LOCATOR_SIGNATURE);
-        bail!("zip64 archive not supported (locator present: {})", has_locator);
+        (entry_count, cd_size, cd_offset) = zip64_directory_location(reader, &tail, eocd).await?;
+    }
+    if cd_size > MAX_DIRECTORY_BYTES {
+        bail!("refusing to read a {} byte central directory", cd_size);
     }
 
     reader.seek(std::io::SeekFrom::Start(cd_offset)).await?;
@@ -90,12 +151,12 @@ where
             break;
         }
         let method = u16_at(&cd, pos + 10);
-        let compressed_size = u32_at(&cd, pos + 20) as u64;
-        let uncompressed_size = u32_at(&cd, pos + 24) as u64;
+        let mut compressed_size = u32_at(&cd, pos + 20) as u64;
+        let mut uncompressed_size = u32_at(&cd, pos + 24) as u64;
         let name_len = u16_at(&cd, pos + 28) as usize;
         let extra_len = u16_at(&cd, pos + 30) as usize;
         let comment_len = u16_at(&cd, pos + 32) as usize;
-        let local_header_offset = u32_at(&cd, pos + 42) as u64;
+        let mut local_header_offset = u32_at(&cd, pos + 42) as u64;
         let name_start = pos + 46;
         let name_end = name_start + name_len;
         if name_end > cd.len() {
@@ -104,6 +165,13 @@ where
             break;
         }
         let name = String::from_utf8_lossy(&cd[name_start..name_end]).into_owned();
+        if [compressed_size, uncompressed_size, local_header_offset].contains(&0xFFFF_FFFF) {
+            let extra_end = (name_end + extra_len).min(cd.len());
+            (uncompressed_size, compressed_size, local_header_offset) = apply_zip64_extra(
+                &cd[name_end..extra_end],
+                (uncompressed_size, compressed_size, local_header_offset),
+            );
+        }
         entries.push(ZipEntry {
             name,
             compressed_size,
@@ -617,5 +685,121 @@ mod tests {
             100.0 * total_video as f64 / total_zip.max(1) as f64,
         );
         assert!(read > 0, "no video could be read from {}", dir);
+    }
+
+    // ── zip64 ────────────────────────────────────────────────────────────────
+
+    /// Rewrite a plain archive's tail into the zip64 shape: the directory is
+    /// left alone, a zip64 EOCD record and locator go after it, and the EOCD
+    /// carries the 0xFFFF... sentinels. `with_locator: false` drops the
+    /// locator, the shape of a truncated or corrupt archive.
+    fn to_zip64_tail(zip: &[u8], with_locator: bool) -> Vec<u8> {
+        let eocd = zip.len() - 22;
+        assert_eq!(u32_at(zip, eocd), EOCD_SIGNATURE);
+        let count = u16_at(zip, eocd + 10) as u64;
+        let cd_size = u32_at(zip, eocd + 12) as u64;
+        let cd_offset = u32_at(zip, eocd + 16) as u64;
+        let record_offset = cd_offset + cd_size;
+
+        let mut out = zip[..record_offset as usize].to_vec();
+        out.extend_from_slice(&ZIP64_EOCD_SIGNATURE.to_le_bytes());
+        out.extend_from_slice(&44u64.to_le_bytes()); // size of the rest
+        out.extend_from_slice(&[45, 0, 45, 0]); // version made by / needed
+        out.extend_from_slice(&0u32.to_le_bytes()); // this disk
+        out.extend_from_slice(&0u32.to_le_bytes()); // directory disk
+        out.extend_from_slice(&count.to_le_bytes());
+        out.extend_from_slice(&count.to_le_bytes());
+        out.extend_from_slice(&cd_size.to_le_bytes());
+        out.extend_from_slice(&cd_offset.to_le_bytes());
+        if with_locator {
+            out.extend_from_slice(&ZIP64_EOCD_LOCATOR_SIGNATURE.to_le_bytes());
+            out.extend_from_slice(&0u32.to_le_bytes());
+            out.extend_from_slice(&record_offset.to_le_bytes());
+            out.extend_from_slice(&1u32.to_le_bytes());
+        }
+        out.extend_from_slice(&EOCD_SIGNATURE.to_le_bytes());
+        out.extend_from_slice(&[0u8; 6]); // disks, disk of directory
+        out.extend_from_slice(&0xFFFFu16.to_le_bytes());
+        out.extend_from_slice(&0xFFFFu16.to_le_bytes());
+        out.extend_from_slice(&0xFFFF_FFFFu32.to_le_bytes());
+        out.extend_from_slice(&0xFFFF_FFFFu32.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes()); // comment length
+        out
+    }
+
+    /// Move one central entry's local header offset into a zip64 extra field,
+    /// the way a writer records an entry that starts beyond 4 GB.
+    fn offset_into_zip64_extra(zip: &[u8], name: &str) -> Vec<u8> {
+        let eocd = zip.len() - 22;
+        let cd_size = u32_at(zip, eocd + 12) as usize;
+        let cd_offset = u32_at(zip, eocd + 16) as usize;
+        let cd = &zip[cd_offset..cd_offset + cd_size];
+
+        let mut new_cd = Vec::new();
+        let mut pos = 0;
+        while pos + 46 <= cd.len() {
+            let name_len = u16_at(cd, pos + 28) as usize;
+            let extra_len = u16_at(cd, pos + 30) as usize;
+            let comment_len = u16_at(cd, pos + 32) as usize;
+            let end = pos + 46 + name_len + extra_len + comment_len;
+            let entry_name = &cd[pos + 46..pos + 46 + name_len];
+            if entry_name == name.as_bytes() {
+                let offset = u32_at(cd, pos + 42) as u64;
+                let mut e = cd[pos..pos + 46 + name_len].to_vec();
+                e[42..46].copy_from_slice(&0xFFFF_FFFFu32.to_le_bytes());
+                let extra_total = extra_len + 12;
+                e[30..32].copy_from_slice(&(extra_total as u16).to_le_bytes());
+                e.extend_from_slice(&cd[pos + 46 + name_len..pos + 46 + name_len + extra_len]);
+                e.extend_from_slice(&ZIP64_EXTRA_ID.to_le_bytes());
+                e.extend_from_slice(&8u16.to_le_bytes());
+                e.extend_from_slice(&offset.to_le_bytes());
+                e.extend_from_slice(&cd[pos + 46 + name_len + extra_len..end]);
+                new_cd.extend_from_slice(&e);
+            } else {
+                new_cd.extend_from_slice(&cd[pos..end]);
+            }
+            pos = end;
+        }
+
+        let mut out = zip[..cd_offset].to_vec();
+        out.extend_from_slice(&new_cd);
+        let mut eocd_rec = zip[eocd..].to_vec();
+        eocd_rec[12..16].copy_from_slice(&(new_cd.len() as u32).to_le_bytes());
+        out.extend_from_slice(&eocd_rec);
+        out
+    }
+
+    #[tokio::test]
+    async fn zip64_directory_is_read_through_the_locator() {
+        let body: Vec<u8> = (0..60_000u32).map(|i| (i % 241) as u8).collect();
+        let zip = to_zip64_tail(&make_zip(&body, false), true);
+        let mut cursor = std::io::Cursor::new(zip.clone());
+        let entries = read_central_directory(&mut cursor, zip.len() as u64).await.unwrap();
+        assert_eq!(entries.len(), 3);
+        assert_eq!(extract_video(&zip).await, body);
+    }
+
+    #[tokio::test]
+    async fn zip64_extra_field_supplies_the_local_header_offset() {
+        let body: Vec<u8> = (0..30_000u32).map(|i| (i % 239) as u8).collect();
+        let plain = make_zip(&body, false);
+        let zip = offset_into_zip64_extra(&plain, "Videos/MS-DOS/Some Game (1994).mp4");
+        let expected = {
+            let mut c = std::io::Cursor::new(plain.clone());
+            let e = read_central_directory(&mut c, plain.len() as u64).await.unwrap();
+            find_video(&e).unwrap().local_header_offset
+        };
+        let mut cursor = std::io::Cursor::new(zip.clone());
+        let entries = read_central_directory(&mut cursor, zip.len() as u64).await.unwrap();
+        assert_eq!(find_video(&entries).unwrap().local_header_offset, expected);
+        assert_eq!(extract_video(&zip).await, body);
+    }
+
+    #[tokio::test]
+    async fn zip64_sentinels_without_a_locator_are_an_error() {
+        let zip = to_zip64_tail(&make_zip(b"video", false), false);
+        let mut cursor = std::io::Cursor::new(zip.clone());
+        let err = read_central_directory(&mut cursor, zip.len() as u64).await.unwrap_err();
+        assert!(err.to_string().contains("zip64"), "{err}");
     }
 }

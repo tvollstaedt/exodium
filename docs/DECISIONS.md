@@ -80,3 +80,9 @@
 - Verworfen: Kommentare ganz streichen (die Invarianten sind das Wissen, das im Code nicht steht); Historie in `git blame` verweisen (die Erklaerung, WARUM eine Zeile so ist, bleibt im Code, nur die Anekdote geht).
 - Grund: 2.353 Zeilen in Bloecken ab fuenf Zeilen, zu grossen Teilen Erzaehlung und Wiederholung der CLAUDE.md; jetzt 119. Netto minus 1.947 Zeilen, kein Code geaendert.
 - Gotcha: Die Paragraphen-Nummern der CLAUDE.md sind damit Referenzziele - beim Umnummerieren `grep "§"` ueber src/ und src-tauri/.
+
+## 2026-09-06 - zip64 im Range-Reader (Blocker fuer den Media-Pack-Spike, #27)
+- Entscheidung: `zip_range::read_central_directory` folgt bei den 0xFFFF-Sentinels dem zip64-Locator (20 Bytes vor dem EOCD) zum zip64-EOCD-Record und liest Eintragszahl, Verzeichnisgroesse und -offset als u64; pro Eintrag ersetzt das Extra-Feld 0x0001 die uebergelaufenen Felder in Spec-Reihenfolge. Verzeichnisse ueber 64 MB werden abgelehnt (`MAX_DIRECTORY_BYTES`), der 512-MB-Deckel pro Eintrag bleibt.
+- Verworfen: die `zip`-Crate fuer das Verzeichnis (synchron, liest ueber den Torrent-Stream ganze Pieces); den Tail groesser lesen statt ein zweites Mal zu seeken (der Record muss nicht im Tail liegen).
+- Grund: `DOSSoundtracks.zip` hat 36 GB und ist damit zwingend zip64; der Reader brach mit "zip64 archive not supported" ab.
+- Gotcha: Der Local Header wird weiter nur uebersprungen (Name + Extra per Laenge), dort braucht es kein zip64. Test-Fixtures sind handgebaut, weil der `zip`-Crate zip64 nur bei Bedarf schreibt.
