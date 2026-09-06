@@ -23,7 +23,7 @@ import { loadVariants } from "../stores/variants";
 import { toggleFavorite, updateGameFavorited } from "../stores/games";
 import { videos, requestVideo, releaseVideo, setForegroundVideo, getVideoState, videoPlaybackUnsupported, PHASE_QUEUED, PHASE_PROBING } from "../stores/videos";
 import { ensureDismissedNotesLoaded, isNoteDismissed, dismissedNotesLoaded, dismissNote } from "../stores/notes";
-import { packsByCollection, activeJobs, startContentPackInstall } from "../stores/contentPacks";
+import { packsByCollection, activeJobs, installedPacks, startContentPackInstall } from "../stores/contentPacks";
 import { ensurePreviewMutedLoaded, previewMuted, setPreviewMuted } from "../stores/playback";
 import { musicJobs, getMusicState, requestTheme, playTheme, pauseFor, resumeFrom, pauseForGame, resumeFromGame, togglePlay, currentTrack, wantedTrack, musicPlaying, musicAutoplay, ensureMusicAutoplayLoaded, musicUnsupported, MUSIC_QUEUED } from "../stores/music";
 
@@ -135,6 +135,18 @@ export function GameDetailPanel(props: Props) {
       .then((v) => { if (props.game?.id === id) { setSvmVariants(v); } })
       .catch(() => {});
   };
+  // A finished pack install has to clear the "not found" note without the
+  // panel being reopened - the Win9x status does the same re-probe.
+  createEffect(() => {
+    installedPacks();
+    if (!panelSettled()) { return; }
+    const g = props.game;
+    if (!isScummVm(g) || g?.id == null) { return; }
+    const id = g.id;
+    scummvmEngineInfo(id)
+      .then((e) => { if (props.game?.id === id) { setSvmEngine(e); } })
+      .catch(() => {});
+  });
   const chooseSvmVariant = async (name: string) => {
     const id = props.game?.id;
     const sel = svmVariants()?.selected;
