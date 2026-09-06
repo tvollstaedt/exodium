@@ -45,26 +45,46 @@ describe("launchNote", () => {
       expect(launchNote(svm())).toBeNull();
     });
     it("blocks when no ScummVM resolves, with the Flatpak hint off Windows", () => {
-      const n = launchNote(svm({ svmEngine: { available: false, pinned_version: "2.9.0", source: null } }));
+      const n = launchNote(svm({ svmEngine: { available: false, pinned_version: "2.9.0", source: null, pack_id: null } }));
       expect(n?.key).toBe("engine-missing");
       expect(n?.blocking).toBe(true);
       expect(n?.text).toContain("ScummVM 2.9.0");
       expect(n?.text).toContain("org.scummvm.ScummVM");
-      const win = launchNote(svm({ isWindows: true, svmEngine: { available: false, pinned_version: "2.9.0", source: null } }));
+      const win = launchNote(svm({ isWindows: true, svmEngine: { available: false, pinned_version: "2.9.0", source: null, pack_id: null } }));
       expect(win?.text).not.toContain("Flatpak");
     });
+    it("offers the pinned build's pack instead of scummvm.org, and on a system ScummVM too", () => {
+      const missing = { available: false, pinned_version: "2.9.0", source: null, pack_id: "scummvm-2.9.0" };
+      const svmPack = { ...pack, id: "scummvm-2.9.0", display_name: "ScummVM 2.9.0" };
+      const install = vi.fn();
+      const n = launchNote(svm({ svmEngine: missing, emulatorPack: svmPack, installPack: install }));
+      expect(n?.key).toBe("engine-missing");
+      expect(n?.blocking).toBe(true);
+      expect(n?.text).not.toContain("scummvm.org");
+      n?.action?.onClick();
+      expect(install).toHaveBeenCalledWith(svmPack);
+      const job = { phase: "downloading", progress: 0.2, downloaded_bytes: 20, total_bytes: 100, finished: false, installed: false, error: null };
+      expect(launchNote(svm({ svmEngine: missing, emulatorPack: svmPack, packJob: job }))?.text).toBe("Downloading ScummVM 2.9.0… 20%");
+      const system = { ...missing, available: true, source: "path" as const };
+      const v = launchNote(svm({ svmEngine: system, emulatorPack: svmPack }));
+      expect(v?.key).toBe("scummvm-version");
+      expect(v?.blocking).toBe(false);
+      expect(v?.text).toContain("eXo pins this game");
+      expect(v?.action?.label).toBe("Download ScummVM 2.9.0 (50.0 MB)");
+      expect(launchNote(svm({ svmEngine: system }))?.action).toBeUndefined();
+    });
     it("eXo's note outranks the version warning, never the missing engine", () => {
-      const ok = { available: true, pinned_version: "2.9.0", source: "path" as const };
+      const ok = { available: true, pinned_version: "2.9.0", source: "path" as const, pack_id: null };
       const n = launchNote(svm({ svmEngine: ok, svmNote: "Audio is off in this port." }));
       expect(n?.key).toBe("svm-note");
       expect(n?.blocking).toBeUndefined();
       expect(key(svm({ svmEngine: { ...ok, available: false }, svmNote: "x" }))).toBe("engine-missing");
     });
     it("warns when a system ScummVM ignores the pin, not for eXo's or the pack's build", () => {
-      expect(key(svm({ svmEngine: { available: true, pinned_version: "2.9.0", source: "path" } }))).toBe("scummvm-version");
-      expect(key(svm({ svmEngine: { available: true, pinned_version: "2.9.0", source: "flatpak" } }))).toBe("scummvm-version");
-      expect(key(svm({ svmEngine: { available: true, pinned_version: "2.9.0", source: "pack" } }))).toBeNull();
-      expect(key(svm({ svmEngine: { available: true, pinned_version: "2.9.0", source: "exo" } }))).toBeNull();
+      expect(key(svm({ svmEngine: { available: true, pinned_version: "2.9.0", source: "path", pack_id: null } }))).toBe("scummvm-version");
+      expect(key(svm({ svmEngine: { available: true, pinned_version: "2.9.0", source: "flatpak", pack_id: null } }))).toBe("scummvm-version");
+      expect(key(svm({ svmEngine: { available: true, pinned_version: "2.9.0", source: "pack", pack_id: null } }))).toBeNull();
+      expect(key(svm({ svmEngine: { available: true, pinned_version: "2.9.0", source: "exo", pack_id: null } }))).toBeNull();
     });
   });
 
@@ -158,7 +178,7 @@ describe("emulatorName", () => {
     expect(emulatorName(game({ dosbox_variant: "x98" }), null, false)).toBe("DOSBox-X");
     expect(emulatorName(game({ dosbox_variant: "86boxME" }), null, false)).toBe("86Box");
     expect(emulatorName(game({ torrent_source: "eXoScummVM" }), null, false)).toBe("ScummVM");
-    expect(emulatorName(game({ torrent_source: "eXoScummVM" }), { available: true, pinned_version: "2.8.0", source: "pack" }, false)).toBe("ScummVM 2.8.0");
+    expect(emulatorName(game({ torrent_source: "eXoScummVM" }), { available: true, pinned_version: "2.8.0", source: "pack", pack_id: null }, false)).toBe("ScummVM 2.8.0");
   });
   it("maps variants to emulator packs like the backend", () => {
     expect(emulatorPackId("x98")).toBe("dosbox-x");

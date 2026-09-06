@@ -183,7 +183,96 @@
     "eXoScummVM": {
       "torrent_infohash": "8d490e5c405dc30161c16bd907372ac01523f5c7",
       "game_count": 832,
-      "content_packs": {}
+      "content_packs": {
+        "scummvm-2.5.0": {
+          "display_name": "ScummVM 2.5.0",
+          "description": "The ScummVM build eXo pins these games to. Downloads automatically with your first game that needs 2.5.0.",
+          "url": "",
+          "sha256": "",
+          "size_bytes": 0,
+          "version": 1,
+          "install_path": "content/emulators/scummvm-2.5.0",
+          "supersedes": [],
+          "platforms": {
+            "darwin-aarch64": {
+              "url": "",
+              "sha256": "",
+              "size_bytes": 0
+            },
+            "linux-x86_64": {
+              "url": "",
+              "sha256": "",
+              "size_bytes": 0
+            }
+          }
+        },
+        "scummvm-2.8.0": {
+          "display_name": "ScummVM 2.8.0",
+          "description": "The ScummVM build eXo pins these games to. Downloads automatically with your first game that needs 2.8.0.",
+          "url": "",
+          "sha256": "",
+          "size_bytes": 0,
+          "version": 1,
+          "install_path": "content/emulators/scummvm-2.8.0",
+          "supersedes": [],
+          "platforms": {
+            "darwin-aarch64": {
+              "url": "",
+              "sha256": "",
+              "size_bytes": 0
+            },
+            "linux-x86_64": {
+              "url": "",
+              "sha256": "",
+              "size_bytes": 0
+            }
+          }
+        },
+        "scummvm-2.9.0": {
+          "display_name": "ScummVM 2.9.0",
+          "description": "The ScummVM build eXo pins these games to. Downloads automatically with your first game that needs 2.9.0.",
+          "url": "",
+          "sha256": "",
+          "size_bytes": 0,
+          "version": 1,
+          "install_path": "content/emulators/scummvm-2.9.0",
+          "supersedes": [],
+          "platforms": {
+            "darwin-aarch64": {
+              "url": "",
+              "sha256": "",
+              "size_bytes": 0
+            },
+            "linux-x86_64": {
+              "url": "",
+              "sha256": "",
+              "size_bytes": 0
+            }
+          }
+        },
+        "scummvm-2026.1.0": {
+          "display_name": "ScummVM 2026.1.0",
+          "description": "The ScummVM build eXo pins these games to. Downloads automatically with your first game that needs 2026.1.0.",
+          "url": "",
+          "sha256": "",
+          "size_bytes": 0,
+          "version": 1,
+          "install_path": "content/emulators/scummvm-2026.1.0",
+          "supersedes": [],
+          "platforms": {
+            "darwin-aarch64": {
+              "url": "",
+              "sha256": "",
+              "size_bytes": 0
+            },
+            "linux-x86_64": {
+              "url": "",
+              "sha256": "",
+              "size_bytes": 0
+            }
+          }
+        }
+      }
     }
   }
 }

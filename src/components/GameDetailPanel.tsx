@@ -148,9 +148,11 @@ export function GameDetailPanel(props: Props) {
   };
   const emulatorName = () => describeEmulator(selected() ?? props.game, svmEngine(), runsUnderEce());
   const packCollection = () => selected()?.torrent_source ?? props.game?.torrent_source ?? "eXoWin9x";
+  /** The variant that picks the emulator pack (Win9x slug or ScummVM pin). */
   /** The content pack that could supply the missing Win9x emulator. */
   const emulatorPack = () => {
-    const packId = emulatorPackId(selected()?.dosbox_variant ?? props.game?.dosbox_variant);
+    const g = selected() ?? props.game;
+    const packId = isScummVm(g) ? svmEngine()?.pack_id ?? null : emulatorPackId(g?.dosbox_variant);
     if (!packId) { return null; }
     return (packsByCollection()[packCollection()] ?? [])
       .find((p) => p.id === packId && p.available && !p.installed) ?? null;

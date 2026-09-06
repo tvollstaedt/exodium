@@ -81,7 +81,31 @@ pub(crate) static WIN9X_SUPPORT: SupportPack = SupportPack {
     failed: AtomicBool::new(false),
 };
 
-pub(crate) static PACKS: [&SupportPack; 2] = [&DOS_SUPPORT, &WIN9X_SUPPORT];
+#[cfg(windows)]
+const SCUMMVM_PREFIXES: &[&str] = &["mt32/", "emulators/scmvm/"];
+#[cfg(not(windows))]
+const SCUMMVM_PREFIXES: &[&str] = &["mt32/"];
+
+pub(crate) fn scummvm_ready(root: &Path) -> bool {
+    root.join("eXo/mt32").exists()
+        && (!cfg!(windows) || root.join("eXo/emulators/scmvm").exists())
+}
+
+/// MT-32 ROMs and the SoundCanvas soundfont for ScummVM's sound menu; on
+/// Windows also eXo's seven pinned ScummVM builds (§18).
+pub(crate) static SCUMMVM_SUPPORT: SupportPack = SupportPack {
+    collection: "eXoScummVM",
+    util_suffix: "util/utilSVM.zip",
+    inner_zip: "EXTsvm.zip",
+    prefixes: SCUMMVM_PREFIXES,
+    label: "MT-32 ROMs + SoundCanvas soundfont for ScummVM",
+    ready: scummvm_ready,
+    post: None,
+    running: AtomicBool::new(false),
+    failed: AtomicBool::new(false),
+};
+
+pub(crate) static PACKS: [&SupportPack; 3] = [&DOS_SUPPORT, &WIN9X_SUPPORT, &SCUMMVM_SUPPORT];
 
 /// Extract the pack's subtrees from the util zip (blocking). Serialised per
 /// pack: the startup rearm and a download-click watcher can both find the

@@ -127,6 +127,35 @@ pub(crate) struct Resolved {
 /// eXo's build (Windows), the per-version pack (macOS/Linux), then whatever
 /// the system offers. The last two ignore the pin - a game that needs 2.5.0
 /// may misbehave under a 2026 release, which is what the packs are for.
+/// The release pack that serves a build slug: its own version, or the
+/// nearest release for the git snapshots (no binary exists for those).
+pub(crate) fn pack_version(slug: &str) -> &'static str {
+    match slug {
+        "svn2.3_18903" => "2.5.0",
+        "svn2.8_9335" => "2.8.0",
+        "svn3.0.0git19492" => "2026.1.0",
+        _ => match build_version(slug) {
+            v @ ("2.5.0" | "2.8.0" | "2.9.0" | "2026.1.0") => v,
+            _ => "2.9.0",
+        },
+    }
+}
+
+/// Content-pack id for a build slug (`scummvm-<version>`).
+pub(crate) fn pack_id(slug: &str) -> String {
+    format!("scummvm-{}", pack_version(slug))
+}
+
+fn pack_binary(data_dir: &str, version: &str) -> Option<PathBuf> {
+    if cfg!(target_os = "macos") {
+        pack_candidate(data_dir, &format!("scummvm-{version}/ScummVM.app/Contents/MacOS/scummvm"))
+    } else if cfg!(target_os = "linux") {
+        pack_candidate(data_dir, &format!("scummvm-{version}/ScummVM.AppImage"))
+    } else {
+        None
+    }
+}
+
 pub(crate) fn resolve_scummvm(torrent_root: &Path, data_dir: &str, slug: &str) -> Option<Resolved> {
     if cfg!(windows) {
         let base = torrent_root.join("eXo/emulators/scmvm");
@@ -139,14 +168,8 @@ pub(crate) fn resolve_scummvm(torrent_root: &Path, data_dir: &str, slug: &str) -
             return Some(Resolved { cmd: EngineCmd::Direct(exe), source: EngineSource::Exo });
         }
     }
-    let version = build_version(slug);
-    let packed = if cfg!(target_os = "macos") {
-        pack_candidate(data_dir, &format!("scummvm-{version}/ScummVM.app/Contents/MacOS/scummvm"))
-    } else if cfg!(target_os = "linux") {
-        pack_candidate(data_dir, &format!("scummvm-{version}/ScummVM.AppImage"))
-    } else {
-        None
-    };
+    let packed = pack_binary(data_dir, build_version(slug))
+        .or_else(|| pack_binary(data_dir, pack_version(slug)));
     if let Some(bin) = packed {
         return Some(Resolved { cmd: EngineCmd::Direct(bin), source: EngineSource::Pack });
     }
@@ -529,6 +552,9 @@ pub struct ScummVmEngineInfo {
     pub pinned_version: String,
     /// Where the binary that would run comes from; None when nothing resolves.
     pub source: Option<EngineSource>,
+    /// The content pack that would supply the pinned build here; None on
+    /// Windows, where eXo's own builds come out of `utilSVM.zip`.
+    pub pack_id: Option<String>,
 }
 
 /// What the panel shows next to Play: answered by the launcher's own resolver
@@ -551,6 +577,7 @@ pub async fn scummvm_engine_info(
             available: false,
             pinned_version: build_version(&variant).to_string(),
             source: None,
+            pack_id: (!cfg!(windows)).then(|| pack_id(&variant)),
         });
     };
     let torrent_root = crate::commands::paths::game_root(&data_dir);
@@ -559,6 +586,7 @@ pub async fn scummvm_engine_info(
         available: resolved.is_some(),
         pinned_version: build_version(&variant).to_string(),
         source: resolved.map(|r| r.source),
+        pack_id: (!cfg!(windows)).then(|| pack_id(&variant)),
     })
 }
 
@@ -843,6 +871,18 @@ mod tests {
         let e = lookup(&["Arthur - The Quest for Excalibur (DOS)"]).unwrap();
         assert_eq!(e.build, "svn2.8_9335");
         assert_eq!(build_version(&e.build), "2.8.0git9335-g00e72a17004");
+    }
+
+    /// Every slug maps to one of the four release packs; snapshots to the
+    /// nearest release.
+    #[test]
+    fn snapshots_fall_back_to_the_nearest_release_pack() {
+        assert_eq!(pack_id("default"), "scummvm-2.8.0");
+        assert_eq!(pack_id("2.5"), "scummvm-2.5.0");
+        assert_eq!(pack_id("2026.1.0"), "scummvm-2026.1.0");
+        assert_eq!(pack_id("svn2.8_9335"), "scummvm-2.8.0");
+        assert_eq!(pack_id("svn3.0.0git19492"), "scummvm-2026.1.0");
+        assert_eq!(pack_id("svn2.3_18903"), "scummvm-2.5.0");
     }
 
     /// The picker needs the whole tree, the launcher only one path.

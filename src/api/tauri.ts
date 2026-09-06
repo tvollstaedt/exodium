@@ -205,6 +205,9 @@ export interface ScummVmEngineInfo {
   /** Where the binary that would run comes from: eXo's own build (Windows),
    *  the per-version pack, or a system copy of some other version. */
   source: "exo" | "pack" | "path" | "flatpak" | null;
+  /** The content pack that would supply the pinned build here; null on
+   *  Windows, where eXo's own builds come out of the support payload. */
+  pack_id: string | null;
 }
 
 /** Which ScummVM would run an eXoScummVM game here - the launcher's own

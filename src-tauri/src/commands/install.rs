@@ -73,8 +73,9 @@ pub async fn download_game(
         (manager, main_mgr)
     };
 
-    let is_win9x_collection = crate::commands::collections::collection_def(source)
-        .is_some_and(|c| c.launcher == crate::commands::collections::Launcher::Win9x);
+    let launcher = crate::commands::collections::collection_def(source).map(|c| c.launcher);
+    let is_win9x_collection = launcher == Some(crate::commands::collections::Launcher::Win9x);
+    let is_scummvm_collection = launcher == Some(crate::commands::collections::Launcher::ScummVm);
 
     // The Win9x support payload is queued below; the disk preflight has to
     // budget it here (zip + inner temp + extracted, ~7.5 GB).
@@ -84,14 +85,22 @@ pub async fn download_game(
             game.dosbox_variant.as_deref(),
         );
 
+    // ScummVM's support payload (MT-32 ROMs, eXo's builds on Windows), same
+    // shape as Win9x's; the preflight budgets it below.
+    let scummvm_support_missing =
+        is_scummvm_collection && !crate::support_files::scummvm_ready(&manager.torrent_root());
+
     let data_dir = {
         let conn = db_state.lock()?;
         queries::get_config(&conn, "data_dir").ok().flatten()
     };
 
-    // macOS/Linux: the emulator pack rides along, resolver-gated so a
-    // system install never pays for it.
-    let win9x_emulator_pack = if is_win9x_collection && !cfg!(windows) {
+    // macOS/Linux: the emulator pack rides along. Win9x is resolver-gated so
+    // a system install never pays for it; ScummVM queues unless eXo's build
+    // or the pack itself is present - a system ScummVM ignores the pin.
+    let emulator_pack: Option<(String, crate::commands::updates::ContentPackInfo)> = if cfg!(windows) {
+        None
+    } else if is_win9x_collection {
         let dd = data_dir.clone().unwrap_or_default();
         crate::commands::win9x::emulator_pack_for_variant(game.dosbox_variant.as_deref())
             .filter(|_| {
@@ -104,8 +113,20 @@ pub async fn download_game(
             })
             .and_then(|pack_id| {
                 crate::commands::content_packs::installable_pack(source, pack_id)
-                    .map(|info| (pack_id, info))
+                    .map(|info| (pack_id.to_string(), info))
             })
+    } else if is_scummvm_collection {
+        use crate::commands::scummvm::{pack_id, resolve_scummvm, EngineSource};
+        let dd = data_dir.clone().unwrap_or_default();
+        let slug = game.dosbox_variant.as_deref().unwrap_or("default");
+        let pinned = resolve_scummvm(&manager.torrent_root(), &dd, slug)
+            .is_some_and(|r| matches!(r.source, EngineSource::Exo | EngineSource::Pack));
+        if pinned {
+            None
+        } else {
+            let id = pack_id(slug);
+            crate::commands::content_packs::installable_pack(source, &id).map(|info| (id, info))
+        }
     } else {
         None
     };
@@ -126,7 +147,10 @@ pub async fn download_game(
             if win9x_support_missing {
                 needed += 8 * 1024 * 1024 * 1024;
             }
-            if let Some((_, info)) = &win9x_emulator_pack {
+            if scummvm_support_missing {
+                needed += 3 * 1024 * 1024 * 1024;
+            }
+            if let Some((_, info)) = &emulator_pack {
                 // Same 2.2x factor as the pack installer's own preflight
                 // (archive + extracted copy).
                 needed += (info.size_bytes as f64 * 2.2) as u64;
@@ -156,14 +180,17 @@ pub async fn download_game(
     if win9x_support_missing {
         crate::support_files::ensure_queued(&crate::support_files::WIN9X_SUPPORT, &manager).await;
     }
+    if scummvm_support_missing {
+        crate::support_files::ensure_queued(&crate::support_files::SCUMMVM_SUPPORT, &manager).await;
+    }
 
-    // Queue the emulator pack alongside (see win9x_emulator_pack above).
-    // "Install already in progress" is the normal second-download case.
-    if let Some((pack_id, _)) = &win9x_emulator_pack {
+    // Queue the emulator pack alongside (see emulator_pack above). "Install
+    // already in progress" is the normal second-download case.
+    if let Some((pack_id, _)) = &emulator_pack {
         if let Err(e) =
             crate::commands::content_packs::start_pack_install(&app, source, pack_id).await
         {
-            log::info!("Win9x emulator pack '{pack_id}' not queued: {e}");
+            log::info!("Emulator pack '{pack_id}' not queued: {e}");
         }
     }
 

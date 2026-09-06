@@ -1311,11 +1311,23 @@ swaps the DOSBox controls for Edition / Sound / Subtitles / Aspect ratio.
 chip click re-sends sound/subtitles/aspect and resets only `svm_sub`. Both
 are null for an uninstalled game - the tree lives in the zip.
 
-**Still open:** Phase 2 - the seven emulator packs (`content-packs.yml`
-matrix, manifest entries), Windows extraction of `utilSVM.zip` (also the
-MT-32 ROMs on every platform), auto-queueing the pack with the first
-download; `Feria D'Arles` has no cover (apostrophe in the image name);
-poster pack.
+**In-app ScummVM (Phase 2a, wired; 2b = the release):** four release packs
+`scummvm-{2.5.0,2.8.0,2.9.0,2026.1.0}` in the manifest (`platforms` map,
+`content/emulators/scummvm-<version>`), the three git snapshots map to the
+nearest release (`pack_version`; no binary exists for a snapshot).
+`download_game` queues the pack with the first game unless eXo's build or
+the pack is already there - a system ScummVM does NOT stop it, because it
+ignores the pin. `SCUMMVM_SUPPORT` in `support_files.rs` fetches
+`utilSVM.zip` for the MT-32 ROMs (every platform) and eXo's builds
+(Windows). The panel note offers the pack ("Download ScummVM 2.9.0") both
+when nothing resolves and when a system copy would run unpinned. Until
+`content-v7` ships the tarballs (macOS: the official DMG's `ScummVM.app`;
+Linux: our own AppImage builds), the manifest URLs are empty and the note
+falls back to scummvm.org.
+
+**Still open:** 2b - the `content-packs.yml` matrix and the release;
+snapshot builds from their commits; `Feria D'Arles` has no cover
+(apostrophe in the image name); poster pack.
 
 ## Conventions
 

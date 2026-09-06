@@ -99,11 +99,46 @@ const supportFailedNote = (): PanelNote => ({
 
 const oneTime = (bytes: number) => (bytes ? ` (one-time ${formatBytes(bytes)})` : "");
 
+/** The pack that supplies the missing emulator, as a note: its running
+ *  install, the offline case, or the download button. Null without a pack. */
+function packRemedy(ctx: NoteContext, key: string, engine: string, blocking: boolean): PanelNote | null {
+  const pack = ctx.emulatorPack;
+  if (!pack) { return null; }
+  const job = ctx.packJob;
+  if (job && !job.finished) {
+    const pct = job.total_bytes > 0 ? Math.round((job.downloaded_bytes / job.total_bytes) * 100) : 0;
+    return {
+      key,
+      blocking,
+      text: job.phase === "extracting"
+        ? `Installing ${pack.display_name}…`
+        : `Downloading ${pack.display_name}… ${pct}%`,
+    };
+  }
+  if (ctx.offline) {
+    return {
+      key,
+      blocking,
+      text: `This game needs ${engine}, which is not downloaded yet. `
+        + "Go online (Settings → Network) to download it.",
+    };
+  }
+  return {
+    key,
+    blocking,
+    text: `This game needs ${engine}, which is not downloaded yet.`,
+    action: {
+      label: `Download emulator (${formatBytes(pack.size_bytes)})`,
+      onClick: () => ctx.installPack(pack),
+    },
+  };
+}
+
 function scummVmNote(ctx: NoteContext, engine: string): PanelNote | null {
   const e = ctx.svmEngine;
   if (!e) { return null; }
   if (!e.available) {
-    return {
+    return packRemedy(ctx, "engine-missing", engine, true) ?? {
       key: "engine-missing",
       blocking: true,
       text: `This game runs under ${engine}, which was not found on this system. `
@@ -116,11 +151,15 @@ function scummVmNote(ctx: NoteContext, engine: string): PanelNote | null {
     return { key: "svm-note", text: ctx.svmNote };
   }
   if (e.source === "path" || e.source === "flatpak") {
-    return {
-      key: "scummvm-version",
-      text: `eXo pins this game to ${engine}. Your system's ScummVM will run it `
-        + "instead, which may behave differently.",
-    };
+    // A system ScummVM runs the game, but not the build eXo tested it with;
+    // the pack fixes that, so the note offers it rather than only warning.
+    const remedy = packRemedy(ctx, "scummvm-version", engine, false);
+    const text = `eXo pins this game to ${engine}. Your system's ScummVM will run it `
+      + "instead, which may behave differently.";
+    if (remedy?.action) {
+      return { ...remedy, text, action: { ...remedy.action, label: `Download ${engine} (${formatBytes(ctx.emulatorPack!.size_bytes)})` } };
+    }
+    return remedy ?? { key: "scummvm-version", text };
   }
   return null;
 }
@@ -130,37 +169,8 @@ function scummVmNote(ctx: NoteContext, engine: string): PanelNote | null {
  *  comes out of it), and elsewhere the advice is an install hint. */
 function engineMissingNote(ctx: NoteContext, engine: string): PanelNote | null {
   const v = ctx.game?.dosbox_variant;
-  const pack = ctx.emulatorPack;
-  if (pack) {
-    const job = ctx.packJob;
-    if (job && !job.finished) {
-      const pct = job.total_bytes > 0 ? Math.round((job.downloaded_bytes / job.total_bytes) * 100) : 0;
-      return {
-        key: "engine-missing",
-        blocking: true,
-        text: job.phase === "extracting"
-          ? `Installing ${pack.display_name}…`
-          : `Downloading ${pack.display_name}… ${pct}%`,
-      };
-    }
-    if (ctx.offline) {
-      return {
-        key: "engine-missing",
-        blocking: true,
-        text: `This game needs ${engine}, which is not downloaded yet. `
-          + "Go online (Settings → Network) to download it.",
-      };
-    }
-    return {
-      key: "engine-missing",
-      blocking: true,
-      text: `This game needs ${engine}, which is not downloaded yet.`,
-      action: {
-        label: `Download emulator (${formatBytes(pack.size_bytes)})`,
-        onClick: () => ctx.installPack(pack),
-      },
-    };
-  }
+  const remedy = packRemedy(ctx, "engine-missing", engine, true);
+  if (remedy) { return remedy; }
   if (ctx.isWindows) {
     const support = ctx.support;
     if (!support) { return null; }
