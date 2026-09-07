@@ -176,7 +176,7 @@ export function GameCard(props: GameCardProps) {
   const isDownloading = () => dlState()?.downloading ?? false;
 
   return (
-    <div ref={cardRef} class={`game-card ${props.game.installed || props.game.in_library ? "installed" : ""}`} onContextMenu={handleContextMenu} data-game-id={props.game.id != null ? String(props.game.id) : undefined}>
+    <div ref={cardRef} class={`game-card ${props.game.installed || props.game.in_library ? "installed" : ""}`} data-testid="game-card" onContextMenu={handleContextMenu} data-game-id={props.game.id != null ? String(props.game.id) : undefined}>
       <div class="game-card-art" onClick={handleClick}>
         <Show when={thumbSrc() && !imgError()}>
           <Show when={underSrc()}>

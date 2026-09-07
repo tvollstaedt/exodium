@@ -289,8 +289,12 @@ cd ~/Sync/Dev/privat/vm-lab
 ```
 
 Usage and pitfalls: `~/Sync/Dev/privat/vm-lab/CLAUDE.md`. Both jobs install
-the toolchain on first run, then run typecheck, vitest, clippy, cargo test
-and a debug `tauri build`. Windows is ARM64, which is where `ring` wants
+the toolchain on first run, then run typecheck, vitest, clippy, cargo test,
+a debug `tauri build` and the E2E suite in `e2e/` (WebdriverIO against
+`tauri-driver`; there is no WebDriver for WKWebView, so it never runs on
+macOS). `examples/e2e_seed.rs` puts the app into a configured OFFLINE state
+first - it overwrites the real app database, hence its `EXODIUM_E2E=1` guard.
+Specs select by `data-testid`, never by CSS class, and all run in one session. Windows is ARM64, which is where `ring` wants
 clang and CI's x86_64 build never does; `.vmlabignore` keeps the 1.4 GB of
 thumbnails and the platform-foreign sidecar out of the transfer.
 

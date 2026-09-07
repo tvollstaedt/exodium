@@ -27,6 +27,7 @@ export function SearchBar() {
     <form class="search-bar" onSubmit={handleSubmit}>
       <input
         type="text"
+        data-testid="search-input"
         placeholder="Search games..."
         value={searchQuery()}
         onInput={handleInput}

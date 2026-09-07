@@ -557,7 +557,7 @@ function App() {
             </Tooltip.Root>
             <Tooltip.Root openDelay={400}>
               <Tooltip.Trigger asChild={(props) =>
-                <button {...props()} class="icon-btn" onClick={openSettings}>
+                <button {...props()} class="icon-btn" data-testid="open-settings" onClick={openSettings}>
                   &#9881;
                 </button>
               } />
@@ -571,7 +571,7 @@ function App() {
           <Portal>
             <Dialog.Backdrop class="ark-dialog-backdrop" />
             <Dialog.Positioner class="ark-dialog-positioner">
-              <Dialog.Content class="ark-dialog-content ark-dialog-settings">
+              <Dialog.Content class="ark-dialog-content ark-dialog-settings" data-testid="settings-dialog">
                 <Dialog.Title class="ark-dialog-title">Settings</Dialog.Title>
                 <div class="settings-tabs">
                   <button
@@ -580,6 +580,7 @@ function App() {
                   >General</button>
                   <button
                     class={`settings-tab ${settingsTab() === "packs" ? "active" : ""}`}
+                    data-testid="settings-tab-packs"
                     onClick={() => setSettingsTab("packs")}
                   >Content Packs</button>
                 </div>

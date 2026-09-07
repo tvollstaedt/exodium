@@ -643,7 +643,7 @@ export function Library() {
     <Show
       when={viewMode() === "list"}
       fallback={
-        <div class="game-grid">
+        <div class="game-grid" data-testid="shelf-grid">
           <For each={p.games}>
             {(game) => <GameCard game={game} onFavoriteChanged={handleFavoriteChanged} onDetail={setDetailGame} />}
           </For>
@@ -672,6 +672,7 @@ export function Library() {
       <div class="lib-tabs">
         <button
           class={`lib-tab ${activeTab() === "browse" ? "active" : ""}`}
+          data-testid="tab-browse"
           onClick={() => switchTab("browse")}
         >
           Browse
@@ -681,6 +682,7 @@ export function Library() {
         </button>
         <button
           class={`lib-tab ${activeTab() === "library" ? "active" : ""}`}
+          data-testid="tab-library"
           onClick={() => switchTab("library")}
         >
           My Library
@@ -787,7 +789,7 @@ export function Library() {
         </Show>
 
         <Show when={viewMode() === "grid"}>
-          <div class="sections-list">
+          <div class="sections-list" data-testid="browse-grid">
             <For each={sections()}>
               {(section) => (
                 <>

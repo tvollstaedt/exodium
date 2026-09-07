@@ -875,6 +875,7 @@ export function GameDetailPanel(props: Props) {
             a child's spinner or badge burst must not settle the panel early. */}
         <div
           class="game-detail-panel"
+          data-testid="game-detail"
           onAnimationEnd={(e) => { if (e.target === e.currentTarget) { markSettled(); } }}
         >
           {/* Hero: thumbnail + title. The close button lives INSIDE it so the
@@ -985,7 +986,7 @@ export function GameDetailPanel(props: Props) {
                 "what am I looking at" - and none of them competes with the
                 description for width any more. */}
             <div class="game-detail-hero-info">
-              <div class="game-detail-title">{selected()?.title ?? props.game!.title}</div>
+              <div class="game-detail-title" data-testid="game-detail-title">{selected()?.title ?? props.game!.title}</div>
 
               {/* Credits carry an icon instead of a label: with only three
                   lines, and values that read as names and a year, uppercase
@@ -1064,7 +1065,7 @@ export function GameDetailPanel(props: Props) {
             {/* Language switcher: picking a chip re-points the whole panel -
                 actions, description, manual and screenshots all follow it. */}
             <Show when={isMultiLang()}>
-              <div class="variant-switcher" role="group" aria-label="Language versions">
+              <div class="variant-switcher" role="group" aria-label="Language versions" data-testid="language-variants">
                 <Show when={rows().length < 2}>
                   <div class="game-detail-loading">Loading versions…</div>
                 </Show>
@@ -1076,6 +1077,7 @@ export function GameDetailPanel(props: Props) {
                     return (
                       <button
                         class={`variant-chip${selected()?.id === vId() ? " is-selected" : ""}`}
+                        data-testid="variant-chip"
                         onClick={() => { if (vId() != null) { setSelectedId(vId()!); } }}
                         title={languageName(variant.language)}
                       >

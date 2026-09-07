@@ -17,7 +17,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:all": "cargo test --manifest-path src-tauri/Cargo.toml && vitest run"
+    "test:all": "cargo test --manifest-path src-tauri/Cargo.toml && vitest run",
+    "test:e2e": "wdio run e2e/wdio.conf.ts"
   },
   "license": "MIT",
   "dependencies": {
@@ -31,11 +32,19 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
+    "@types/node": "^26.4.1",
+    "@wdio/cli": "^9.31.6",
+    "@wdio/globals": "^9.31.3",
+    "@wdio/local-runner": "^9.31.6",
+    "@wdio/mocha-framework": "^9.31.6",
+    "@wdio/spec-reporter": "^9.31.2",
     "cross-env": "^10.1.0",
     "jsdom": "^25",
+    "tsx": "^4.23.13",
     "typescript": "~5.6.2",
     "vite": "^6.0.3",
     "vite-plugin-solid": "^2.11.0",
-    "vitest": "^2"
+    "vitest": "^2",
+    "webdriverio": "^9.31.6"
   }
 }
