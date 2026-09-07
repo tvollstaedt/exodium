@@ -594,6 +594,31 @@ pub fn run() {
                 log::warn!("resource_dir() unavailable; bundled assets may not be found");
             }
 
+            // The main window is built here rather than by the config
+            // (`create: false`) for one reason: on Windows a WebDriver asks
+            // for the remote-debugging port through
+            // WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS, and WebView2 ignores that
+            // variable once the app passes its own arguments - which wry
+            // always does. With the variable unset the window is identical.
+            let win_cfg = app
+                .config()
+                .app
+                .windows
+                .first()
+                .cloned()
+                .ok_or("tauri.conf.json defines no window")?;
+            #[allow(unused_mut)]
+            let mut window = tauri::WebviewWindowBuilder::from_config(app.handle(), &win_cfg)?;
+            #[cfg(target_os = "windows")]
+            if let Ok(extra) = std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS") {
+                // wry's own defaults, which the override would otherwise drop.
+                window = window.additional_browser_args(&format!(
+                    "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection \
+                     --autoplay-policy=no-user-gesture-required {extra}"
+                ));
+            }
+            window.build()?;
+
             // A fatal error here must be VISIBLE: a panic shows nothing, and
             // a blocking dialog deadlocks before the event loop on macOS. So:
             // non-blocking dialog, in-memory DB, let the loop start.

@@ -12,6 +12,7 @@
   "app": {
     "windows": [
       {
+        "create": false,
         "title": "Exodium",
         "width": 1280,
         "height": 800,
