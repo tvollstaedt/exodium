@@ -246,6 +246,68 @@ pub async fn download_game(
 }
 
 /// Get download progress for a game. If complete, extract and mark installed.
+/// A library row whose torrent file the session has selected. Complete-but-
+/// unextracted rows count too - the extraction runs from the progress poll,
+/// so they need a watcher as well. `installed && !complete` is a false
+/// install: a sparse archive that passed the size test mid-download.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PendingDownload {
+    pub id: i64,
+    pub title: String,
+    #[serde(skip)]
+    pub rel_path: String,
+    pub installed: bool,
+    pub complete: bool,
+}
+
+pub(crate) async fn pending_downloads(
+    db: &Mutex<rusqlite::Connection>,
+    torrent_state: &TorrentState,
+) -> Result<Vec<PendingDownload>, String> {
+    let rows: Vec<(i64, String, String, i64, bool)> = {
+        let conn = db.lock().map_err(|_| "database lock poisoned".to_string())?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, title, torrent_source, game_torrent_index, installed FROM games \
+                 WHERE in_library = 1 AND game_torrent_index IS NOT NULL",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get::<_, i64>(4)? != 0)))
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        rows
+    };
+    let managers = torrent_state.0.read().await.clone();
+    let mut out = Vec::new();
+    for (id, title, source, idx, installed) in rows {
+        let Some(mgr) = managers.get(&source) else { continue };
+        let idx = idx as usize;
+        if !mgr.is_file_selected(idx).await {
+            continue;
+        }
+        let Some(file) = mgr.index().files.get(idx) else { continue };
+        let complete = mgr.is_file_complete(idx).await;
+        // An installed row whose archive is complete is simply done.
+        if installed && complete {
+            continue;
+        }
+        out.push(PendingDownload { id, title, rel_path: file.path.clone(), installed, complete });
+    }
+    Ok(out)
+}
+
+/// Downloads to pick up after a restart: the frontend re-arms a tracker per
+/// row, which is what shows progress and, on completion, extracts.
+#[tauri::command]
+pub async fn list_active_downloads(
+    db_state: State<'_, DbState>,
+    torrent_state: State<'_, TorrentState>,
+) -> Result<Vec<PendingDownload>, String> {
+    pending_downloads(&db_state.0, &torrent_state).await
+}
+
 #[tauri::command]
 pub async fn get_download_progress(
     db_state: State<'_, DbState>,

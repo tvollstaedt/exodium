@@ -291,10 +291,14 @@ fn scan_torrent_indices() -> std::collections::HashMap<&'static str, TorrentInde
 /// Mark games whose files are on disk as installed; returns rows updated.
 /// `adopt_from_disk` lets a bare archive CREATE a library entry - true for
 /// import, Rescan and a data-dir change, never for the startup scan (§4).
+/// `in_flight`: torrent-relative paths of archives the live session is still
+/// downloading. librqbit writes them sparse, so they reach full length long
+/// before they are complete - size alone would confirm a half-fetched game.
 pub(crate) fn scan_installed_games_with_db(
     db: &std::sync::Mutex<rusqlite::Connection>,
     data_dir: &str,
     adopt_from_disk: bool,
+    in_flight: &std::collections::HashSet<String>,
 ) -> Result<usize, String> {
     // Game dirs: eXo/eXoDOS/[<lang>/]<shortcode>, eXo/eXoWin3x/<shortcode>,
     // eXo/eXoWin9x/<year>/<title dir>. The `!`-prefixed config dirs always
@@ -531,6 +535,9 @@ pub(crate) fn scan_installed_games_with_db(
                             return false;
                         };
                         let rel = rel.to_string_lossy().replace('\\', "/");
+                        if in_flight.contains(&rel) {
+                            return false;
+                        }
                         expected_sizes.get(&rel).is_some_and(|expected| len == *expected)
                     })
                     .filter_map(|e| {
@@ -614,13 +621,26 @@ pub(crate) fn scan_installed_games_with_db(
 #[tauri::command]
 pub async fn scan_installed_games(
     db_state: State<'_, DbState>,
+    torrent_state: State<'_, super::TorrentState>,
     adopt: Option<bool>,
 ) -> Result<usize, String> {
     let data_dir = {
         let conn = db_state.lock()?;
         crate::commands::games::configured_data_dir(&conn)?
     };
-    scan_installed_games_with_db(&db_state.0, &data_dir, adopt.unwrap_or(false))
+    let pending = crate::commands::install::pending_downloads(&db_state.0, &torrent_state).await?;
+    // Rows an earlier scan confirmed off a sparse, half-fetched archive.
+    let false_installs: Vec<i64> = pending.iter().filter(|d| d.installed && !d.complete).map(|d| d.id).collect();
+    if !false_installs.is_empty() {
+        let conn = db_state.lock()?;
+        for id in &false_installs {
+            conn.execute("UPDATE games SET installed = 0 WHERE id = ?1", [id]).map_err(|e| e.to_string())?;
+        }
+        log::info!("scan_installed_games: {} rows reset - archive still downloading", false_installs.len());
+    }
+    let in_flight: std::collections::HashSet<String> =
+        pending.into_iter().filter(|d| !d.complete).map(|d| d.rel_path).collect();
+    scan_installed_games_with_db(&db_state.0, &data_dir, adopt.unwrap_or(false), &in_flight)
 }
 
 #[cfg(test)]
@@ -687,10 +707,10 @@ mod scan_tests {
         let data_dir = dir.to_string_lossy().to_string();
 
         // A data dir without any collection tree must not clear the library.
-        assert!(scan_installed_games_with_db(&db, "/nonexistent/exodium", true).is_err());
+        assert!(scan_installed_games_with_db(&db, "/nonexistent/exodium", true, &Default::default()).is_err());
 
-        let first = scan_installed_games_with_db(&db, &data_dir, true).unwrap();
-        let second = scan_installed_games_with_db(&db, &data_dir, true).unwrap();
+        let first = scan_installed_games_with_db(&db, &data_dir, true, &Default::default()).unwrap();
+        let second = scan_installed_games_with_db(&db, &data_dir, true, &Default::default()).unwrap();
         assert_eq!(first, 2, "one extracted dir + one ZIP");
         assert_eq!(second, first, "a second scan must not shrink");
 
@@ -793,7 +813,7 @@ mod scan_tests {
         let db = std::sync::Mutex::new(conn);
         let data_dir = dir.to_string_lossy().to_string();
 
-        scan_installed_games_with_db(&db, &data_dir, false).unwrap();
+        scan_installed_games_with_db(&db, &data_dir, false, &Default::default()).unwrap();
         let (installed, in_library): (i64, i64) = db
             .lock()
             .unwrap()
@@ -807,7 +827,7 @@ mod scan_tests {
         assert_eq!(installed, 0, "and it is not an install either");
 
         // Asking the disk directly is the one case where it may add games.
-        scan_installed_games_with_db(&db, &data_dir, true).unwrap();
+        scan_installed_games_with_db(&db, &data_dir, true, &Default::default()).unwrap();
         let adopted: i64 = db
             .lock()
             .unwrap()
@@ -857,7 +877,7 @@ mod scan_tests {
         let db = std::sync::Mutex::new(conn);
 
         // The automatic scan, the one that would have dropped it.
-        scan_installed_games_with_db(&db, &dir.to_string_lossy(), false).unwrap();
+        scan_installed_games_with_db(&db, &dir.to_string_lossy(), false, &Default::default()).unwrap();
         let (installed, in_library): (i64, i64) = db
             .lock()
             .unwrap()
@@ -899,7 +919,7 @@ mod scan_tests {
         let db = std::sync::Mutex::new(conn);
 
         let installed_after = |adopt: bool| -> i64 {
-            scan_installed_games_with_db(&db, &dir.to_string_lossy(), adopt).unwrap();
+            scan_installed_games_with_db(&db, &dir.to_string_lossy(), adopt, &Default::default()).unwrap();
             db.lock()
                 .unwrap()
                 .query_row("SELECT installed FROM games WHERE shortcode = 'WOLF'", [], |r| {
@@ -912,6 +932,41 @@ mod scan_tests {
         // may hold repacked archives the bundled torrent never described, and
         // refusing those would report "no games found" on a full installation.
         assert_eq!(installed_after(true), 1, "an explicit import trusts what it finds");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A full-length archive the session is still fetching is sparse: the
+    /// size test passes long before the pieces are in.
+    #[test]
+    fn an_archive_still_downloading_is_not_an_install() {
+        let dir = std::env::temp_dir().join(format!("exodium_inflight_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let base = dir.join("eXoDOS/eXo/eXoDOS");
+        std::fs::create_dir_all(&base).unwrap();
+        write_sparse_zip(&base.join("Wolf (1994).zip"), "eXo/eXoDOS/Wolf (1994).zip");
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::init(&conn).unwrap();
+        conn.execute(
+            r"INSERT INTO games (title, platform, language, shortcode, torrent_source,
+                                 application_path, game_torrent_index, installed, in_library)
+              VALUES ('Wolf', 'MS-DOS', 'EN', 'WOLF', 'eXoDOS',
+                      'eXo\eXoDOS\!dos\WOLF\Wolf (1994).bat', ?1, 0, 1)",
+            rusqlite::params![torrent_index_of("eXo/eXoDOS/Wolf (1994).zip")],
+        )
+        .unwrap();
+        let db = std::sync::Mutex::new(conn);
+        let installed = |in_flight: &std::collections::HashSet<String>| -> i64 {
+            scan_installed_games_with_db(&db, &dir.to_string_lossy(), false, in_flight).unwrap();
+            db.lock()
+                .unwrap()
+                .query_row("SELECT installed FROM games WHERE shortcode = 'WOLF'", [], |r| r.get(0))
+                .unwrap()
+        };
+        let in_flight: std::collections::HashSet<String> =
+            ["eXo/eXoDOS/Wolf (1994).zip".to_string()].into_iter().collect();
+        assert_eq!(installed(&in_flight), 0, "a download in flight is not an install, whatever its length");
+        assert_eq!(installed(&Default::default()), 1, "the same file counts once the session is done with it");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

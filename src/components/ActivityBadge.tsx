@@ -176,14 +176,26 @@ export function ActivityBadge(props: Props) {
     return `Sharing with ${peers(v.peers)} - nothing requested right now. ${shared}`;
   };
 
+  // The sheet is fixed-positioned, so it is placed under the badge as
+  // measured at open time - a constant offset lands on the badge itself
+  // wherever the custom title bar adds height above the top bar.
+  let badgeRef: HTMLButtonElement | undefined;
+  const [sheetTop, setSheetTop] = createSignal(48);
+  const openSheet = () => {
+    const rect = badgeRef?.getBoundingClientRect();
+    if (rect) { setSheetTop(Math.round(rect.bottom + 6)); }
+    setShowSheet(!showSheet());
+  };
+
   return (
     <>
       <Tooltip.Root openDelay={300}>
         <Tooltip.Trigger asChild={(triggerProps) =>
           <button
             {...triggerProps()}
+            ref={badgeRef}
             class={`net-badge ${isOffline() ? "net-badge--offline" : "net-badge--online"}`}
-            onClick={() => setShowSheet(!showSheet())}
+            onClick={openSheet}
           >
             <span class="net-badge-dot" classList={{ "is-active": !isOffline() && moving() }} />
             <Show when={!isOffline()} fallback={<>Offline</>}>
@@ -208,7 +220,7 @@ export function ActivityBadge(props: Props) {
       <Show when={showSheet()}>
         <Portal>
           <div class="download-sheet-backdrop" onClick={() => setShowSheet(false)} />
-          <div class="download-sheet">
+          <div class="download-sheet" style={{ top: `${sheetTop()}px` }}>
             <div class="download-sheet-header">
               <span>Downloads</span>
             </div>

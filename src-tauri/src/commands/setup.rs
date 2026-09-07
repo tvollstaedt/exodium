@@ -1228,7 +1228,7 @@ pub async fn setup_from_local(
     // (init_download_manager handles the bundled configs zip for fresh installs.)
 
     // Scan the existing eXoDOS tree to mark games that are already on disk as installed.
-    let installed_count = scan_installed_games_with_db(&db_state.0, &data_dir, true)
+    let installed_count = scan_installed_games_with_db(&db_state.0, &data_dir, true, &Default::default())
         .unwrap_or_else(|e| { log::warn!("scan_installed_games failed: {}", e); 0 });
     log::info!("Import from local complete: {} games, {} installed, data_dir={}", count, installed_count, data_dir);
 

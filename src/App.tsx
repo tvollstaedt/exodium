@@ -12,6 +12,7 @@ import { WelcomeModal } from "./components/WelcomeModal";
 import { SeedingConsentDialog } from "./components/SeedingConsentDialog";
 import { ActivityBadge } from "./components/ActivityBadge";
 import { needsSeedingConsent, seedingOn, applySeeding, loadSeeding } from "./stores/seeding";
+import { resumeDownloads } from "./stores/downloads";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ContentPackSettings } from "./components/ContentPackSettings";
 import { WindowFrame } from "./components/WindowFrame";
@@ -80,6 +81,7 @@ function App() {
       await initDownloadManager();
       setMigrateStep("Checking your library…");
       const installed = await scanInstalledGames().catch(() => 0);
+      void resumeDownloads();
       fetchGames();
       setLayoutMigration(null);
       setLayoutSkipped(false);
@@ -165,7 +167,9 @@ function App() {
         loadSeeding();
         // Re-check the disk: install flags are per game and go stale behind
         // the app's back. The backend refuses an empty data dir.
-        scanInstalledGames().then(() => fetchGames()).catch(() => {});
+        // Downloads the session resumed by itself need their trackers back -
+        // after the scan, which resets installs confirmed off a half-fetched archive.
+        scanInstalledGames().then(() => { fetchGames(); void resumeDownloads(); }).catch(() => {});
         // Installs made before the single-root layout keep their games in
         // per-collection folders. Ask before touching them - it moves files.
         pendingLayoutMigration()

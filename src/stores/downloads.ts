@@ -1,5 +1,5 @@
 import { createSignal } from "solid-js";
-import { cancelDownload, downloadGame, getDownloadProgress } from "../api/tauri";
+import { cancelDownload, downloadGame, getDownloadProgress, listActiveDownloads } from "../api/tauri";
 import { refreshLoadedGames, notifyGameLibraryChanged } from "./games";
 import { showToast } from "./toasts";
 import { transferStats } from "./transfer";
@@ -293,6 +293,37 @@ export function startGameDownload(gameId: number, title?: string) {
       { detail: String(e) },
     );
   });
+}
+
+/** Re-arm a tracker for every download the session resumed on its own
+ *  (librqbit persists selections). The poll is what shows progress AND what
+ *  extracts on completion, so without this a restarted download finishes
+ *  invisibly and never installs. */
+export async function resumeDownloads() {
+  let pending: { id: number; title: string }[];
+  try { pending = await listActiveDownloads(); } catch { return; }
+  for (const { id, title } of pending) {
+    if (trackers.has(id)) { continue; }
+    const now = Date.now();
+    const t: Tracker = {
+      gameId: id,
+      title,
+      cancelled: false,
+      // No download_game call to wait for: the session already has the file.
+      commandPending: false,
+      nullPolls: 0,
+      stuckSince: 0,
+      maxProgress: 0,
+      announcedInstalled: false,
+      lastProgressVal: -1,
+      lastProgressAt: now,
+      lastTorrentVal: -1,
+      lastTorrentAt: now,
+    };
+    trackers.set(id, t);
+    setState(t, { status: "Resuming download…", progress: 0, downloading: true });
+    void poll(t);
+  }
 }
 
 /** Stop tracking a game in any phase (uninstall during extras would
