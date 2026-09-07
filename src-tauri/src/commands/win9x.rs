@@ -1224,16 +1224,7 @@ mod tests {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct Win9xSupportStatus {
-    /// "ready" | "downloading" | "missing" | "failed"
-    pub phase: String,
-    /// Download progress 0..1 while phase == "downloading".
-    pub progress: f32,
-    /// Size of utilWin9x.zip - lets the panel say what the one-time
-    /// support download costs. 0 when the torrent index is unavailable.
-    pub total_bytes: u64,
-}
+pub type Win9xSupportStatus = crate::support_files::SupportStatus;
 
 /// Is the emulator a Win9x game needs resolvable here? Answered by the
 /// launcher's own resolver, so the panel never disagrees with a launch.
@@ -1276,40 +1267,5 @@ pub async fn get_win9x_support_status(
         Some(v) => win9x_support_ready(&root, Some(v)),
         None => win9x_support_ready(&root, None) && win9x_support_ready(&root, Some("86box")),
     };
-    if ready {
-        return Ok(Win9xSupportStatus { phase: "ready".into(), progress: 1.0, total_bytes: 0 });
-    }
-    let Some(util) = mgr.index().find_by_suffix("util/utilWin9x.zip") else {
-        return Ok(Win9xSupportStatus { phase: "missing".into(), progress: 0.0, total_bytes: 0 });
-    };
-    if crate::support_files::WIN9X_SUPPORT.failed() {
-        return Ok(Win9xSupportStatus {
-            phase: "failed".into(),
-            progress: 1.0,
-            total_bytes: util.size,
-        });
-    }
-    if mgr.is_file_selected(util.index).await {
-        let on_disk = mgr
-            .file_output_path(util.index)
-            .and_then(|p| std::fs::metadata(p).ok())
-            .map(|m| m.len())
-            .unwrap_or(0);
-        // Torrent pieces land out of order, so the sparse file's length
-        // reaches full size long before the download is done - only a
-        // verified-complete file may claim 100% (= "setting up" in the UI).
-        let progress = if mgr.is_file_complete(util.index).await {
-            1.0
-        } else if util.size > 0 {
-            (on_disk as f32 / util.size as f32).min(0.99)
-        } else {
-            0.0
-        };
-        return Ok(Win9xSupportStatus {
-            phase: "downloading".into(),
-            progress,
-            total_bytes: util.size,
-        });
-    }
-    Ok(Win9xSupportStatus { phase: "missing".into(), progress: 0.0, total_bytes: util.size })
+    Ok(crate::support_files::status(&crate::support_files::WIN9X_SUPPORT, &mgr, ready).await)
 }

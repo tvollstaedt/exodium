@@ -135,10 +135,12 @@ export function GameDetailPanel(props: Props) {
       .then((v) => { if (props.game?.id === id) { setSvmVariants(v); } })
       .catch(() => {});
   };
-  // A finished pack install has to clear the "not found" note without the
-  // panel being reopened - the Win9x status does the same re-probe.
+  // A finished pack install - or, on Windows, the support payload turning
+  // ready - has to clear the "not found" note without the panel being
+  // reopened; the Win9x status does the same re-probe.
   createEffect(() => {
     installedPacks();
+    win9x.support()?.phase;
     if (!panelSettled()) { return; }
     const g = props.game;
     if (!isScummVm(g) || g?.id == null) { return; }

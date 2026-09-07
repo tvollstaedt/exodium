@@ -107,6 +107,56 @@ pub(crate) static SCUMMVM_SUPPORT: SupportPack = SupportPack {
 
 pub(crate) static PACKS: [&SupportPack; 3] = [&DOS_SUPPORT, &WIN9X_SUPPORT, &SCUMMVM_SUPPORT];
 
+/// Where a pack's payload stands, for the detail panel.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SupportStatus {
+    /// "ready" | "downloading" | "missing" | "failed"
+    pub phase: String,
+    /// Download progress 0..1 while phase == "downloading".
+    pub progress: f32,
+    /// Size of the util zip, so the panel can say what the one-time download
+    /// costs. 0 when the torrent index is unavailable.
+    pub total_bytes: u64,
+}
+
+impl SupportStatus {
+    fn new(phase: &str, progress: f32, total_bytes: u64) -> Self {
+        Self { phase: phase.into(), progress, total_bytes }
+    }
+}
+
+/// `ready` is the caller's readiness verdict (Win9x scopes it per variant).
+pub(crate) async fn status(pack: &SupportPack, mgr: &DownloadManager, ready: bool) -> SupportStatus {
+    if ready {
+        return SupportStatus::new("ready", 1.0, 0);
+    }
+    let Some(util) = mgr.index().find_by_suffix(pack.util_suffix) else {
+        return SupportStatus::new("missing", 0.0, 0);
+    };
+    if pack.failed() {
+        return SupportStatus::new("failed", 1.0, util.size);
+    }
+    if mgr.is_file_selected(util.index).await {
+        let on_disk = mgr
+            .file_output_path(util.index)
+            .and_then(|p| std::fs::metadata(p).ok())
+            .map(|m| m.len())
+            .unwrap_or(0);
+        // Torrent pieces land out of order, so the sparse file's length
+        // reaches full size long before the download is done - only a
+        // verified-complete file may claim 100% (= "setting up" in the UI).
+        let progress = if mgr.is_file_complete(util.index).await {
+            1.0
+        } else if util.size > 0 {
+            (on_disk as f32 / util.size as f32).min(0.99)
+        } else {
+            0.0
+        };
+        return SupportStatus::new("downloading", progress, util.size);
+    }
+    SupportStatus::new("missing", 0.0, util.size)
+}
+
 /// Extract the pack's subtrees from the util zip (blocking). Serialised per
 /// pack: the startup rearm and a download-click watcher can both find the
 /// zip complete at the same moment.

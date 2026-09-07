@@ -488,10 +488,19 @@ async fn launch_inner(
     })?;
 
     let resolved = resolve_scummvm(&torrent_root, data_dir, &entry.build).ok_or_else(|| {
-        format!(
-            "ScummVM was not found. Install ScummVM from scummvm.org{} and try again.",
-            if cfg!(target_os = "linux") { " (or the Flatpak org.scummvm.ScummVM)" } else { "" }
-        )
+        if cfg!(target_os = "windows") {
+            // eXo's builds come with utilSVM.zip, which download_game queues.
+            format!(
+                "ScummVM {} was not found in the ScummVM support files (eXo\\emulators\\scmvm). \
+                 Download any ScummVM game to fetch them, then try again.",
+                build_version(&entry.build)
+            )
+        } else {
+            format!(
+                "ScummVM was not found. Install ScummVM from scummvm.org{} and try again.",
+                if cfg!(target_os = "linux") { " (or the Flatpak org.scummvm.ScummVM)" } else { "" }
+            )
+        }
     })?;
     if resolved.source != EngineSource::Exo && resolved.source != EngineSource::Pack {
         log::info!(
@@ -555,6 +564,24 @@ pub struct ScummVmEngineInfo {
     /// The content pack that would supply the pinned build here; None on
     /// Windows, where eXo's own builds come out of `utilSVM.zip`.
     pub pack_id: Option<String>,
+}
+
+/// Where `utilSVM.zip` stands: MT-32 ROMs everywhere, and on Windows the
+/// pinned ScummVM builds themselves - so the panel can say that the engine
+/// arrives with the game instead of pointing at scummvm.org.
+#[tauri::command]
+pub async fn get_scummvm_support_status(
+    torrent_state: State<'_, super::TorrentState>,
+) -> Result<crate::support_files::SupportStatus, String> {
+    let mgr = {
+        let guard = torrent_state.0.read().await;
+        guard.get("eXoScummVM").cloned()
+    };
+    let Some(mgr) = mgr else {
+        return Ok(crate::support_files::SupportStatus { phase: "missing".into(), progress: 0.0, total_bytes: 0 });
+    };
+    let ready = crate::support_files::scummvm_ready(&mgr.torrent_root());
+    Ok(crate::support_files::status(&crate::support_files::SCUMMVM_SUPPORT, &mgr, ready).await)
 }
 
 /// What the panel shows next to Play: answered by the launcher's own resolver

@@ -78,22 +78,21 @@ export function emulatorPackId(variant: string | null | undefined): string | nul
   return "dosbox-x";
 }
 
-const supportProgressNote = (s: Win9xSupportStatus, withEmulators: boolean): PanelNote => {
-  const what = withEmulators ? "OS images + emulators" : "OS images";
+const supportProgressNote = (s: Win9xSupportStatus, family: "Windows 9x" | "ScummVM", what: string): PanelNote => {
   const pct = Math.round(s.progress * 100);
   return {
-    key: "win9x-support-progress",
+    key: `${family === "ScummVM" ? "scummvm" : "win9x"}-support-progress`,
     blocking: true,
     text: pct >= 100
-      ? `Setting up the Windows 9x support files (${what})…`
-      : `Downloading the Windows 9x support files (${what})… ${pct}%`,
+      ? `Setting up the ${family} support files (${what})…`
+      : `Downloading the ${family} support files (${what})… ${pct}%`,
   };
 };
 
-const supportFailedNote = (): PanelNote => ({
-  key: "win9x-support-failed",
+const supportFailedNote = (family: "Windows 9x" | "ScummVM"): PanelNote => ({
+  key: `${family === "ScummVM" ? "scummvm" : "win9x"}-support-failed`,
   blocking: true,
-  text: "Setting up the Windows 9x support files failed - make sure the library drive has "
+  text: `Setting up the ${family} support files failed - make sure the library drive has `
     + "enough free space, then restart Exodium to retry.",
 });
 
@@ -148,6 +147,35 @@ function scummVmNote(ctx: NoteContext, engine: string): PanelNote | null {
           + `${oneTime(ctx.emulatorPack.size_bytes)} - every game eXo pins to that build uses it.`,
       };
     }
+    // Windows has no pack: eXo's own builds come out of utilSVM.zip, which
+    // download_game queues with the game. The note follows that payload.
+    if (ctx.isWindows && ctx.offline) {
+      return {
+        key: "engine-missing",
+        blocking: true,
+        text: `This game needs eXo's ${engine}, which downloads with the game. `
+          + "Go online (Settings → Network) to fetch it.",
+      };
+    }
+    if (ctx.isWindows && ctx.support) {
+      const support = ctx.support;
+      if (support.phase === "failed") { return supportFailedNote("ScummVM"); }
+      if (support.phase === "downloading") { return supportProgressNote(support, "ScummVM", engine); }
+      if (support.phase === "missing" && !ctx.installed) {
+        return {
+          key: "scummvm-engine-size",
+          text: `Downloading this game also fetches eXo's ${engine}`
+            + `${oneTime(support.total_bytes)} - every game eXo pins to that build uses it.`,
+        };
+      }
+      return {
+        key: "engine-missing",
+        blocking: true,
+        text: `${engine} was not found in the ScummVM support files (eXo\\emulators\\scmvm `
+          + "inside your library folder). Restore that folder, or delete it and download "
+          + "any ScummVM game to fetch it again.",
+      };
+    }
     return packRemedy(ctx, "engine-missing", engine, true) ?? {
       key: "engine-missing",
       blocking: true,
@@ -184,8 +212,8 @@ function engineMissingNote(ctx: NoteContext, engine: string): PanelNote | null {
   if (ctx.isWindows) {
     const support = ctx.support;
     if (!support) { return null; }
-    if (support.phase === "failed") { return supportFailedNote(); }
-    if (support.phase === "downloading") { return supportProgressNote(support, true); }
+    if (support.phase === "failed") { return supportFailedNote("Windows 9x"); }
+    if (support.phase === "downloading") { return supportProgressNote(support, "Windows 9x", "OS images + emulators"); }
     if (support.phase === "missing" && !ctx.installed) {
       return {
         key: "win9x-support-size",
@@ -236,8 +264,8 @@ export function launchNote(ctx: NoteContext): PanelNote | null {
   // Engine resolves, but the shared payload (parent OS images, needed on
   // every platform) may still be on its way.
   const support = ctx.support;
-  if (support?.phase === "failed") { return supportFailedNote(); }
-  if (support?.phase === "downloading") { return supportProgressNote(support, false); }
+  if (support?.phase === "failed") { return supportFailedNote("Windows 9x"); }
+  if (support?.phase === "downloading") { return supportProgressNote(support, "Windows 9x", "OS images"); }
   if (support?.phase === "missing" && !ctx.installed && !ctx.downloading) {
     return {
       key: "win9x-support-size",

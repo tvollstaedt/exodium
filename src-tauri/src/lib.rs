@@ -770,6 +770,7 @@ pub fn run() {
             commands::win9x::get_win9x_support_status,
             commands::win9x::win9x_engine_available,
             commands::scummvm::scummvm_engine_info,
+            commands::scummvm::get_scummvm_support_status,
             commands::scummvm::scummvm_variants,
             commands::scummvm::set_scummvm_options,
             commands::win9x::win9x_network_status,

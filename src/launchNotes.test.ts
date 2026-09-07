@@ -67,6 +67,32 @@ describe("launchNote", () => {
       // No pack to offer at all: the scummvm.org advice stands either way.
       expect(launchNote(svm({ svmEngine: missing }))?.text).toContain("scummvm.org");
     });
+    it("on Windows the engine arrives with utilSVM.zip, and the note follows that payload", () => {
+      const missing = { available: false, pinned_version: "2.8.0", source: null, pack_id: null };
+      const win = (support: NoteContext["support"], over: Partial<NoteContext> = {}) =>
+        launchNote(svm({ isWindows: true, svmEngine: missing, support, ...over }));
+      const size = win({ phase: "missing", progress: 0, total_bytes: 200_000_000 });
+      expect(size?.key).toBe("scummvm-engine-size");
+      expect(size?.blocking).toBeUndefined();
+      expect(size?.text).toContain("eXo's ScummVM 2.8.0");
+      expect(size?.text).toContain("one-time 200.0 MB");
+      expect(size?.text).not.toContain("scummvm.org");
+      const dl = win({ phase: "downloading", progress: 0.42, total_bytes: 1 });
+      expect(dl?.key).toBe("scummvm-support-progress");
+      expect(dl?.text).toBe("Downloading the ScummVM support files (ScummVM 2.8.0)… 42%");
+      expect(win({ phase: "failed", progress: 1, total_bytes: 1 })?.key).toBe("scummvm-support-failed");
+      // Installed with the payload gone: name the folder, never scummvm.org.
+      const gone = win({ phase: "missing", progress: 0, total_bytes: 1 }, { installed: true });
+      expect(gone?.blocking).toBe(true);
+      expect(gone?.text).toContain("scmvm");
+      expect(gone?.text).not.toContain("scummvm.org");
+      // Offline there is no payload status; the note still names the way.
+      const off = win(null, { offline: true });
+      expect(off?.text).toContain("Go online");
+      expect(off?.text).not.toContain("scummvm.org");
+      // No status at all (session without a manager): the old advice remains.
+      expect(win(null)?.text).toContain("scummvm.org");
+    });
     it("offers the pinned build's pack instead of scummvm.org, and on a system ScummVM too", () => {
       const missing = { available: false, pinned_version: "2.9.0", source: null, pack_id: "scummvm-2.9.0" };
       const svmPack = { ...pack, id: "scummvm-2.9.0", display_name: "ScummVM 2.9.0" };

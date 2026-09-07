@@ -340,11 +340,18 @@ export async function disableWin9xNetwork(): Promise<Win9xNetworkStatus> {
   return invoke("disable_win9x_network");
 }
 
-export interface Win9xSupportStatus {
+/** Where a collection's support payload (its util zip) stands. */
+export interface SupportStatus {
   phase: "ready" | "downloading" | "missing" | "failed";
   progress: number;
-  /** Size of utilWin9x.zip; 0 when the torrent index is unavailable. */
+  /** Size of the util zip; 0 when the torrent index is unavailable. */
   total_bytes: number;
+}
+export type Win9xSupportStatus = SupportStatus;
+
+/** utilSVM.zip: MT-32 ROMs everywhere, and on Windows eXo's pinned ScummVM builds. */
+export async function getScummVmSupportStatus(): Promise<SupportStatus> {
+  return invoke("get_scummvm_support_status");
 }
 
 /** State of the shared Win9x support files (OS parent images + emulators),
