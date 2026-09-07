@@ -1341,25 +1341,26 @@ nearest release (`pack_version`; no binary exists for a snapshot).
 the pack is already there - a system ScummVM does NOT stop it, because it
 ignores the pin. `SCUMMVM_SUPPORT` in `support_files.rs` fetches
 `utilSVM.zip` for the MT-32 ROMs (every platform) and eXo's builds
-(Windows). The panel note offers the pack ("Download ScummVM 2.9.0") both
-when nothing resolves and when a system copy would run unpinned. Until
-`content-v7` ships the tarballs (macOS: the official DMG's `ScummVM.app`;
-Linux: our own AppImage builds), the manifest URLs are empty and the note
-falls back to scummvm.org.
+(Windows); on Windows the panel note follows that payload
+(`get_scummvm_support_status`), never a pack. The packs ship as
+**`content-v7`** (macOS: the official universal DMG repacked, Sparkle off;
+Linux: our own AppImages from the release sources, `-fpermissive
+-Wno-template-body` for the pre-GCC-15 pins) and `manifest.json` carries
+their URLs and hashes. The panel note offers the pack ("Download ScummVM
+2.9.0") both when nothing resolves and when a system copy would run unpinned.
 
-The build side is in place (`content-packs.yml` input `packs: scummvm`, a
-matrix over the pins): macOS repacks upstream's UNIVERSAL DMG - verified on
-2.5.0, `Contents/MacOS/scummvm` is x86_64 + arm64, so both Mac tokens point
-at the same tarball - with Sparkle's auto-update disabled in the Info.plist
-(the framework cannot be stripped, `scummvm` links it via `@rpath`) and an
-ad-hoc re-sign. Linux compiles the release tarball
-(`build-scummvm-appimage.sh`) because upstream ships no Linux binary at all;
-that half is UNVERIFIED - it needs the pkgforge container, and an old pin
-(2.5.0, 2021) may not build against a current toolchain.
+`content-packs.yml` (input `packs: scummvm`, a matrix over the pins): macOS
+repacks upstream's UNIVERSAL DMG - `Contents/MacOS/scummvm` is x86_64 +
+arm64, so both Mac tokens point at the same tarball - with Sparkle's
+auto-update disabled in the Info.plist (the framework cannot be stripped,
+`scummvm` links it via `@rpath`) and an ad-hoc re-sign. Linux compiles the
+release tarball (`build-scummvm-appimage.sh`) because upstream ships no
+Linux binary at all. The Linux AppImages were verified under qemu-user on
+the ARM64 lab guest (`--version`, engine list, features) - there is no
+x86_64 Linux machine in the lab, so a native run is still owed.
 
-**Still open:** running that workflow and publishing `content-v7`, then the
-URLs and hashes in `manifest.json`; snapshot builds from their commits;
-`Feria D'Arles` has no cover (apostrophe in the image name); poster pack.
+**Still open:** snapshot builds from their commits; `Feria D'Arles` has no
+cover (apostrophe in the image name); poster pack.
 
 ## Conventions
 

@@ -195,14 +195,19 @@
           "supersedes": [],
           "platforms": {
             "darwin-aarch64": {
-              "url": "",
-              "sha256": "",
-              "size_bytes": 0
+              "url": "https://github.com/tvollstaedt/exodium/releases/download/content-v7/scummvm-2.5.0-macos-universal-v1.tar.gz",
+              "sha256": "ba071cb367b64dda980361ccedf7bb32bddc28eb8625aee5f42d711252ef66b8",
+              "size_bytes": 94047435
+            },
+            "darwin-x86_64": {
+              "url": "https://github.com/tvollstaedt/exodium/releases/download/content-v7/scummvm-2.5.0-macos-universal-v1.tar.gz",
+              "sha256": "ba071cb367b64dda980361ccedf7bb32bddc28eb8625aee5f42d711252ef66b8",
+              "size_bytes": 94047435
             },
             "linux-x86_64": {
-              "url": "",
-              "sha256": "",
-              "size_bytes": 0
+              "url": "https://github.com/tvollstaedt/exodium/releases/download/content-v7/scummvm-2.5.0-linux-x86_64-v1.tar.gz",
+              "sha256": "18649d8b298fecc83631d74b2899304490ac138a6b182e8fb1ede97fe6066639",
+              "size_bytes": 109477207
             }
           }
         },
@@ -217,14 +222,19 @@
           "supersedes": [],
           "platforms": {
             "darwin-aarch64": {
-              "url": "",
-              "sha256": "",
-              "size_bytes": 0
+              "url": "https://github.com/tvollstaedt/exodium/releases/download/content-v7/scummvm-2.8.0-macos-universal-v1.tar.gz",
+              "sha256": "d3b434f909f8f4d7639f53c889c276a1823567b45edc47ee8d4da0e1dd1ea717",
+              "size_bytes": 128377535
+            },
+            "darwin-x86_64": {
+              "url": "https://github.com/tvollstaedt/exodium/releases/download/content-v7/scummvm-2.8.0-macos-universal-v1.tar.gz",
+              "sha256": "d3b434f909f8f4d7639f53c889c276a1823567b45edc47ee8d4da0e1dd1ea717",
+              "size_bytes": 128377535
             },
             "linux-x86_64": {
-              "url": "",
-              "sha256": "",
-              "size_bytes": 0
+              "url": "https://github.com/tvollstaedt/exodium/releases/download/content-v7/scummvm-2.8.0-linux-x86_64-v1.tar.gz",
+              "sha256": "080f54e40230837cc793b2a9befe21b863c1caa8fec494a6821e16a5c1d869f5",
+              "size_bytes": 141375131
             }
           }
         },
@@ -239,14 +249,19 @@
           "supersedes": [],
           "platforms": {
             "darwin-aarch64": {
-              "url": "",
-              "sha256": "",
-              "size_bytes": 0
+              "url": "https://github.com/tvollstaedt/exodium/releases/download/content-v7/scummvm-2.9.0-macos-universal-v1.tar.gz",
+              "sha256": "e257e2628b7bee54585f59517d632cfdf845037ede673f1ab7eed42dafbaef45",
+              "size_bytes": 143559285
+            },
+            "darwin-x86_64": {
+              "url": "https://github.com/tvollstaedt/exodium/releases/download/content-v7/scummvm-2.9.0-macos-universal-v1.tar.gz",
+              "sha256": "e257e2628b7bee54585f59517d632cfdf845037ede673f1ab7eed42dafbaef45",
+              "size_bytes": 143559285
             },
             "linux-x86_64": {
-              "url": "",
-              "sha256": "",
-              "size_bytes": 0
+              "url": "https://github.com/tvollstaedt/exodium/releases/download/content-v7/scummvm-2.9.0-linux-x86_64-v1.tar.gz",
+              "sha256": "ae952b8260064d8015b322bdeedf673916896f981402a8ef884f8b7b39c42006",
+              "size_bytes": 148755350
             }
           }
         },
@@ -261,14 +276,19 @@
           "supersedes": [],
           "platforms": {
             "darwin-aarch64": {
-              "url": "",
-              "sha256": "",
-              "size_bytes": 0
+              "url": "https://github.com/tvollstaedt/exodium/releases/download/content-v7/scummvm-2026.1.0-macos-universal-v1.tar.gz",
+              "sha256": "d545af6dfbaad87a3076a3599c574d8149686a0ddb6c73aa5d5e4747e3bdce8e",
+              "size_bytes": 158676014
+            },
+            "darwin-x86_64": {
+              "url": "https://github.com/tvollstaedt/exodium/releases/download/content-v7/scummvm-2026.1.0-macos-universal-v1.tar.gz",
+              "sha256": "d545af6dfbaad87a3076a3599c574d8149686a0ddb6c73aa5d5e4747e3bdce8e",
+              "size_bytes": 158676014
             },
             "linux-x86_64": {
-              "url": "",
-              "sha256": "",
-              "size_bytes": 0
+              "url": "https://github.com/tvollstaedt/exodium/releases/download/content-v7/scummvm-2026.1.0-linux-x86_64-v1.tar.gz",
+              "sha256": "6d998ada189e298b9aa9ac63da7aff9c88573f360718a21732f620dea13f40ff",
+              "size_bytes": 153260193
             }
           }
         }
