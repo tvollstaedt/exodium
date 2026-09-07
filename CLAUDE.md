@@ -1268,9 +1268,11 @@ hash - `BUILDS` in scummvm.rs maps slug to version). Distribution: 2.9.0
 (Windows, from the torrent's `utilSVM.zip` - NOT extracted yet), the
 per-version content pack `content/emulators/scummvm-<version>/`
 (macOS `ScummVM.app`, Linux `ScummVM.AppImage` - packs NOT published yet),
-then `scummvm` on PATH, then the Flatpak `org.scummvm.ScummVM`. The last two
-ignore the pin; the panel says so (`scummvm_engine_info`, source `path` /
-`flatpak`). No official Linux binary exists (only .deb and Flatpak), so the
+then - ONLY on a platform the manifest has no pack for - `scummvm` on PATH
+and the Flatpak `org.scummvm.ScummVM`. Where a pack exists, a system copy is
+ignored: the panel offers the pack and `download_game` fetches it with the
+game, because a system build runs the game unpinned. The two fallbacks say
+so where they apply (`scummvm_engine_info`, source `path` / `flatpak`). No official Linux binary exists (only .deb and Flatpak), so the
 Linux packs will be our own builds like DOSBox-X's.
 
 **The variant tree lives INSIDE the game zip**, not in the catalogue: one

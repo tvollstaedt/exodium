@@ -173,6 +173,12 @@ pub(crate) fn resolve_scummvm(torrent_root: &Path, data_dir: &str, slug: &str) -
     if let Some(bin) = packed {
         return Some(Resolved { cmd: EngineCmd::Direct(bin), source: EngineSource::Pack });
     }
+    // A system copy is the fallback for platforms Exodium has no pack for.
+    // Where a pack exists it is offered and fetched with the game instead:
+    // eXo's pins are real, and a system build runs the game unpinned.
+    if crate::commands::content_packs::installable_pack("eXoScummVM", &pack_id(slug)).is_some() {
+        return None;
+    }
     if binary_exists_on_path("scummvm") {
         return Some(Resolved {
             cmd: EngineCmd::Direct(PathBuf::from("scummvm")),
