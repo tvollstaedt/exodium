@@ -617,9 +617,10 @@ body {
 }
 
 /* The box itself. Inactive boxes sit dimmed and desaturated on the shelf; the
-   active one is lit, tilted back and lifted off the board, with a soft
-   reflection below. Effects live on the wrap so the sheen and reflection
-   move with the tilt. */
+   active one is lit, tilted back and lifted off the board. Effects live on
+   the wrap so the sheen moves with the tilt. No -webkit-box-reflect here:
+   WebKitGTK drops its mask once the wrap is transformed and filtered on
+   hover and paints the full copy over the label below. */
 .collection-cover-wrap {
   position: relative;
   border-radius: 5px;
@@ -627,7 +628,6 @@ body {
   box-shadow: 0 3px 8px rgba(0, 0, 0, 0.5), inset 0 0 0 1px rgba(255, 255, 255, 0.1);
   filter: saturate(0.45) brightness(0.72);
   transition: filter 0.25s, transform 0.3s cubic-bezier(0.34, 1.4, 0.64, 1), box-shadow 0.3s;
-  -webkit-box-reflect: below 3px linear-gradient(transparent 74%, rgba(255, 255, 255, 0.1));
 }
 
 .collection-card:hover .collection-cover-wrap {
