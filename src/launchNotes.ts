@@ -265,7 +265,10 @@ export function launchNote(ctx: NoteContext): PanelNote | null {
   // every platform) may still be on its way.
   const support = ctx.support;
   if (support?.phase === "failed") { return supportFailedNote("Windows 9x"); }
-  if (support?.phase === "downloading") { return supportProgressNote(support, "Windows 9x", "OS images"); }
+  // On Windows the payload is also where the emulators come from.
+  if (support?.phase === "downloading") {
+    return supportProgressNote(support, "Windows 9x", ctx.isWindows ? "OS images + emulators" : "OS images");
+  }
   if (support?.phase === "missing" && !ctx.installed && !ctx.downloading) {
     return {
       key: "win9x-support-size",

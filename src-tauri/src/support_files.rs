@@ -73,7 +73,13 @@ pub(crate) static WIN9X_SUPPORT: SupportPack = SupportPack {
     collection: "eXoWin9x",
     util_suffix: "util/utilWin9x.zip",
     inner_zip: "EXTWin9x.zip",
-    prefixes: &["emulators/dosbox/", "emulators/86box98/"],
+    // Not `emulators/dosbox/`: that directory also holds eXoDOS's ece builds.
+    prefixes: &[
+        "emulators/dosbox/x98/",
+        "emulators/dosbox/config9x.bat",
+        "emulators/dosbox/options9x.conf",
+        "emulators/86box98/",
+    ],
     label: "Windows 9x OS images + emulators",
     ready: win9x_ready,
     post: Some(crate::commands::win9x::add_parent_case_aliases),
@@ -211,6 +217,10 @@ fn do_extract(pack: &SupportPack, util_zip: &Path, torrent_root: &Path) -> Resul
             return Err(format!("no matching entries in {}", pack.inner_zip));
         }
 
+        // Each prefix is replaced whole - stale files must not survive a
+        // new build - so a prefix must name what the pack OWNS: `emulators/
+        // dosbox/` holds eXoDOS's ece builds and eXoWin9x's x98 side by side,
+        // and either pack naming the parent would delete the other.
         let dest_root = torrent_root.join("eXo");
         for prefix in pack.prefixes {
             let Some(rel) = staged_dir(&staging_root, prefix) else { continue };
@@ -218,8 +228,10 @@ fn do_extract(pack: &SupportPack, util_zip: &Path, torrent_root: &Path) -> Resul
             if let Some(parent) = dst.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
             }
-            if dst.exists() {
+            if dst.is_dir() {
                 std::fs::remove_dir_all(&dst).map_err(|e| e.to_string())?;
+            } else if dst.exists() {
+                std::fs::remove_file(&dst).map_err(|e| e.to_string())?;
             }
             std::fs::rename(staging_root.join(&rel), &dst)
                 .map_err(|e| format!("moving {} into place: {}", rel.display(), e))?;
@@ -272,7 +284,32 @@ pub(crate) async fn ensure_queued(pack: &'static SupportPack, mgr: &Arc<Download
 
 /// Re-arm the watcher after a restart: one armed by a download click dies
 /// with the app, and a zip finishing later would never extract.
+/// Remove staging dirs and inner-zip copies a dead process left behind
+/// (`.support_staging_<pid>`, `<util>.support_tmp_<pid>`): a hard stop
+/// mid-extraction leaves gigabytes nobody would ever delete.
+pub(crate) fn sweep_leftovers(torrent_root: &Path) {
+    let own = format!("_{}", std::process::id());
+    let stale = |name: &str, marker: &str| name.contains(marker) && !name.ends_with(&own);
+    let exo = torrent_root.join("eXo");
+    for (dir, marker) in [(exo.clone(), ".support_staging_"), (exo.join("util"), ".support_tmp_")] {
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for e in entries.filter_map(|e| e.ok()) {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if !stale(&name, marker) {
+                continue;
+            }
+            let path = e.path();
+            let res = if path.is_dir() { std::fs::remove_dir_all(&path) } else { std::fs::remove_file(&path) };
+            match res {
+                Ok(()) => log::info!("Removed stale support leftover {}", path.display()),
+                Err(err) => log::warn!("Could not remove {}: {}", path.display(), err),
+            }
+        }
+    }
+}
+
 pub(crate) async fn rearm(pack: &'static SupportPack, mgr: &Arc<DownloadManager>) {
+    sweep_leftovers(&mgr.torrent_root());
     if (pack.ready)(&mgr.torrent_root()) {
         return;
     }
@@ -328,6 +365,11 @@ fn spawn_watcher(pack: &'static SupportPack, mgr: Arc<DownloadManager>, util_ind
                         return;
                     }
                     Ok(Err(e)) if e == "extraction already running" => return,
+                    Ok(Err(e)) if !stats_complete => {
+                        // The size fallback fired on a sparse file the session
+                        // is still filling: not a failure, just not yet.
+                        log::info!("{} not extractable yet ({}); waiting", pack.util_suffix, e);
+                    }
                     Ok(Err(e)) => {
                         failures += 1;
                         log::error!(
@@ -420,13 +462,61 @@ mod tests {
         assert!(!util.with_extension(format!("support_tmp_{}", std::process::id())).exists());
     }
 
+    static SIBLING_PACK: SupportPack = SupportPack {
+        collection: "test",
+        util_suffix: "util/util.zip",
+        inner_zip: "INNER.zip",
+        prefixes: &["emulators/dosbox/x98/", "emulators/dosbox/options9x.conf"],
+        label: "test payload",
+        ready: never_ready,
+        post: None,
+        running: AtomicBool::new(false),
+        failed: AtomicBool::new(false),
+    };
+
+    /// eXoDOS's ece builds and eXoWin9x's x98 share `emulators/dosbox/`;
+    /// a pack replaces what it names, and a file prefix works like a dir.
+    #[test]
+    fn a_pack_leaves_its_siblings_under_a_shared_parent_alone() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let inner = zip_bytes(&[
+            ("emulators/DOSBox/x98/dosbox-x.exe", b"x98"),
+            ("emulators/DOSBox/options9x.conf", b"conf"),
+        ]);
+        let util = root.join("util.zip");
+        std::fs::write(&util, zip_bytes(&[("INNER.zip", &inner)])).unwrap();
+        let ece = root.join("eXo/emulators/dosbox/ece4230/DOSBox.exe");
+        std::fs::create_dir_all(ece.parent().unwrap()).unwrap();
+        std::fs::write(&ece, b"ece").unwrap();
+        std::fs::write(root.join("eXo/emulators/dosbox/options9x.conf"), b"old").unwrap();
+
+        extract(&SIBLING_PACK, &util, root).unwrap();
+
+        assert_eq!(std::fs::read(&ece).unwrap(), b"ece", "the other pack's build survives");
+        assert_eq!(std::fs::read(root.join("eXo/emulators/dosbox/x98/dosbox-x.exe")).unwrap(), b"x98");
+        assert_eq!(std::fs::read(root.join("eXo/emulators/dosbox/options9x.conf")).unwrap(), b"conf");
+    }
+
     #[test]
     fn missing_inner_zip_is_an_error_and_cleans_up() {
+        // Own pack: `running` is per pack, and the tests run in parallel.
+        static PACK: SupportPack = SupportPack {
+            collection: "test",
+            util_suffix: "util/util.zip",
+            inner_zip: "INNER.zip",
+            prefixes: &["mt32/"],
+            label: "test payload",
+            ready: never_ready,
+            post: None,
+            running: AtomicBool::new(false),
+            failed: AtomicBool::new(false),
+        };
         let tmp = tempfile::tempdir().unwrap();
         let util = tmp.path().join("util.zip");
         std::fs::write(&util, zip_bytes(&[("OTHER.zip", b"x")])).unwrap();
-        let err = extract(&TEST_PACK, &util, tmp.path()).unwrap_err();
+        let err = extract(&PACK, &util, tmp.path()).unwrap_err();
         assert!(err.contains("INNER.zip not found"));
-        assert!(!TEST_PACK.running.load(Ordering::SeqCst));
+        assert!(!PACK.running.load(Ordering::SeqCst));
     }
 }
