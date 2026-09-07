@@ -42,6 +42,10 @@ cd "scummvm-${VERSION}"
 
 # --enable-release strips the assert-heavy debug build; --prefix=/usr puts the
 # engine data, themes and .desktop where the packaging step looks for them.
+# The pinned sources predate GCC 15's stricter checks: 2.8.0's bundled
+# freetype (ags) fails on unsigned char* -> char*, 2.5.0's icb engine on
+# -Wtemplate-body. Both are warnings in the compiler that built them.
+export CXXFLAGS="${CXXFLAGS:-} -fpermissive -Wno-template-body"
 echo "Building ScummVM ${VERSION}..."
 ./configure --prefix=/usr --enable-release --enable-all-engines
 make -j"$(nproc)"
