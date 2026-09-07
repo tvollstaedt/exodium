@@ -1,14 +1,15 @@
 import { createSignal, createEffect, on, Show, For } from "solid-js";
 import type { Game } from "../api/tauri";
 import { loadVariants } from "../stores/variants";
-import { formatBytes, parseLangEntries, langBadgeClass } from "../util";
+import { formatBytes, parseLangEntries, langBadgeClass, platformTag } from "../util";
 import { downloads, cancelGameDownload } from "../stores/downloads";
 import { isOffline } from "../stores/network";
-import { toggleFavorite } from "../stores/games";
+import { toggleFavorite, collectionFilter } from "../stores/games";
 import {
   playableHint, playFromList, togglePlay, currentTrack, musicPlaying, musicCached, getMusicState,
 } from "../stores/music";
 import { GameActionsMenu } from "./GameActionsMenu";
+import { createCover } from "./cover";
 
 interface GameRowProps {
   game: Game;
@@ -29,6 +30,8 @@ export function GameRow(props: GameRowProps) {
 
   const langEntries = () => parseLangEntries(props.game);
   const isMultiLang = () => langEntries().length > 1;
+  let rowRef: HTMLDivElement | undefined;
+  const cover = createCover(() => props.game, () => rowRef);
 
   // Same preload as GameCard: without it a variant's download would be
   // invisible on the merged row. Deduped by the promise cache in the store.
@@ -98,6 +101,7 @@ export function GameRow(props: GameRowProps) {
 
   return (
     <div
+      ref={rowRef}
       class={`game-row ${props.game.installed || props.game.in_library ? "installed" : ""}${isCurrentTrack() ? " is-playing" : ""}`}
       data-game-id={props.game.id != null ? String(props.game.id) : undefined}
       onClick={(e) => {
@@ -127,8 +131,17 @@ export function GameRow(props: GameRowProps) {
           >{isCurrentTrack() && musicPlaying() ? "⏸" : "▶"}</button>
         </Show>
       </span>
+      {/* Always rendered for the grid column; the <img> only once a cover resolves. */}
+      <span class="row-cover">
+        <Show when={cover.src()}>
+          <img src={cover.src()!} alt="" onError={cover.onError} />
+        </Show>
+      </span>
       <span class="row-title" title={props.game.title}>
         <span class="row-title-text">{props.game.title}</span>
+        <Show when={!collectionFilter() && platformTag(props.game.torrent_source)}>
+          <span class="badge badge-platform">{platformTag(props.game.torrent_source)}</span>
+        </Show>
         <For each={langEntries()}>
           {(entry) => (
             <span class={`badge badge-lang ${langBadgeClass(entry.state)}`}>{entry.lang}</span>

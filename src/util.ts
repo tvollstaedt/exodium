@@ -81,6 +81,17 @@ export function parseLangEntries(game: {
   });
 }
 
+/** The collection family a row belongs to, as the grid shows it next to
+ *  the language badges when no collection is selected. */
+export function platformTag(torrentSource: string | null | undefined): string | null {
+  if (!torrentSource) { return null; }
+  if (torrentSource.startsWith("eXoDOS")) { return "DOS"; }
+  if (torrentSource === "eXoWin3x") { return "Win3x"; }
+  if (torrentSource === "eXoWin9x") { return "Win9x"; }
+  if (torrentSource === "eXoScummVM") { return "ScummVM"; }
+  return null;
+}
+
 export function langBadgeClass(state: number): string {
   if (state === 2) { return "lang-installed"; }
   if (state === 1) { return "lang-downloading"; }

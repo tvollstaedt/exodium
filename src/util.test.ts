@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { matchesLibraryQuery } from "./util";
+import { matchesLibraryQuery, platformTag } from "./util";
 
 describe("matchesLibraryQuery", () => {
   const game = { title: "Magic Carpet Plus", sort_title: "Magic Carpet Plus" };
@@ -52,5 +52,17 @@ describe("matchesLibraryQuery across language variants", () => {
 
   it("does not match an unrelated query", () => {
     expect(matchesLibraryQuery(merged, "kyrandia")).toBe(false);
+  });
+});
+
+describe("platformTag", () => {
+  it("names the collection family, and nothing for unknown sources", () => {
+    expect(platformTag("eXoDOS")).toBe("DOS");
+    expect(platformTag("eXoDOS_GLP")).toBe("DOS");
+    expect(platformTag("eXoWin3x")).toBe("Win3x");
+    expect(platformTag("eXoWin9x")).toBe("Win9x");
+    expect(platformTag("eXoScummVM")).toBe("ScummVM");
+    expect(platformTag(null)).toBeNull();
+    expect(platformTag("something")).toBeNull();
   });
 });

@@ -1,14 +1,12 @@
-import { createSignal, createEffect, on, onCleanup, onMount, Show, For } from "solid-js";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { createSignal, createEffect, on, onCleanup, Show, For } from "solid-js";
 import { CircularProgress } from "./ProgressBar";
 import type { Game } from "../api/tauri";
 import { loadVariants } from "../stores/variants";
-import { formatBytes, parseLangEntries, langBadgeClass } from "../util";
-import { thumbnailCandidates } from "../stores/thumbnails";
-import { observeNearViewport, unobserveNearViewport } from "../nearViewport";
+import { formatBytes, parseLangEntries, langBadgeClass, platformTag } from "../util";
+import { createCover } from "./cover";
 import { downloads, cancelGameDownload } from "../stores/downloads";
 import { isOffline } from "../stores/network";
-import { toggleFavorite } from "../stores/games";
+import { toggleFavorite, collectionFilter } from "../stores/games";
 import { GameActionsMenu } from "./GameActionsMenu";
 
 interface GameCardProps {
@@ -19,11 +17,6 @@ interface GameCardProps {
 
 export function GameCard(props: GameCardProps) {
   const [status, setStatus] = createSignal("");
-  const [imgError, setImgError] = createSignal(false);
-  // Index into `thumbnailCandidates()` - advances on each <img onError> so
-  // a stale poster dir (shortcode-keyed files from a previous Exodium version)
-  // still falls through to the bundled preview on 404.
-  const [thumbIdx, setThumbIdx] = createSignal(0);
   const [favorited, setFavorited] = createSignal(props.game.favorited);
   const [variants, setVariants] = createSignal<Game[]>([]);
   const [contextMenu, setContextMenu] = createSignal<{x: number, y: number} | null>(null);
@@ -46,36 +39,9 @@ export function GameCard(props: GameCardProps) {
       .catch(() => {});
   });
 
-  // Covers load once the card is within ~2 screens of the viewport instead of
-  // when it nearly enters it - see nearViewport.ts. Sticky once true: a card
-  // scrolled back into view must not refetch.
-  const [nearViewport, setNearViewport] = createSignal(false);
   let cardRef: HTMLDivElement | undefined;
-  onMount(() => {
-    if (cardRef) { observeNearViewport(cardRef, () => setNearViewport(true)); }
-  });
-  onCleanup(() => { if (cardRef) { unobserveNearViewport(cardRef); } });
-
-  const thumbCandidates = () => thumbnailCandidates(props.game.torrent_source, props.game.thumbnail_key);
-
-  // A new game OR a changed tier list restarts the candidate walk (a removed
-  // pack shortens the list under a card's index).
-  createEffect(on(
-    () => `${props.game.id}|${thumbCandidates().join("|")}`,
-    () => { setImgError(false); setThumbIdx(0); },
-    { defer: true },
-  ));
-
-  const thumbSrc = () => {
-    if (!nearViewport()) { return null; }
-    const c = thumbCandidates();
-    // Clamp rather than trust the index: the reset effect lands a frame later,
-    // and for that frame an out-of-range index would unmount the <img>, drop
-    // the card to the no-cover aspect-ratio rule and jolt the whole grid.
-    const path = c[thumbIdx()] ?? c[c.length - 1];
-    if (!path) { return null; }
-    return convertFileSrc(path);
-  };
+  const cover = createCover(() => props.game, () => cardRef);
+  const thumbSrc = cover.src;
 
   /** The outgoing cover, kept underneath while its replacement decodes.
    *  Non-null only during that hand-over: a first cover must not fade in. */
@@ -114,15 +80,6 @@ export function GameCard(props: GameCardProps) {
     }
   });
 
-  const handleImgError = () => {
-    // Advance to next candidate (e.g. poster URL 404'd → try bundled preview).
-    // If we've exhausted them all, hide the tile.
-    if (thumbIdx() + 1 < thumbCandidates().length) {
-      setThumbIdx(thumbIdx() + 1);
-    } else {
-      setImgError(true);
-    }
-  };
 
   const langEntries = () => parseLangEntries(props.game);
   const isMultiLang = () => langEntries().length > 1;
@@ -178,7 +135,7 @@ export function GameCard(props: GameCardProps) {
   return (
     <div ref={cardRef} class={`game-card ${props.game.installed || props.game.in_library ? "installed" : ""}`} data-testid="game-card" onContextMenu={handleContextMenu} data-game-id={props.game.id != null ? String(props.game.id) : undefined}>
       <div class="game-card-art" onClick={handleClick}>
-        <Show when={thumbSrc() && !imgError()}>
+        <Show when={thumbSrc()}>
           <Show when={underSrc()}>
             <img class="game-card-thumb-base" src={underSrc()!} alt="" aria-hidden="true" />
           </Show>
@@ -190,7 +147,7 @@ export function GameCard(props: GameCardProps) {
             // Only the reveal ends the hand-over; the fade-out's own
             // transitionend arrives whether or not the new cover decoded.
             onTransitionEnd={() => { if (topLoaded()) { setUnderSrc(null); } }}
-            onError={handleImgError}
+            onError={cover.onError}
           />
         </Show>
         <Show when={isDownloading()}>
@@ -214,6 +171,9 @@ export function GameCard(props: GameCardProps) {
             {props.game.genre && <span class="genre">{props.game.genre}</span>}
           </div>
           <div class="game-card-footer">
+            <Show when={!collectionFilter() && platformTag(props.game.torrent_source)}>
+              <span class="badge badge-platform">{platformTag(props.game.torrent_source)}</span>
+            </Show>
             <For each={langEntries()}>
               {(entry) => (
                 <span class={`badge badge-lang ${langBadgeClass(entry.state)}`}>

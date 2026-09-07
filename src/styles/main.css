@@ -1106,7 +1106,7 @@ body {
 .game-row {
   display: grid;
   grid-template-columns:
-    28px 24px minmax(200px, 2.4fr) 44px minmax(110px, 1.3fr)
+    28px 24px 26px minmax(200px, 2.4fr) 44px minmax(110px, 1.3fr)
     minmax(110px, 1.3fr) minmax(110px, 1.3fr) 58px 68px 104px;
   gap: 10px;
   align-items: center;
@@ -1291,7 +1291,7 @@ body {
   .game-list-header,
   .game-row {
     grid-template-columns:
-      28px 24px minmax(200px, 2.4fr) 44px minmax(110px, 1.3fr)
+      28px 24px 26px minmax(200px, 2.4fr) 44px minmax(110px, 1.3fr)
       minmax(110px, 1.3fr) 58px 68px 104px;
   }
 
@@ -1305,7 +1305,7 @@ body {
   .game-list-header,
   .game-row {
     grid-template-columns:
-      28px 24px minmax(160px, 2.4fr) 44px minmax(100px, 1.3fr) 58px 68px 104px;
+      28px 24px 26px minmax(160px, 2.4fr) 44px minmax(100px, 1.3fr) 58px 68px 104px;
   }
 
   .game-list-header .row-dev,
@@ -1532,6 +1532,29 @@ body {
 .badge-lang {
   background: rgba(100, 149, 237, 0.25);
   color: #8ab4f8;
+}
+
+/* Collection family, shown only in the "All" view where it is not implied. */
+.badge-platform {
+  background: rgba(255, 255, 255, 0.10);
+  color: var(--text-secondary);
+  text-transform: none;
+}
+
+/* List-view cover: a 3:4 tile inside the 40px row. */
+.game-row .row-cover {
+  width: 26px;
+  height: 34px;
+  border-radius: 2px;
+  background: var(--bg-secondary);
+  overflow: hidden;
+}
+
+.game-row .row-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .badge-lang.lang-downloading {

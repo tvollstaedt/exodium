@@ -824,6 +824,7 @@ export function Library() {
             <div class="game-list-header" style={{ top: separatorTop() }}>
               <span class="row-fav" />
               <span class="row-play" />
+              <span class="row-cover" />
               <For each={listColumns}>
                 {(col) => (
                   <button
