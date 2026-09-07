@@ -134,3 +134,9 @@
 - Verworfen: Systemkopie bevorzugen und das Pack nur anbieten (so war es) - im Labor lief prompt ein apt-ScummVM statt des Pins, und der Hinweis "your system's ScummVM will run it instead" ist fuer den Nutzer ein Fehler, kein Angebot.
 - Grund: eXo pinnt, weil Spiele ueber Releases brechen; eine Systemkopie ist keine Loesung, sondern der Zustand, den die Packs beenden sollen.
 - Gotcha: Ohne Pack fuer die Plattform (heute: alles ausser darwin-*, linux-x86_64, linux-aarch64) bleibt das System der einzige Weg, und der scummvm.org-Hinweis ist dort ehrlich.
+
+## 2026-09-08 - ScummVM: Plattformcodes uebersetzt, mehrteilige Glk-Spiele auf Teil 1 gepinnt
+- Entscheidung: `platform.txt` traegt eXos Kuerzel (`sp48`, `st`, `dos`), ScummVM will seine eigenen (`zx`, `atari`, `pc`) und verwirft sonst die ganze Kommandozeile - `scummvm_platform_code` uebersetzt, Unbekanntes laesst `--platform` weg. Liefert `--detect` mehrere Zeilen fuer eine Kennung (Level-9-Trilogien: `GAMEDAT1-3.DAT` in einem Ordner), fragt `pin_first_part` ScummVM pro Datei, welche Teil 1 ist, schreibt ein Target mit `filename=` in die Ini und startet das Target.
+- Verworfen: die alphabetisch erste Datei nehmen (Heuristik ueber Dateinamen, die ScummVM selbst besser kennt); `--massadd` (in den Builds nicht einkompiliert).
+- Grund: Der nackte Start mit `engine:gameid` nimmt den ersten Treffer der Verzeichnisliste - NTFS alphabetisch (Teil 1, darum laeuft eXos Bat), APFS in Hash-Reihenfolge (Teil 2: "you've started in the middle of the game").
+- Gotcha: Gemessen mit dem 2.8.0-Pack auf macOS; die Probe kostet einen `--detect` pro Datendatei, nur wenn es mehrere Treffer gibt.

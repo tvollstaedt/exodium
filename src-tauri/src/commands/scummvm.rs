@@ -439,7 +439,9 @@ fn hide_console(_cmd: &mut std::process::Command) {}
 
 /// `--detect` before launching: unrecognised data does NOT fail a launch,
 /// ScummVM opens its own launcher GUI instead.
-fn detect(resolved: &Resolved, ini: &Path, run_dir: &Path, game_id: &str, grant: &Path) -> Result<(), String> {
+/// Rows of `--detect` for the expected id: their descriptions ("Gnome
+/// Ranger (pt. 2/Spectrum 48)"). Errors when nothing matches.
+fn detect(resolved: &Resolved, ini: &Path, run_dir: &Path, game_id: &str, grant: &Path) -> Result<Vec<String>, String> {
     let (mut cmd, _) = resolved.cmd.command(grant);
     hide_console(&mut cmd);
     cmd.arg(format!("--config={}", ini.display()))
@@ -466,13 +468,13 @@ fn detect(resolved: &Resolved, ini: &Path, run_dir: &Path, game_id: &str, grant:
         .skip(1)
         .filter(|l| !l.trim().is_empty())
         .collect();
-    let ok = if game_id.contains(':') {
-        rows.iter().any(|r| r.split_whitespace().next() == Some(game_id))
-    } else {
-        !rows.is_empty()
-    };
-    if ok {
-        return Ok(());
+    let matching: Vec<String> = rows
+        .iter()
+        .filter(|r| !game_id.contains(':') || r.split_whitespace().next() == Some(game_id))
+        .map(|r| detect_description(r))
+        .collect();
+    if !matching.is_empty() {
+        return Ok(matching);
     }
     log::warn!(
         "scummvm --detect found nothing for {} in {} (exit {:?}):\n{}\n{}",
@@ -488,6 +490,78 @@ fn detect(resolved: &Resolved, ini: &Path, run_dir: &Path, game_id: &str, grant:
         run_dir.display(),
         game_id
     ))
+}
+
+/// The middle column of a `--detect` row: columns are separated by runs of
+/// two or more spaces, the description itself may hold single spaces.
+fn detect_description(row: &str) -> String {
+    let cols: Vec<&str> = row.split("  ").filter(|c| !c.trim().is_empty()).collect();
+    cols.get(1).map(|c| c.trim().to_string()).unwrap_or_default()
+}
+
+/// "(pt. 2/Spectrum 48)" -> 2. Level 9 and other Glk packs ship a game's
+/// parts as sibling files, and the description is the only place the part
+/// number appears.
+fn part_number(description: &str) -> Option<u32> {
+    let i = description.find("pt.")?;
+    description[i + 3..].trim_start().chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse().ok()
+}
+
+/// Several detections for one id means several data files in one folder,
+/// and ScummVM runs whichever the directory lists first - alphabetical on
+/// NTFS (part 1, which is why eXo's bat works), hash order on APFS (part 2).
+/// Ask ScummVM which file is the lowest part and pin it as a target with
+/// `filename=`; the launch then names the target instead of the id.
+fn pin_first_part(
+    resolved: &Resolved,
+    ini: &Path,
+    run_dir: &Path,
+    game_id: &str,
+    grant: &Path,
+) -> Option<String> {
+    let engine_and_id: Vec<&str> = game_id.split(':').collect();
+    let (engine, id) = (engine_and_id.first()?, engine_and_id.get(1)?);
+    let mut files: Vec<String> = std::fs::read_dir(run_dir)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_file())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| !n.to_ascii_lowercase().ends_with(".txt"))
+        .collect();
+    files.sort();
+    let probe = std::env::temp_dir().join(format!("exodium-svm-probe-{}", std::process::id()));
+    let mut best: Option<(u32, String)> = None;
+    for name in &files {
+        let _ = std::fs::remove_dir_all(&probe);
+        std::fs::create_dir_all(&probe).ok()?;
+        let src = run_dir.join(name);
+        let dst = probe.join(name);
+        if std::fs::hard_link(&src, &dst).is_err() && std::fs::copy(&src, &dst).is_err() {
+            continue;
+        }
+        let Ok(rows) = detect(resolved, ini, &probe, game_id, grant) else { continue };
+        let part = rows.iter().filter_map(|d| part_number(d)).min().unwrap_or(u32::MAX);
+        if best.as_ref().is_none_or(|(p, _)| part < *p) {
+            best = Some((part, name.clone()));
+        }
+    }
+    let _ = std::fs::remove_dir_all(&probe);
+    let (part, file) = best?;
+    let target = format!("exodium-{id}");
+    let section = format!(
+        "\n[{target}]\ngameid={id}\nengineid={engine}\npath={}\nfilename={file}\n",
+        run_dir.display()
+    );
+    let mut text = std::fs::read_to_string(ini).ok()?;
+    if let Some(start) = text.find(&format!("[{target}]")) {
+        let end = text[start + 1..].find("\n[").map(|i| start + 1 + i).unwrap_or(text.len());
+        text.replace_range(start..end, section.trim_start_matches('\n'));
+    } else {
+        text.push_str(&section);
+    }
+    std::fs::write(ini, text).ok()?;
+    log::info!("scummvm: {game_id} has several parts in {}; pinned part {part} ({file}) as target {target}", run_dir.display());
+    Some(target)
 }
 
 pub(crate) async fn launch_scummvm_game(
@@ -556,7 +630,13 @@ async fn launch_inner(
     let savepath = game_dir.join("!saves");
     std::fs::create_dir_all(&savepath).map_err(|e| format!("cannot create {}: {e}", savepath.display()))?;
 
-    detect(&resolved, &ini, &variant.run_dir, &entry.game_id, &torrent_root)?;
+    let detections = detect(&resolved, &ini, &variant.run_dir, &entry.game_id, &torrent_root)?;
+    let launch_target = if detections.len() > 1 && entry.game_id.contains(':') {
+        pin_first_part(&resolved, &ini, &variant.run_dir, &entry.game_id, &torrent_root)
+            .unwrap_or_else(|| entry.game_id.clone())
+    } else {
+        entry.game_id.clone()
+    };
 
     let fullscreen = match per_game_config.get("fullscreen").map(String::as_str) {
         Some("true") => true,
@@ -581,7 +661,7 @@ async fn launch_inner(
     }
     cmd.arg(format!("--savepath={}", savepath.display()));
     cmd.arg(format!("--path={}", variant.run_dir.display()));
-    cmd.arg(&entry.game_id);
+    cmd.arg(&launch_target);
     cmd.current_dir(&variant.run_dir);
     log::info!(
         "Launching {} via ScummVM {} ({:?}): {} in {}",
@@ -855,6 +935,15 @@ mod tests {
     /// Maniac Mansion's tree: nine platform folders, DOS v1 with a sub-menu
     /// of render modes. Defaults pick the first entry at every level, like
     /// eXo's menu; stored choices override.
+    #[test]
+    fn detect_rows_yield_descriptions_and_part_numbers() {
+        let row = "glk:gnomeranger                Gnome Ranger (pt. 2/Spectrum 48)                           /some/where/Gnome Ranger Spectrum";
+        assert_eq!(detect_description(row), "Gnome Ranger (pt. 2/Spectrum 48)");
+        assert_eq!(part_number("Gnome Ranger (pt. 2/Spectrum 48)"), Some(2));
+        assert_eq!(part_number("Gnome Ranger (pt. 1/PC)"), Some(1));
+        assert_eq!(part_number("Maniac Mansion (DOS/English)"), None);
+    }
+
     /// eXo's own short names must reach ScummVM as codes it accepts.
     #[test]
     fn exo_platform_names_become_scummvm_codes() {
