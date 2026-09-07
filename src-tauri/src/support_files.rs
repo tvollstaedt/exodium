@@ -143,20 +143,12 @@ pub(crate) async fn status(pack: &SupportPack, mgr: &DownloadManager, ready: boo
         return SupportStatus::new("failed", 1.0, util.size);
     }
     if mgr.is_file_selected(util.index).await {
-        let on_disk = mgr
-            .file_output_path(util.index)
-            .and_then(|p| std::fs::metadata(p).ok())
-            .map(|m| m.len())
-            .unwrap_or(0);
-        // Torrent pieces land out of order, so the sparse file's length
-        // reaches full size long before the download is done - only a
-        // verified-complete file may claim 100% (= "setting up" in the UI).
-        let progress = if mgr.is_file_complete(util.index).await {
-            1.0
-        } else if util.size > 0 {
-            (on_disk as f32 / util.size as f32).min(0.99)
-        } else {
-            0.0
+        // Verified bytes from the session, never the on-disk length: the
+        // sparse file reaches full size long before the pieces are in.
+        let progress = match mgr.file_progress(util.index).await {
+            Some(p) if p.finished => 1.0,
+            Some(p) => (p.progress as f32).min(0.99),
+            None => 0.0,
         };
         return SupportStatus::new("downloading", progress, util.size);
     }
@@ -349,11 +341,13 @@ fn spawn_watcher(pack: &'static SupportPack, mgr: Arc<DownloadManager>, util_ind
             let Some(zip_path) = mgr.file_output_path(util_index) else {
                 return;
             };
-            // librqbit's per-file stat can stall short of total for a file
-            // fully on disk, and after a restart without session state the
-            // handle is gone - so the on-disk size is a second completion test.
-            let stats_complete = mgr.is_file_complete(util_index).await;
-            let disk_complete = expected_size > 0
+            // The session's verdict while it has a handle; the on-disk size
+            // only when it has none (a restart without session state). With
+            // a handle, full length means nothing - the file is sparse.
+            let stats = mgr.file_progress(util_index).await;
+            let stats_complete = stats.as_ref().is_some_and(|p| p.finished);
+            let disk_complete = stats.is_none()
+                && expected_size > 0
                 && std::fs::metadata(&zip_path).is_ok_and(|m| m.len() >= expected_size);
             if stats_complete || disk_complete {
                 let root = torrent_root.clone();

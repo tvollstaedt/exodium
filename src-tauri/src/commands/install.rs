@@ -816,6 +816,8 @@ impl From<ExtractError> for String {
 pub(crate) enum LaunchError {
     /// Torrent placeholder or fragment; `installed` has been cleared.
     Placeholder { title: String },
+    /// The session is still fetching the archive.
+    StillDownloading { title: String },
     NoShortcode { title: String },
     FilesMissing { title: String },
     /// Unpacked, but the folder is not where the catalogue expects it.
@@ -831,6 +833,9 @@ impl From<LaunchError> for String {
                 "Game ZIP for '{title}' is incomplete or corrupted (torrent placeholder). \
                  Please re-download the game."
             ),
+            LaunchError::StillDownloading { title } => {
+                format!("'{title}' is still downloading - it will install by itself when done.")
+            }
             LaunchError::NoShortcode { title } => {
                 format!("'{title}' has no game directory in the catalogue")
             }
@@ -888,6 +893,18 @@ pub(crate) async fn extract_before_launch(
         .into_iter()
         .find(|z| z.exists())
         .ok_or_else(|| LaunchError::FilesMissing { title: title() })?;
+    // A zip the session is still filling is sparse and may open (its tail
+    // piece can land first) - unpacking it would leave a half game dir that
+    // reads as installed from then on.
+    if let Some(idx) = game.game_torrent_index {
+        let mgr = app.state::<TorrentState>().0.read().await.get(source).cloned();
+        if let Some(mgr) = mgr {
+            let idx = idx as usize;
+            if mgr.is_file_selected(idx).await && !mgr.is_file_complete(idx).await {
+                return Err(LaunchError::StillDownloading { title: title() });
+            }
+        }
+    }
     log::info!("Auto-extracting {} before launch", zip.display());
     // Next to the zip, so the dir lands where the probe above looks.
     let dest = zip.parent().map(PathBuf::from).unwrap_or_else(|| torrent_root.to_path_buf());

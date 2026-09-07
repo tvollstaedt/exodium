@@ -574,6 +574,47 @@ pub(crate) fn scan_installed_games_with_db(
             }
         }
 
+        // A `<zip>.extracting` lock older than the poll's own stale limit
+        // marks an extraction that died with the process; its half game dir
+        // passed pass 1. Unmark the row and drop the lock - the tracker the
+        // frontend re-arms extracts again from the complete archive.
+        let mut crashed: Vec<i64> = Vec::new();
+        let mut scan_dirs = vec![game_base.clone()];
+        for col in COLLECTION_MAP.iter().filter(|c| c.year_subdirs) {
+            if let Ok(entries) = std::fs::read_dir(game_root(data_dir).join(col.game_prefix)) {
+                scan_dirs.extend(entries.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.is_dir()));
+            }
+        }
+        for dir in &scan_dirs {
+            let Ok(entries) = std::fs::read_dir(dir) else { continue };
+            for e in entries.filter_map(|e| e.ok()) {
+                let path = e.path();
+                if path.extension().is_none_or(|x| x != "extracting") {
+                    continue;
+                }
+                let stale = e.metadata().and_then(|m| m.modified()).ok()
+                    .and_then(|t| t.elapsed().ok())
+                    .is_some_and(|age| age.as_secs() > 300);
+                if !stale {
+                    continue;
+                }
+                if let Some(id) = path.file_stem().and_then(|s| name_to_id.get(&*s.to_string_lossy())) {
+                    crashed.push(*id);
+                }
+                let _ = std::fs::remove_file(&path);
+            }
+        }
+        zip_ids.retain(|id| !crashed.contains(id));
+        if !crashed.is_empty() {
+            let placeholders = crashed.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+            let conn = db.lock().map_err(|e| e.to_string())?;
+            let _ = conn.execute(
+                &format!("UPDATE games SET installed = 0 WHERE id IN ({})", placeholders),
+                rusqlite::params_from_iter(crashed.iter()),
+            );
+            log::warn!("scan_installed_games: {} extractions died mid-way - unmarked, will extract again", crashed.len());
+        }
+
         if !zip_ids.is_empty() {
             let placeholders = zip_ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
             let sql = format!(

@@ -239,7 +239,12 @@ fn merge_tree(src: &Path, dst: &Path) -> Result<MergeTally, String> {
         }
         let src_len = from.metadata().map(|m| m.len()).unwrap_or(0);
         let dst_len = to.metadata().map(|m| m.len()).unwrap_or(0);
-        if from.is_file() && to.is_file() && src_len > dst_len {
+        // Equal lengths do not mean equal files: a half-fetched torrent
+        // archive is sparse at full length. Then the one that opens as a
+        // zip is the real one; with no verdict the existing copy stays.
+        let from_wins = src_len > dst_len
+            || (src_len == dst_len && src_len > 0 && opens_as_zip(&from) && !opens_as_zip(&to));
+        if from.is_file() && to.is_file() && from_wins {
             std::fs::remove_file(&to).map_err(|e| e.to_string())?;
             std::fs::rename(&from, &to)
                 .map_err(|e| format!("replacing {}: {e}", to.display()))?;
@@ -272,6 +277,18 @@ fn remove_empty_tree(dir: &Path) {
         }
     }
     let _ = std::fs::remove_dir(dir);
+}
+
+/// Does the central directory read? A sparse, half-fetched archive fails
+/// here; a complete one passes. Non-zip files answer false either way.
+fn opens_as_zip(path: &Path) -> bool {
+    if path.extension().is_none_or(|e| !e.eq_ignore_ascii_case("zip")) {
+        return false;
+    }
+    std::fs::File::open(path)
+        .ok()
+        .and_then(|f| zip::ZipArchive::new(f).ok())
+        .is_some()
 }
 
 #[cfg(test)]
@@ -319,6 +336,35 @@ mod tests {
         assert_eq!(tally.deduped, 1, "the zero-byte Placeholder.zip is dropped");
         assert_eq!(tally.skipped, 0);
         assert!(!stray.exists(), "the old folder must be gone, or we ask again forever");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Same length on both sides is the sparse case: the real archive is the
+    /// one whose central directory reads.
+    #[test]
+    fn equal_length_tie_goes_to_the_archive_that_opens() {
+        let dir = std::env::temp_dir().join(format!("exodium_tie_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let old = dir.join("eXoWin9x/eXo/eXoWin9x/1995");
+        let new_root = dir.join("eXoDOS/eXo/eXoWin9x/1995");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::create_dir_all(&new_root).unwrap();
+        let real = {
+            let mut buf = std::io::Cursor::new(Vec::new());
+            let mut w = zip::ZipWriter::new(&mut buf);
+            let opts: zip::write::FileOptions<'_, ()> = zip::write::FileOptions::default();
+            w.start_file("GAME/run.bat", opts).unwrap();
+            std::io::Write::write_all(&mut w, b"@echo off").unwrap();
+            w.finish().unwrap();
+            buf.into_inner()
+        };
+        std::fs::write(old.join("Game.zip"), &real).unwrap();
+        // The new root holds a sparse download of the same length: zeros.
+        std::fs::write(new_root.join("Game.zip"), vec![0u8; real.len()]).unwrap();
+
+        merge_tree(&dir.join("eXoWin9x"), &dir.join("eXoDOS")).unwrap();
+
+        assert_eq!(std::fs::read(new_root.join("Game.zip")).unwrap(), real, "the readable archive wins the tie");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
