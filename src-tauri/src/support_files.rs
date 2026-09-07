@@ -126,9 +126,24 @@ pub struct SupportStatus {
 }
 
 impl SupportStatus {
-    fn new(phase: &str, progress: f32, total_bytes: u64) -> Self {
+    pub(crate) fn new(phase: &str, progress: f32, total_bytes: u64) -> Self {
         Self { phase: phase.into(), progress, total_bytes }
     }
+}
+
+/// The pack's status for the panel; "missing" when its collection has no
+/// manager (offline, or the collection is not enabled).
+pub(crate) async fn status_for(
+    torrent_state: &crate::commands::TorrentState,
+    pack: &SupportPack,
+    ready: impl FnOnce(&Path) -> bool,
+) -> SupportStatus {
+    let mgr = torrent_state.0.read().await.get(pack.collection).cloned();
+    let Some(mgr) = mgr else {
+        return SupportStatus::new("missing", 0.0, 0);
+    };
+    let ready = ready(&mgr.torrent_root());
+    status(pack, &mgr, ready).await
 }
 
 /// `ready` is the caller's readiness verdict (Win9x scopes it per variant).

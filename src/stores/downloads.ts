@@ -254,18 +254,15 @@ async function poll(t: Tracker) {
   }
 }
 
-export function startGameDownload(gameId: number, title?: string) {
-  // A still-running attempt for the same game must not write the store on
-  // behalf of this one.
-  const previous = trackers.get(gameId);
-  if (previous) { endTracker(previous); }
-
+/** A registered tracker at t=0; `commandPending` says whether a
+ *  download_game call is still on its way (null polls are expected then). */
+function newTracker(gameId: number, title: string | undefined, commandPending: boolean): Tracker {
   const now = Date.now();
   const t: Tracker = {
     gameId,
-    title: title ?? previous?.title ?? downloads()[gameId]?.title,
+    title,
     cancelled: false,
-    commandPending: true,
+    commandPending,
     nullPolls: 0,
     stuckSince: 0,
     maxProgress: 0,
@@ -276,6 +273,16 @@ export function startGameDownload(gameId: number, title?: string) {
     lastTorrentAt: now,
   };
   trackers.set(gameId, t);
+  return t;
+}
+
+export function startGameDownload(gameId: number, title?: string) {
+  // A still-running attempt for the same game must not write the store on
+  // behalf of this one.
+  const previous = trackers.get(gameId);
+  if (previous) { endTracker(previous); }
+
+  const t = newTracker(gameId, title ?? previous?.title ?? downloads()[gameId]?.title, true);
   setState(t, { status: "Starting download...", progress: 0, downloading: true });
 
   void poll(t);
@@ -304,23 +311,8 @@ export async function resumeDownloads() {
   try { pending = await listActiveDownloads(); } catch { return; }
   for (const { id, title } of pending) {
     if (trackers.has(id)) { continue; }
-    const now = Date.now();
-    const t: Tracker = {
-      gameId: id,
-      title,
-      cancelled: false,
-      // No download_game call to wait for: the session already has the file.
-      commandPending: false,
-      nullPolls: 0,
-      stuckSince: 0,
-      maxProgress: 0,
-      announcedInstalled: false,
-      lastProgressVal: -1,
-      lastProgressAt: now,
-      lastTorrentVal: -1,
-      lastTorrentAt: now,
-    };
-    trackers.set(id, t);
+    // No download_game call to wait for: the session already has the file.
+    const t = newTracker(id, title, false);
     setState(t, { status: "Resuming download…", progress: 0, downloading: true });
     void poll(t);
   }

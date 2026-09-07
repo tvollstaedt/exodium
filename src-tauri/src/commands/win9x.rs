@@ -1255,17 +1255,10 @@ pub async fn get_win9x_support_status(
     torrent_state: State<'_, TorrentState>,
     variant: Option<String>,
 ) -> Result<Win9xSupportStatus, String> {
-    let mgr = {
-        let guard = torrent_state.0.read().await;
-        guard.get("eXoWin9x").cloned()
-    };
-    let Some(mgr) = mgr else {
-        return Ok(Win9xSupportStatus { phase: "missing".into(), progress: 0.0, total_bytes: 0 });
-    };
-    let root = mgr.torrent_root();
-    let ready = match variant.as_deref() {
-        Some(v) => win9x_support_ready(&root, Some(v)),
-        None => win9x_support_ready(&root, None) && win9x_support_ready(&root, Some("86box")),
-    };
-    Ok(crate::support_files::status(&crate::support_files::WIN9X_SUPPORT, &mgr, ready).await)
+    use crate::support_files::{status_for, WIN9X_SUPPORT};
+    Ok(status_for(&torrent_state, &WIN9X_SUPPORT, |root| match variant.as_deref() {
+        Some(v) => win9x_support_ready(root, Some(v)),
+        None => win9x_support_ready(root, None) && win9x_support_ready(root, Some("86box")),
+    })
+    .await)
 }

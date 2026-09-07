@@ -245,7 +245,6 @@ pub async fn download_game(
     Ok(format!("Downloading: {}", game.title))
 }
 
-/// Get download progress for a game. If complete, extract and mark installed.
 /// A library row whose torrent file the session has selected. Complete-but-
 /// unextracted rows count too - the extraction runs from the progress poll,
 /// so they need a watcher as well. `installed && !complete` is a false
@@ -308,6 +307,7 @@ pub async fn list_active_downloads(
     pending_downloads(&db_state.0, &torrent_state).await
 }
 
+/// Get download progress for a game. If complete, extract and mark installed.
 #[tauri::command]
 pub async fn get_download_progress(
     db_state: State<'_, DbState>,

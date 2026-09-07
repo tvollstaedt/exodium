@@ -29,6 +29,8 @@ export function GameRow(props: GameRowProps) {
   createEffect(on(() => props.game.id, () => { setFavorited(props.game.favorited); }, { defer: true }));
 
   const langEntries = () => parseLangEntries(props.game);
+  // Shown only where the collection is not implied by a filter.
+  const platform = () => (collectionFilter() ? null : platformTag(props.game.torrent_source));
   const isMultiLang = () => langEntries().length > 1;
   let rowRef: HTMLDivElement | undefined;
   const cover = createCover(() => props.game, () => rowRef);
@@ -139,8 +141,8 @@ export function GameRow(props: GameRowProps) {
       </span>
       <span class="row-title" title={props.game.title}>
         <span class="row-title-text">{props.game.title}</span>
-        <Show when={!collectionFilter() && platformTag(props.game.torrent_source)}>
-          <span class="badge badge-platform">{platformTag(props.game.torrent_source)}</span>
+        <Show when={platform()}>
+          <span class="badge badge-platform">{platform()}</span>
         </Show>
         <For each={langEntries()}>
           {(entry) => (

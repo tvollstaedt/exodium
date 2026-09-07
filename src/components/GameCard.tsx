@@ -82,6 +82,8 @@ export function GameCard(props: GameCardProps) {
 
 
   const langEntries = () => parseLangEntries(props.game);
+  // Shown only where the collection is not implied by a filter.
+  const platform = () => (collectionFilter() ? null : platformTag(props.game.torrent_source));
   const isMultiLang = () => langEntries().length > 1;
 
   // The live download of the primary or any variant, with its id so Cancel
@@ -171,8 +173,8 @@ export function GameCard(props: GameCardProps) {
             {props.game.genre && <span class="genre">{props.game.genre}</span>}
           </div>
           <div class="game-card-footer">
-            <Show when={!collectionFilter() && platformTag(props.game.torrent_source)}>
-              <span class="badge badge-platform">{platformTag(props.game.torrent_source)}</span>
+            <Show when={platform()}>
+              <span class="badge badge-platform">{platform()}</span>
             </Show>
             <For each={langEntries()}>
               {(entry) => (

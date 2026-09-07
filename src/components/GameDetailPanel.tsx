@@ -135,20 +135,6 @@ export function GameDetailPanel(props: Props) {
       .then((v) => { if (props.game?.id === id) { setSvmVariants(v); } })
       .catch(() => {});
   };
-  // A finished pack install - or, on Windows, the support payload turning
-  // ready - has to clear the "not found" note without the panel being
-  // reopened; the Win9x status does the same re-probe.
-  createEffect(() => {
-    installedPacks();
-    win9x.support()?.phase;
-    if (!panelSettled()) { return; }
-    const g = props.game;
-    if (!isScummVm(g) || g?.id == null) { return; }
-    const id = g.id;
-    scummvmEngineInfo(id)
-      .then((e) => { if (props.game?.id === id) { setSvmEngine(e); } })
-      .catch(() => {});
-  });
   const chooseSvmVariant = async (name: string) => {
     const id = props.game?.id;
     const sel = svmVariants()?.selected;
@@ -327,6 +313,20 @@ export function GameDetailPanel(props: Props) {
   });
   onCleanup(() => clearTimeout(settleTimer));
   const win9x = createWin9xStatus(() => props.game, panelSettled);
+  // A finished pack install - or, on Windows, the support payload turning
+  // ready - has to clear the "not found" note without the panel being
+  // reopened; the Win9x status does the same re-probe.
+  createEffect(() => {
+    void installedPacks();
+    void win9x.support()?.phase;
+    if (!panelSettled()) { return; }
+    const g = props.game;
+    if (!isScummVm(g) || g?.id == null) { return; }
+    const id = g.id;
+    scummvmEngineInfo(id)
+      .then((e) => { if (props.game?.id === id) { setSvmEngine(e); } })
+      .catch(() => {});
+  });
 
   // Reset only when the displayed game changes: library refreshes replace
   // the object for the same id.

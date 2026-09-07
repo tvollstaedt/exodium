@@ -2,7 +2,7 @@
 //! which archives on disk are installs (§4), uninstall with save backup and
 //! reset (§5).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use tauri::State;
 
@@ -288,6 +288,13 @@ fn scan_torrent_indices() -> std::collections::HashMap<&'static str, TorrentInde
     out
 }
 
+/// `eXo/eXoWin9x/<year>/`: the one directory shape that holds zips a level down.
+fn is_year_dir(p: &Path) -> bool {
+    p.file_name()
+        .map(|n| n.to_string_lossy())
+        .is_some_and(|n| n.len() == 4 && n.bytes().all(|b| b.is_ascii_digit()))
+}
+
 /// Mark games whose files are on disk as installed; returns rows updated.
 /// `adopt_from_disk` lets a bare archive CREATE a library entry - true for
 /// import, Rescan and a data-dir change, never for the startup scan (§4).
@@ -563,12 +570,7 @@ pub(crate) fn scan_installed_games_with_db(
             let Ok(entries) = std::fs::read_dir(&col_base) else { continue };
             for year_dir in entries
                 .filter_map(|e| e.ok())
-                .filter(|e| e.path().is_dir())
-                .filter(|e| {
-                    let n = e.file_name();
-                    let n = n.to_string_lossy();
-                    n.len() == 4 && n.bytes().all(|b| b.is_ascii_digit())
-                })
+                .filter(|e| e.path().is_dir() && is_year_dir(&e.path()))
             {
                 zip_ids.extend(collect_zip_ids(&year_dir.path()));
             }
@@ -582,7 +584,9 @@ pub(crate) fn scan_installed_games_with_db(
         let mut scan_dirs = vec![game_base.clone()];
         for col in COLLECTION_MAP.iter().filter(|c| c.year_subdirs) {
             if let Ok(entries) = std::fs::read_dir(game_root(data_dir).join(col.game_prefix)) {
-                scan_dirs.extend(entries.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.is_dir()));
+                scan_dirs.extend(
+                    entries.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.is_dir() && is_year_dir(p)),
+                );
             }
         }
         for dir in &scan_dirs {
@@ -673,10 +677,13 @@ pub async fn scan_installed_games(
     // Rows an earlier scan confirmed off a sparse, half-fetched archive.
     let false_installs: Vec<i64> = pending.iter().filter(|d| d.installed && !d.complete).map(|d| d.id).collect();
     if !false_installs.is_empty() {
+        let placeholders = false_installs.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
         let conn = db_state.lock()?;
-        for id in &false_installs {
-            conn.execute("UPDATE games SET installed = 0 WHERE id = ?1", [id]).map_err(|e| e.to_string())?;
-        }
+        conn.execute(
+            &format!("UPDATE games SET installed = 0 WHERE id IN ({})", placeholders),
+            rusqlite::params_from_iter(false_installs.iter()),
+        )
+        .map_err(|e| e.to_string())?;
         log::info!("scan_installed_games: {} rows reset - archive still downloading", false_installs.len());
     }
     let in_flight: std::collections::HashSet<String> =

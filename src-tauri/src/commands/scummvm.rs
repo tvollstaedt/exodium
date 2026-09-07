@@ -573,15 +573,8 @@ pub struct ScummVmEngineInfo {
 pub async fn get_scummvm_support_status(
     torrent_state: State<'_, super::TorrentState>,
 ) -> Result<crate::support_files::SupportStatus, String> {
-    let mgr = {
-        let guard = torrent_state.0.read().await;
-        guard.get("eXoScummVM").cloned()
-    };
-    let Some(mgr) = mgr else {
-        return Ok(crate::support_files::SupportStatus { phase: "missing".into(), progress: 0.0, total_bytes: 0 });
-    };
-    let ready = crate::support_files::scummvm_ready(&mgr.torrent_root());
-    Ok(crate::support_files::status(&crate::support_files::SCUMMVM_SUPPORT, &mgr, ready).await)
+    use crate::support_files::{scummvm_ready, status_for, SCUMMVM_SUPPORT};
+    Ok(status_for(&torrent_state, &SCUMMVM_SUPPORT, scummvm_ready).await)
 }
 
 /// What the panel shows next to Play: answered by the launcher's own resolver
