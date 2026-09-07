@@ -238,6 +238,21 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* A game row's label is a link to its detail panel; same look, hover underline. */
+.download-sheet-label.is-link {
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.download-sheet-label.is-link:hover {
+  text-decoration: underline;
   margin-bottom: 4px;
   text-transform: capitalize;
 }

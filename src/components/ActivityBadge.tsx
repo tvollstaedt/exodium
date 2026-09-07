@@ -7,6 +7,7 @@ import { transferStats, isTransferring, formatRate } from "../stores/transfer";
 import { downloads, cancelGameDownload } from "../stores/downloads";
 import { activeJobs, cancelContentPackJob } from "../stores/contentPacks";
 import { seedingOn } from "../stores/seeding";
+import { setOpenGameRequest } from "../stores/music";
 import { formatBytes } from "../util";
 
 interface Props {
@@ -16,6 +17,8 @@ interface Props {
 
 interface ActiveDownload {
   id: string;
+  /** The game behind a "game" row; content packs have none. */
+  gameId?: number;
   label: string;
   progress: number;
   status: string;
@@ -116,6 +119,7 @@ export function ActivityBadge(props: Props) {
       if (state.downloading) {
         result.push({
           id: `game:${id}`,
+          gameId: Number(id),
           label: state.title ?? `Game #${id}`,
           progress: state.progress,
           status: state.status,
@@ -220,7 +224,15 @@ export function ActivityBadge(props: Props) {
                 {(dl) => (
                   <div class="download-sheet-row">
                     <div class="download-sheet-info">
-                      <span class="download-sheet-label">{dl().label}</span>
+                      {/* A game row opens its detail panel - the same request
+                          the player bar's cover makes (Library listens). */}
+                      <Show when={dl().gameId != null} fallback={<span class="download-sheet-label">{dl().label}</span>}>
+                        <button
+                          class="download-sheet-label is-link"
+                          title="Show game"
+                          onClick={() => { setShowSheet(false); setOpenGameRequest(dl().gameId!); }}
+                        >{dl().label}</button>
+                      </Show>
                       <div class="download-sheet-progress-row">
                         <AutoProgress value={dl().progress} class="mini" />
                         <span class="download-sheet-status">{dl().status}</span>
