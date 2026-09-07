@@ -208,6 +208,11 @@
               "url": "https://github.com/tvollstaedt/exodium/releases/download/content-v7/scummvm-2.5.0-linux-x86_64-v1.tar.gz",
               "sha256": "18649d8b298fecc83631d74b2899304490ac138a6b182e8fb1ede97fe6066639",
               "size_bytes": 109477207
+            },
+            "linux-aarch64": {
+              "url": "https://github.com/tvollstaedt/exodium/releases/download/content-v7/scummvm-2.5.0-linux-aarch64-v1.tar.gz",
+              "sha256": "a7f936027ecdd190fff48cded34beea20b375750950b635f4b4bf6b8ec61ae84",
+              "size_bytes": 108035392
             }
           }
         },
@@ -235,6 +240,11 @@
               "url": "https://github.com/tvollstaedt/exodium/releases/download/content-v7/scummvm-2.8.0-linux-x86_64-v1.tar.gz",
               "sha256": "080f54e40230837cc793b2a9befe21b863c1caa8fec494a6821e16a5c1d869f5",
               "size_bytes": 141375131
+            },
+            "linux-aarch64": {
+              "url": "https://github.com/tvollstaedt/exodium/releases/download/content-v7/scummvm-2.8.0-linux-aarch64-v1.tar.gz",
+              "sha256": "79068466f48da8437c216adbada5f6f3e3ccdd8f9e6959dfba057085247be3f8",
+              "size_bytes": 139309323
             }
           }
         },
@@ -262,6 +272,11 @@
               "url": "https://github.com/tvollstaedt/exodium/releases/download/content-v7/scummvm-2.9.0-linux-x86_64-v1.tar.gz",
               "sha256": "ae952b8260064d8015b322bdeedf673916896f981402a8ef884f8b7b39c42006",
               "size_bytes": 148755350
+            },
+            "linux-aarch64": {
+              "url": "https://github.com/tvollstaedt/exodium/releases/download/content-v7/scummvm-2.9.0-linux-aarch64-v1.tar.gz",
+              "sha256": "fc87e1010a9a4805b3b56a64b940a3e1fef9401a2b5b4e4ce0ff4924a5ae0ebd",
+              "size_bytes": 146336251
             }
           }
         },
@@ -289,6 +304,11 @@
               "url": "https://github.com/tvollstaedt/exodium/releases/download/content-v7/scummvm-2026.1.0-linux-x86_64-v1.tar.gz",
               "sha256": "6d998ada189e298b9aa9ac63da7aff9c88573f360718a21732f620dea13f40ff",
               "size_bytes": 153260193
+            },
+            "linux-aarch64": {
+              "url": "https://github.com/tvollstaedt/exodium/releases/download/content-v7/scummvm-2026.1.0-linux-aarch64-v1.tar.gz",
+              "sha256": "0b47df63ba19959bad73bc53b7ff5e8f001b7d18e37f90ef5e6e27eac529c2b5",
+              "size_bytes": 150672854
             }
           }
         }
