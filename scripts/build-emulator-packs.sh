@@ -12,7 +12,7 @@
 #
 #   --emulator scummvm --scummvm-version <v>
 #   --platform macos   scummvm-<v>-macos-universal-v<N>.tar.gz (upstream DMG)
-#   --platform linux   scummvm-<v>-linux-x86_64-v<N>.tar.gz    (our self-built
+#   --platform linux   scummvm-<v>-linux-<uname -m>-v<N>.tar.gz  (our self-built
 #                        AppImage, pass it via --scummvm-appimage <path>)
 #
 # Tarball rules (each one guards a shipped incident - see CLAUDE.md §10/§16):
@@ -137,7 +137,7 @@ if [[ "$EMULATOR" == "scummvm" ]]; then
       chmod +x "$STAGE/ScummVM.AppImage"
       fetch_license "https://raw.githubusercontent.com/scummvm/scummvm/v${SCUMMVM_VERSION}/COPYING" "$STAGE/COPYING"
       roll_tar "$TMP_DIR/stage-svm" "scummvm-${SCUMMVM_VERSION}" \
-        "$OUT_DIR/scummvm-${SCUMMVM_VERSION}-linux-x86_64-v${PACK_VERSION}.tar.gz"
+        "$OUT_DIR/scummvm-${SCUMMVM_VERSION}-linux-$(uname -m)-v${PACK_VERSION}.tar.gz"
       ;;
 
     *)

@@ -18,6 +18,10 @@ on:
         options: [win9x, scummvm]
         default: win9x
         required: true
+      scummvm_arches:
+        description: 'Linux architectures to build (JSON array of uname -m values)'
+        default: '["x86_64", "aarch64"]'
+        type: string
       scummvm_versions:
         description: "ScummVM releases to package (JSON array; eXo's pins)"
         default: '["2.5.0", "2.8.0", "2.9.0", "2026.1.0"]'
@@ -197,7 +201,9 @@ jobs:
       fail-fast: false
       matrix:
         version: ${{ fromJSON(inputs.scummvm_versions) }}
-    runs-on: ubuntu-latest
+        arch: ${{ fromJSON(inputs.scummvm_arches) }}
+    # The container image is multi-arch; the runner picks the architecture.
+    runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     container: ghcr.io/pkgforge-dev/archlinux:latest
     steps:
       - uses: actions/checkout@v4
@@ -217,7 +223,7 @@ jobs:
           cp dist/scummvm-*-source.tar.xz dist/packs/
       - uses: actions/upload-artifact@v4
         with:
-          name: scummvm-linux-${{ matrix.version }}
+          name: scummvm-linux-${{ matrix.arch }}-${{ matrix.version }}
           path: dist/packs/*
           if-no-files-found: error
 
@@ -277,8 +283,10 @@ jobs:
             # ScummVM.app carries Sparkle.framework, so its symlinks must survive.
             check "scummvm-$ver-macos-universal-v$V.tar.gz" \
                   "scummvm-$ver/ScummVM.app/Contents/MacOS/scummvm" yes
-            check "scummvm-$ver-linux-x86_64-v$V.tar.gz" \
-                  "scummvm-$ver/ScummVM.AppImage"
+            for arch in $(echo '${{ inputs.scummvm_arches }}' | jq -r '.[]'); do
+              check "scummvm-$ver-linux-$arch-v$V.tar.gz" \
+                    "scummvm-$ver/ScummVM.AppImage"
+            done
           done
       - name: Emit manifest snippet + checksums
         run: |
@@ -289,19 +297,18 @@ jobs:
           V="${{ inputs.pack_version }}"
           # The macOS tarball is universal (x86_64 + arm64), so both Mac
           # platform tokens point at the same file.
+          src() { # src <file> -> {url,sha256,size_bytes}
+            jq -n --arg url "$BASE/$1" --arg h "$(sha256sum "$1" | cut -d' ' -f1)" \
+              --argjson s "$(wc -c < "$1" | tr -d ' ')" '{url: $url, sha256: $h, size_bytes: $s}'
+          }
           for ver in $(echo '${{ inputs.scummvm_versions }}' | jq -r '.[]'); do
-            mac="scummvm-$ver-macos-universal-v$V.tar.gz"
-            lin="scummvm-$ver-linux-x86_64-v$V.tar.gz"
-            jq -n --arg id "scummvm-$ver" --arg base "$BASE" \
-              --arg mac "$mac" --arg lin "$lin" \
-              --arg h_mac "$(sha256sum "$mac" | cut -d' ' -f1)" \
-              --arg h_lin "$(sha256sum "$lin" | cut -d' ' -f1)" \
-              --argjson s_mac "$(wc -c < "$mac" | tr -d ' ')" \
-              --argjson s_lin "$(wc -c < "$lin" | tr -d ' ')" \
-              '{ ($id): { platforms: {
-                   "darwin-aarch64": { url: ($base + "/" + $mac), sha256: $h_mac, size_bytes: $s_mac },
-                   "darwin-x86_64":  { url: ($base + "/" + $mac), sha256: $h_mac, size_bytes: $s_mac },
-                   "linux-x86_64":   { url: ($base + "/" + $lin), sha256: $h_lin, size_bytes: $s_lin } } } }'
+            mac="$(src "scummvm-$ver-macos-universal-v$V.tar.gz")"
+            plat="$(jq -n --argjson m "$mac" '{"darwin-aarch64": $m, "darwin-x86_64": $m}')"
+            for arch in $(echo '${{ inputs.scummvm_arches }}' | jq -r '.[]'); do
+              lin="$(src "scummvm-$ver-linux-$arch-v$V.tar.gz")"
+              plat="$(jq -n --argjson p "$plat" --argjson l "$lin" --arg k "linux-$arch" '$p + {($k): $l}')"
+            done
+            jq -n --arg id "scummvm-$ver" --argjson p "$plat" '{ ($id): { platforms: $p } }'
           done | jq -s 'add' > manifest-snippet.json
           cat manifest-snippet.json
       - uses: actions/upload-artifact@v4
