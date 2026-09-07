@@ -4,7 +4,9 @@ import { Tooltip } from "@ark-ui/solid/tooltip";
 import { AutoProgress } from "./ProgressBar";
 import { isOffline } from "../stores/network";
 import { transferStats, isTransferring, formatRate } from "../stores/transfer";
-import { downloads, cancelGameDownload } from "../stores/downloads";
+import { downloads, cancelGameDownload, type DownloadCover } from "../stores/downloads";
+import { thumbnailCandidates } from "../stores/thumbnails";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { activeJobs, cancelContentPackJob } from "../stores/contentPacks";
 import { seedingOn } from "../stores/seeding";
 import { setOpenGameRequest } from "../stores/music";
@@ -19,6 +21,7 @@ interface ActiveDownload {
   id: string;
   /** The game behind a "game" row; content packs have none. */
   gameId?: number;
+  cover?: DownloadCover;
   label: string;
   progress: number;
   status: string;
@@ -120,6 +123,7 @@ export function ActivityBadge(props: Props) {
         result.push({
           id: `game:${id}`,
           gameId: Number(id),
+          cover: state.cover,
           label: state.title ?? `Game #${id}`,
           progress: state.progress,
           status: state.status,
@@ -181,6 +185,11 @@ export function ActivityBadge(props: Props) {
   // wherever the custom title bar adds height above the top bar.
   let badgeRef: HTMLButtonElement | undefined;
   const [sheetTop, setSheetTop] = createSignal(48);
+  const coverSrc = (c: DownloadCover | undefined) => {
+    if (!c) { return null; }
+    const tiers = thumbnailCandidates(c.source, c.key);
+    return tiers.length ? convertFileSrc(tiers[tiers.length - 1]) : null;
+  };
   const openSheet = () => {
     const rect = badgeRef?.getBoundingClientRect();
     if (rect) { setSheetTop(Math.round(rect.bottom + 6)); }
@@ -235,6 +244,10 @@ export function ActivityBadge(props: Props) {
               <Index each={activeDownloads()}>
                 {(dl) => (
                   <div class="download-sheet-row">
+                    {/* The bundled preview is always there and 24 px needs no more. */}
+                    <Show when={coverSrc(dl().cover)}>
+                      <img class="download-sheet-cover" src={coverSrc(dl().cover)!} alt="" />
+                    </Show>
                     <div class="download-sheet-info">
                       {/* A game row opens its detail panel - the same request
                           the player bar's cover makes (Library listens). */}

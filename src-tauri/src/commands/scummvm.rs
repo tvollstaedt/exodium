@@ -86,6 +86,38 @@ fn index() -> &'static [IndexEntry] {
     })
 }
 
+/// eXo's `platform.txt` uses its own short names; ScummVM rejects the whole
+/// command line for a code it does not know ("Unrecognized platform 'sp48'").
+/// Known names are translated, anything else drops the flag - ScummVM
+/// detects the platform from the data files, the flag only disambiguates.
+fn scummvm_platform_code(exo: &str) -> Option<&'static str> {
+    Some(match exo.trim().to_ascii_lowercase().as_str() {
+        "dos" | "pc" => "pc",
+        "amiga" => "amiga",
+        "atari" | "st" | "atari-st" | "atarist" => "atari",
+        "c64" => "c64",
+        "nes" => "nes",
+        "sp48" | "spectrum" | "zx" | "zxspectrum" => "zx",
+        "mac" | "macintosh" => "macintosh",
+        "win" | "windows" => "windows",
+        "fmtowns" | "towns" => "fmtowns",
+        "pc98" => "pc98",
+        "pce" | "pcengine" => "pce",
+        "segacd" | "sega" => "segacd",
+        "3do" => "3do",
+        "cdi" => "cdi",
+        "apple2" => "apple2",
+        "apple2gs" | "2gs" => "2gs",
+        "psx" | "playstation" => "playstation",
+        "linux" => "linux",
+        "os2" => "os2",
+        _ => {
+            log::warn!("scummvm: unknown platform '{exo}' in platform.txt - launching without --platform");
+            return None;
+        }
+    })
+}
+
 /// Find the index line for a game the way `launch_svm.bat` does: it looks the
 /// innermost selected directory up first and keeps the previous hit when a
 /// level has no line of its own (`findstr /b` - a PREFIX match, which is why
@@ -305,7 +337,9 @@ pub(crate) fn select_variant(
     };
 
     let dirs: [&Path; 2] = [&run_dir, &dir1];
-    let platform = probe(&dirs, "platform.txt").and_then(|p| first_field(&p));
+    let platform = probe(&dirs, "platform.txt")
+        .and_then(|p| first_field(&p))
+        .and_then(|p| scummvm_platform_code(&p).map(str::to_string));
     let mut extra: Vec<String> = Vec::new();
 
     // Sound: the menu eXo shows at launch. Its answer picks a music driver and
@@ -821,6 +855,15 @@ mod tests {
     /// Maniac Mansion's tree: nine platform folders, DOS v1 with a sub-menu
     /// of render modes. Defaults pick the first entry at every level, like
     /// eXo's menu; stored choices override.
+    /// eXo's own short names must reach ScummVM as codes it accepts.
+    #[test]
+    fn exo_platform_names_become_scummvm_codes() {
+        assert_eq!(scummvm_platform_code("sp48"), Some("zx"));
+        assert_eq!(scummvm_platform_code("st"), Some("atari"));
+        assert_eq!(scummvm_platform_code("DOS"), Some("pc"));
+        assert_eq!(scummvm_platform_code("martian"), None);
+    }
+
     #[test]
     fn variant_selection_walks_menu_levels_and_control_files() {
         let tmp = tempfile::tempdir().unwrap();

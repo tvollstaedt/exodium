@@ -222,6 +222,15 @@ body {
   padding: 8px 12px;
 }
 
+.download-sheet-cover {
+  width: 24px;
+  height: 32px;
+  border-radius: 2px;
+  object-fit: cover;
+  flex: none;
+  background: var(--bg-secondary);
+}
+
 .download-sheet-row:hover {
   background: rgba(255, 255, 255, 0.03);
 }
@@ -240,19 +249,31 @@ body {
   text-overflow: ellipsis;
 }
 
-/* A game row's label is a link to its detail panel; same look, hover underline. */
+/* A game row's label is a link to its detail panel: the label's own type,
+   not the button's, and the hover is an underline and nothing else. */
 .download-sheet-label.is-link {
   width: 100%;
+  margin: 0;
   padding: 0;
   border: none;
   background: none;
-  font: inherit;
+  appearance: none;
+  -webkit-appearance: none;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: inherit;
+  line-height: inherit;
+  color: var(--text-primary);
   text-align: left;
   cursor: pointer;
 }
 
-.download-sheet-label.is-link:hover {
+.download-sheet-label.is-link:hover,
+.download-sheet-label.is-link:focus-visible {
+  background: none;
+  color: var(--text-primary);
   text-decoration: underline;
+  outline: none;
   margin-bottom: 4px;
   text-transform: capitalize;
 }

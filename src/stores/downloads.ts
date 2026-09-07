@@ -12,7 +12,11 @@ interface DownloadState {
    *  downloading) - components must use this, not string-match the status. */
   installed?: boolean;
   title?: string;
+  /** What the download sheet needs for a cover; absent for extras-only trackers. */
+  cover?: DownloadCover;
 }
+
+export interface DownloadCover { source: string; key: string | null }
 
 const [downloads, setDownloads] = createSignal<Record<number, DownloadState>>({});
 
@@ -32,6 +36,7 @@ interface Tracker {
   /** Kept on the tracker so status writes inside the loop don't have to
    *  re-pass the title on every tick. */
   title?: string;
+  cover?: DownloadCover;
   /** Set by whoever ends the run; checked after every await so an in-flight
    *  poll cannot resurrect the card. */
   cancelled: boolean;
@@ -74,8 +79,8 @@ function endTracker(t: Tracker) {
   }
 }
 
-function setState(t: Tracker, state: Omit<DownloadState, "title">) {
-  setDownloads((prev) => ({ ...prev, [t.gameId]: { ...state, title: t.title } }));
+function setState(t: Tracker, state: Omit<DownloadState, "title" | "cover">) {
+  setDownloads((prev) => ({ ...prev, [t.gameId]: { ...state, title: t.title, cover: t.cover } }));
 }
 
 function clearState(gameId: number) {
@@ -256,11 +261,12 @@ async function poll(t: Tracker) {
 
 /** A registered tracker at t=0; `commandPending` says whether a
  *  download_game call is still on its way (null polls are expected then). */
-function newTracker(gameId: number, title: string | undefined, commandPending: boolean): Tracker {
+function newTracker(gameId: number, title: string | undefined, commandPending: boolean, cover?: DownloadCover): Tracker {
   const now = Date.now();
   const t: Tracker = {
     gameId,
     title,
+    cover,
     cancelled: false,
     commandPending,
     nullPolls: 0,
@@ -276,13 +282,16 @@ function newTracker(gameId: number, title: string | undefined, commandPending: b
   return t;
 }
 
-export function startGameDownload(gameId: number, title?: string) {
+export function startGameDownload(gameId: number, title?: string, cover?: DownloadCover) {
   // A still-running attempt for the same game must not write the store on
   // behalf of this one.
   const previous = trackers.get(gameId);
   if (previous) { endTracker(previous); }
 
-  const t = newTracker(gameId, title ?? previous?.title ?? downloads()[gameId]?.title, true);
+  const t = newTracker(
+    gameId, title ?? previous?.title ?? downloads()[gameId]?.title, true,
+    cover ?? previous?.cover ?? downloads()[gameId]?.cover,
+  );
   setState(t, { status: "Starting download...", progress: 0, downloading: true });
 
   void poll(t);
@@ -307,12 +316,12 @@ export function startGameDownload(gameId: number, title?: string) {
  *  extracts on completion, so without this a restarted download finishes
  *  invisibly and never installs. */
 export async function resumeDownloads() {
-  let pending: { id: number; title: string }[];
+  let pending: Awaited<ReturnType<typeof listActiveDownloads>>;
   try { pending = await listActiveDownloads(); } catch { return; }
-  for (const { id, title } of pending) {
+  for (const { id, title, torrent_source, thumbnail_key } of pending) {
     if (trackers.has(id)) { continue; }
     // No download_game call to wait for: the session already has the file.
-    const t = newTracker(id, title, false);
+    const t = newTracker(id, title, false, { source: torrent_source, key: thumbnail_key });
     setState(t, { status: "Resuming download…", progress: 0, downloading: true });
     void poll(t);
   }

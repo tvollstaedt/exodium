@@ -253,6 +253,9 @@ pub async fn download_game(
 pub struct PendingDownload {
     pub id: i64,
     pub title: String,
+    /// For the download sheet's cover (`thumbnailCandidates`).
+    pub torrent_source: String,
+    pub thumbnail_key: Option<String>,
     #[serde(skip)]
     pub rel_path: String,
     pub installed: bool,
@@ -263,16 +266,16 @@ pub(crate) async fn pending_downloads(
     db: &Mutex<rusqlite::Connection>,
     torrent_state: &TorrentState,
 ) -> Result<Vec<PendingDownload>, String> {
-    let rows: Vec<(i64, String, String, i64, bool)> = {
+    let rows: Vec<(i64, String, String, i64, bool, Option<String>)> = {
         let conn = db.lock().map_err(|_| "database lock poisoned".to_string())?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, title, torrent_source, game_torrent_index, installed FROM games \
-                 WHERE in_library = 1 AND game_torrent_index IS NOT NULL",
+                "SELECT id, title, torrent_source, game_torrent_index, installed, thumbnail_key \
+                 FROM games WHERE in_library = 1 AND game_torrent_index IS NOT NULL",
             )
             .map_err(|e| e.to_string())?;
         let rows = stmt
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get::<_, i64>(4)? != 0)))
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get::<_, i64>(4)? != 0, r.get(5)?)))
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())?;
@@ -280,7 +283,7 @@ pub(crate) async fn pending_downloads(
     };
     let managers = torrent_state.0.read().await.clone();
     let mut out = Vec::new();
-    for (id, title, source, idx, installed) in rows {
+    for (id, title, source, idx, installed, thumbnail_key) in rows {
         let Some(mgr) = managers.get(&source) else { continue };
         let idx = idx as usize;
         if !mgr.is_file_selected(idx).await {
@@ -292,7 +295,15 @@ pub(crate) async fn pending_downloads(
         if installed && complete {
             continue;
         }
-        out.push(PendingDownload { id, title, rel_path: file.path.clone(), installed, complete });
+        out.push(PendingDownload {
+            id,
+            title,
+            torrent_source: source.clone(),
+            thumbnail_key,
+            rel_path: file.path.clone(),
+            installed,
+            complete,
+        });
     }
     Ok(out)
 }

@@ -492,7 +492,9 @@ export function GameDetailPanel(props: Props) {
   };
 
   const handleDownload = (gameId: number, title?: string) => {
-    startGameDownload(gameId, title ?? props.game?.title);
+    const g = rows().find((r) => r.id === gameId) ?? props.game;
+    const cover = g?.torrent_source ? { source: g.torrent_source, key: g.thumbnail_key ?? null } : undefined;
+    startGameDownload(gameId, title ?? props.game?.title, cover);
   };
 
   // ── Preview video ──────────────────────────────────────────────────────

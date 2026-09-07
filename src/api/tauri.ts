@@ -500,7 +500,9 @@ export async function getDownloadProgress(id: number): Promise<DownloadProgress 
 }
 
 /** Downloads the torrent session still owns after a restart. */
-export async function listActiveDownloads(): Promise<{ id: number; title: string; installed: boolean; complete: boolean }[]> {
+export async function listActiveDownloads(): Promise<{
+  id: number; title: string; torrent_source: string; thumbnail_key: string | null; installed: boolean; complete: boolean;
+}[]> {
   return invoke("list_active_downloads");
 }
 
