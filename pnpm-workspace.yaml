@@ -1,0 +1,13 @@
+# Build-script approvals. `allowBuilds` is pnpm 11.3+'s scheme; the two lists
+# below are the pnpm 10 spelling the e2e VMs (pinned 10.27) still read.
+# esbuild's postinstall pins its native binary - without it vite won't start.
+# The wdio driver downloads are unused: the e2e VMs drive the webview itself.
+allowBuilds:
+  esbuild: true
+  edgedriver: false
+  geckodriver: false
+onlyBuiltDependencies:
+  - esbuild
+ignoredBuiltDependencies:
+  - edgedriver
+  - geckodriver
