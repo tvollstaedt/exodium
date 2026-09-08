@@ -25,7 +25,7 @@ import { videos, requestVideo, releaseVideo, setForegroundVideo, getVideoState, 
 import { ensureDismissedNotesLoaded, isNoteDismissed, dismissedNotesLoaded, dismissNote } from "../stores/notes";
 import { packsByCollection, activeJobs, installedPacks, startContentPackInstall } from "../stores/contentPacks";
 import { ensurePreviewMutedLoaded, previewMuted, setPreviewMuted } from "../stores/playback";
-import { musicJobs, getMusicState, requestTheme, playTheme, pauseFor, resumeFrom, pauseForGame, resumeFromGame, togglePlay, currentTrack, wantedTrack, musicPlaying, musicAutoplay, musicUserPaused, playerHidden, ensureMusicAutoplayLoaded, musicUnsupported, MUSIC_QUEUED } from "../stores/music";
+import { musicJobs, getMusicState, requestTheme, playTheme, pauseFor, resumeFrom, pauseForGame, resumeFromGame, togglePlay, currentTrack, wantedTrack, musicPlaying, musicAutoplay, musicUserPaused, playerHidden, ensureMusicAutoplayLoaded, musicUnsupported, MUSIC_QUEUED, describePlayError } from "../stores/music";
 
 interface Props {
   game: Game | null;
@@ -612,6 +612,9 @@ export function GameDetailPanel(props: Props) {
   // reads the whole store, which every background poll rewrites.
   let autoplayTimer: number | undefined;
   let autoplayFor: number | null | undefined;
+  /** Why the preview did not start (both the unmuted and the muted attempt
+   *  rejected, or the element errored): shown in the hero's status line. */
+  const [videoError, setVideoError] = createSignal<string | null>(null);
   onCleanup(() => { if (autoplayTimer) { clearTimeout(autoplayTimer); } });
   createEffect(() => {
     const id = selected()?.id;
@@ -622,6 +625,7 @@ export function GameDetailPanel(props: Props) {
     }
     if (!videoReady() || id == null || id === autoplayFor) { return; }
     autoplayFor = id;
+    setVideoError(null);
     // Two seconds of cover first; a trailer mid-slide reads as an ad.
     autoplayTimer = window.setTimeout(() => {
       autoplayTimer = undefined;
@@ -640,7 +644,10 @@ export function GameDetailPanel(props: Props) {
             el.muted = true;
             const retry = el.play();
             if (retry && typeof retry.then === "function") {
-              retry.then(() => setVideoPlaying(true)).catch(() => setVideoPlaying(false));
+              retry.then(() => setVideoPlaying(true)).catch((e) => {
+                setVideoPlaying(false);
+                setVideoError(describePlayError(e));
+              });
             } else {
               setVideoPlaying(true);
             }
@@ -648,8 +655,9 @@ export function GameDetailPanel(props: Props) {
         } else {
           setVideoPlaying(true);
         }
-      } catch {
+      } catch (e) {
         setVideoPlaying(false);
+        setVideoError(describePlayError(e));
       }
     }, videoJustFetched() ? 0 : VIDEO_START_DELAY_MS);
   });
@@ -922,7 +930,12 @@ export function GameDetailPanel(props: Props) {
                   setVideoPlaying(false);
                   if (!lightboxHoldsAudio()) { resumeFrom("video"); }
                 }}
-                onPlay={(e) => { setVideoPlaying(true); if (!e.currentTarget.muted) { pauseFor("video"); } }}
+                onPlay={(e) => { setVideoPlaying(true); setVideoError(null); if (!e.currentTarget.muted) { pauseFor("video"); } }}
+                onError={(e) => {
+                  const err = e.currentTarget.error;
+                  setVideoPlaying(false);
+                  setVideoError(err ? `MediaError ${err.code}${err.message ? `: ${err.message}` : ""}` : "media error");
+                }}
                 onClick={() => { setLightboxStart(0); setLightboxOpen(true); }}
               />
             </Show>
@@ -938,6 +951,14 @@ export function GameDetailPanel(props: Props) {
                 }>
                   Video queued…
                 </Show>
+              </div>
+            </Show>
+
+            {/* The bytes are here but the element will not run them: name
+                the reason rather than leave a cover that never moves. */}
+            <Show when={videoError() && !videoPlaying()}>
+              <div class="game-detail-video-status game-detail-video-error" title={videoError()!}>
+                Preview can't play - {videoError()}
               </div>
             </Show>
 

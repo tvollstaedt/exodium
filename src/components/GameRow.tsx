@@ -10,6 +10,7 @@ import {
 } from "../stores/music";
 import { GameActionsMenu } from "./GameActionsMenu";
 import { createCover } from "./cover";
+import { IconPause, IconPlay } from "./icons";
 
 interface GameRowProps {
   game: Game;
@@ -130,7 +131,7 @@ export function GameRow(props: GameRowProps) {
             disabled={playBlocked()}
             title={playTitle()}
             onClick={onPlayClick}
-          >{isCurrentTrack() && musicPlaying() ? "⏸" : "▶"}</button>
+          >{isCurrentTrack() && musicPlaying() ? <IconPause size={12} /> : <IconPlay size={12} />}</button>
         </Show>
       </span>
       {/* Always rendered for the grid column; the <img> only once a cover resolves. */}

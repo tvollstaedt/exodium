@@ -36,6 +36,11 @@ export interface AudioPort {
   pause(): void;
   setVolume(volume: number): void;
   onEnded(cb: () => void): void;
+  /** The element failed on the loaded source (decoder, server, format). */
+  onError?(cb: (message: string) => void): void;
+  /** Frames are flowing. Some engines settle `play()` only here, or never;
+   *  the event is what the transport state follows. */
+  onPlaying?(cb: () => void): void;
 }
 
 export type PauseReason = "video" | "game";
@@ -348,12 +353,15 @@ const [mode, setMode] = createSignal<"theme" | "shuffle" | "list">("theme");
 const [playing, setPlaying] = createSignal(false);
 const [userPaused, setUserPaused] = createSignal(false);
 const [pauseReasons, setPauseReasons] = createSignal<PauseReason[]>([]);
+/** Why the last start failed, for the bar: a ▶ that does nothing is a bug
+ *  report with no content. Cleared by the next successful start or track. */
+const [playError, setPlayError] = createSignal<string | null>(null);
 /** The bar's × was clicked: the track stays loaded, only the bar is gone.
  *  The top bar's ♪ brings it back - hiding is not stopping. */
 const [barHidden, setBarHidden] = createSignal(false);
 /** The bar's cover was clicked: Library opens this game's panel. */
 const [openGameRequest, setOpenGameRequest] = createSignal<number | null>(null);
-export { currentTrack, wanted as wantedTrack, mode as musicMode, playing as musicPlaying, userPaused as musicUserPaused, pauseReasons, barHidden as playerHidden, openGameRequest, setOpenGameRequest };
+export { currentTrack, wanted as wantedTrack, mode as musicMode, playing as musicPlaying, userPaused as musicUserPaused, pauseReasons, playError as musicPlayError, barHidden as playerHidden, openGameRequest, setOpenGameRequest };
 
 let port: AudioPort | null = null;
 const reasons = new Set<PauseReason>();
@@ -381,7 +389,16 @@ export function attachAudio(next: AudioPort | null) {
   port = next;
   if (!port) { return; }
   port.onEnded(handleEnded);
+  port.onError?.((message) => { setPlayError(message); setPlaying(false); });
+  port.onPlaying?.(() => { setPlaying(true); setPlayError(null); });
   port.setVolume(musicVolume());
+}
+
+/** `play()` rejections carry a DOMException name worth showing verbatim
+ *  (NotSupportedError: no decoder; NotAllowedError: autoplay policy). */
+export function describePlayError(e: unknown): string {
+  if (e instanceof Error) { return e.message ? `${e.name}: ${e.message}` : e.name; }
+  return String(e);
 }
 
 function trackOf(game: Pick<Game, "id" | "title" | "torrent_source" | "thumbnail_key">, id: number): Track {
@@ -396,9 +413,12 @@ function play() {
   if (!port || !currentTrack()) { return; }
   const started = port.play();
   if (started && typeof started.then === "function") {
-    started.then(() => setPlaying(true)).catch(() => setPlaying(false));
+    started
+      .then(() => { setPlaying(true); setPlayError(null); })
+      .catch((e) => { setPlaying(false); setPlayError(describePlayError(e)); });
   } else {
     setPlaying(true);
+    setPlayError(null);
   }
 }
 
@@ -522,6 +542,7 @@ async function load(track: Track, path: string) {
   setCurrentTrack(track);
   if (upNext?.gameId === track.gameId) { upNext = null; }
   setPlaying(false);
+  setPlayError(null);
   port?.setSrc(url);
   if (!userPaused() && reasons.size === 0) { play(); }
   // No prefetch when nothing will follow: the bytes would never be played.

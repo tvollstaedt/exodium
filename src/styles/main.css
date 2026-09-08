@@ -1253,6 +1253,8 @@ body {
 
 .row-play-btn {
   position: relative;
+  display: inline-flex;
+  align-items: center;
   background: transparent;
   border: none;
   color: var(--text-muted);
@@ -4548,6 +4550,14 @@ body {
   background: rgba(124, 92, 252, 0.85);
 }
 
+.game-detail-video-error {
+  max-width: calc(100% - 24px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #ffb4c0;
+}
+
 .game-detail-video-replay {
   position: absolute;
   left: 10px;
@@ -5024,6 +5034,10 @@ body.has-player {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.player-sub.is-error {
+  color: var(--danger);
 }
 
 .player-seek {

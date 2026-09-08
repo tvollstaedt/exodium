@@ -76,6 +76,33 @@ export const IconMusicNote = () => (
   </svg>
 );
 
+/** Transport glyphs. U+23F8/23EE/23E9 have no text form in most Linux UI
+ *  fonts and fall through to the colour emoji font; these do not. `size`
+ *  follows the button's font size. */
+export const IconPlay = (p: { size?: number }) => (
+  <svg width={p.size ?? 14} height={p.size ?? 14} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <path d="M7 4.5v15l12-7.5z" />
+  </svg>
+);
+
+export const IconPause = (p: { size?: number }) => (
+  <svg width={p.size ?? 14} height={p.size ?? 14} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <path d="M6 4.5h4.5v15H6zM13.5 4.5H18v15h-4.5z" />
+  </svg>
+);
+
+export const IconPrev = (p: { size?: number }) => (
+  <svg width={p.size ?? 14} height={p.size ?? 14} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <path d="M5 4.5h3v15H5zM20 4.5v15L9 12z" />
+  </svg>
+);
+
+export const IconNext = (p: { size?: number }) => (
+  <svg width={p.size ?? 14} height={p.size ?? 14} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <path d="M16 4.5h3v15h-3zM4 4.5v15L15 12z" />
+  </svg>
+);
+
 export const IconZoom = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
     <circle cx="11" cy="11" r="7" />

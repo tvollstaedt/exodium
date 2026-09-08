@@ -1,12 +1,12 @@
 import { createEffect, createSignal, on, onCleanup, onMount, Show } from "solid-js";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import {
-  attachAudio, currentTrack, musicPlaying, musicVolume, setMusicVolume, pauseReasons, wantedTrack, musicMode,
+  attachAudio, currentTrack, musicPlaying, musicVolume, setMusicVolume, pauseReasons, wantedTrack, musicMode, musicPlayError,
   musicContinuous, setMusicContinuous,
   togglePlay, next, prev, hidePlayer, playerHidden, startShuffle, setOpenGameRequest, getMusicState, musicJobs, type AudioPort,
 } from "../stores/music";
 import { thumbnailCandidates } from "../stores/thumbnails";
-import { IconAutoplay, IconShuffle, IconSoundOff, IconSoundOn } from "./icons";
+import { IconAutoplay, IconNext, IconPause, IconPlay, IconPrev, IconShuffle, IconSoundOff, IconSoundOn } from "./icons";
 
 /** `m:ss`, or `--:--` while the element has no duration to report (a stream
  *  still loading its metadata answers NaN, a live one Infinity). */
@@ -52,6 +52,13 @@ export function NowPlayingBar() {
       pause: () => el.pause(),
       setVolume(v) { el.volume = v; },
       onEnded(cb) { el.onended = cb; },
+      onPlaying(cb) { el.onplaying = () => cb(); },
+      onError(cb) {
+        el.onerror = () => {
+          const err = el.error;
+          cb(err ? `MediaError ${err.code}${err.message ? `: ${err.message}` : ""}` : "media error");
+        };
+      },
     };
     attachAudio(port);
     onCleanup(() => attachAudio(null));
@@ -143,10 +150,14 @@ export function NowPlayingBar() {
             </button>
             <div class="player-meta">
               <div class="player-title">{track().title}</div>
-              <div class="player-sub">
+              <div class={`player-sub${musicPlayError() && !pending() ? " is-error" : ""}`}>
                 <Show when={pending()} fallback={
-                  <Show when={pausedNote()} fallback={modeNote()}>
-                    {pausedNote()}
+                  <Show when={musicPlayError()} fallback={
+                    <Show when={pausedNote()} fallback={modeNote()}>
+                      {pausedNote()}
+                    </Show>
+                  }>
+                    Can't play this track - {musicPlayError()}
                   </Show>
                 }>
                   {pending()}
@@ -182,7 +193,7 @@ export function NowPlayingBar() {
                   the buttons stay in place (the bar must not resize when the
                   bytes land) but do nothing. */}
               <Show when={musicMode() !== "theme"}>
-                <button class="player-btn" title="Previous game" aria-label="Previous game" disabled={loadingOnly()} onClick={() => prev()}>⏮</button>
+                <button class="player-btn" title="Previous game" aria-label="Previous game" disabled={loadingOnly()} onClick={() => prev()}><IconPrev /></button>
               </Show>
               <button
                 class="player-btn player-btn-main"
@@ -190,7 +201,7 @@ export function NowPlayingBar() {
                 aria-label={musicPlaying() ? "Pause" : "Play"}
                 disabled={loadingOnly()}
                 onClick={() => togglePlay()}
-              >{musicPlaying() ? "⏸" : "▶"}</button>
+              >{musicPlaying() ? <IconPause size={16} /> : <IconPlay size={16} />}</button>
               <Show when={musicMode() !== "theme"}>
                 <button
                   class="player-btn"
@@ -198,7 +209,7 @@ export function NowPlayingBar() {
                   aria-label="Next game"
                   disabled={loadingOnly()}
                   onClick={() => { void next(); }}
-                >⏭</button>
+                ><IconNext /></button>
               </Show>
               <Show when={musicMode() === "theme"}>
                 <button

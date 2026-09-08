@@ -112,6 +112,30 @@ describe("music store", () => {
     expect(store.wantedTrack()).toBeNull();
   });
 
+  it("names a start the element refused, and forgets it on the next track", async () => {
+    backend({ start_game_music: ({ id }: any) => ready(id) });
+    const store = await import("./music");
+    const port = fakePort();
+    let refuse = true;
+    port.play = async () => {
+      port.playCalls++;
+      if (refuse) { throw new DOMException("no decoder", "NotSupportedError"); }
+    };
+    store.attachAudio(port);
+
+    store.playTheme(game(1));
+    await settle(800);
+    expect(store.musicPlaying()).toBe(false);
+    expect(store.musicPlayError()).toBe("NotSupportedError: no decoder");
+
+    // The listener's ▶ retries; a track that starts clears the message.
+    refuse = false;
+    store.togglePlay();
+    await settle(10);
+    expect(store.musicPlaying()).toBe(true);
+    expect(store.musicPlayError()).toBeNull();
+  });
+
   it("pauses for an unmuted video and resumes when it ends", async () => {
     backend({ start_game_music: ({ id }: any) => ready(id) });
     const store = await import("./music");
