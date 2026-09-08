@@ -526,10 +526,13 @@ fn pin_first_part(
 ) -> Option<String> {
     let engine_and_id: Vec<&str> = game_id.split(':').collect();
     let (engine, id) = (engine_and_id.first()?, engine_and_id.get(1)?);
+    // Text-adventure parts are kilobytes; anything large is art or audio and
+    // would only cost a copy when the temp dir is on another volume.
+    const MAX_PROBE_BYTES: u64 = 32 * 1024 * 1024;
     let mut files: Vec<String> = std::fs::read_dir(run_dir)
         .ok()?
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().is_file())
+        .filter(|e| e.metadata().is_ok_and(|m| m.is_file() && m.len() <= MAX_PROBE_BYTES))
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .filter(|n| !n.to_ascii_lowercase().ends_with(".txt"))
         .collect();
@@ -641,13 +644,15 @@ async fn launch_inner(
     std::fs::create_dir_all(&savepath).map_err(|e| format!("cannot create {}: {e}", savepath.display()))?;
 
     let detections = detect(&resolved, &ini, &variant.run_dir, &entry.game_id, &torrent_root)?;
-    let launch_target = if detections.len() > 1 && entry.game_id.contains(':') {
-        let want = detections.iter().filter_map(|d| part_number(d)).min().unwrap_or(1);
-        pin_first_part(&resolved, &ini, &variant.run_dir, &entry.game_id, &torrent_root, want)
-            .unwrap_or_else(|| entry.game_id.clone())
+    // Only a real part number justifies overriding ScummVM's own choice.
+    let lowest_part = if detections.len() > 1 && entry.game_id.contains(':') {
+        detections.iter().filter_map(|d| part_number(d)).min()
     } else {
-        entry.game_id.clone()
+        None
     };
+    let launch_target = lowest_part
+        .and_then(|want| pin_first_part(&resolved, &ini, &variant.run_dir, &entry.game_id, &torrent_root, want))
+        .unwrap_or_else(|| entry.game_id.clone());
 
     let fullscreen = match per_game_config.get("fullscreen").map(String::as_str) {
         Some("true") => true,
