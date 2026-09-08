@@ -4929,6 +4929,23 @@ html.soft-render * {
   -webkit-backdrop-filter: none !important;
 }
 
+/* ── WebKitGTK compositing ─────────────────────────────────────────────────
+   A hovered card (scale transition) or the sliding tab pane gets its own
+   compositing layer, and WebKitGTK's overlap test lags a frame behind the
+   scroll: a sticky bar painted in the root layer then shows the card's
+   title through it. Promoting the sticky bars themselves ends that, and a
+   composited spinner rotates as one texture instead of re-rasterizing its
+   ring at every frame (the 1 px jitter). Harmless on the other platforms. */
+.lib-tabs,
+.library-toolbar,
+.grid-separator,
+.game-list-header,
+.section-title,
+.btn-spinner {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
 /* ============================================
    Now Playing bar (theme music player)
    ============================================

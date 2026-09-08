@@ -840,14 +840,16 @@ export function GameDetailPanel(props: Props) {
 
   // Shared "Play" button - same disabled+spinner UX whether it's the main
   // single-language action or one row of the multi-language variant list.
+  // A pending note (emulator or support files still downloading) keeps it
+  // spinning: a launch would only fail with the note's own message.
   const PlayButton = (p: { id: number; class?: string; disabled?: boolean }) => (
     <Button
       variant="action"
       class={p.class}
       onClick={() => handleLaunch(p.id)}
       disabled={p.disabled}
-      loading={launchingId() === p.id}
-      loadingLabel="Starting…"
+      loading={launchingId() === p.id || note()?.pending === true}
+      loadingLabel={launchingId() === p.id ? "Starting…" : "Preparing…"}
     >
       ▶ Play
     </Button>

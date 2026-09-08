@@ -10,6 +10,9 @@ export interface PanelNote {
   key: string;
   text: string;
   blocking?: boolean;
+  /** The block is temporary and Exodium is working on it (a pack or support
+   *  download in flight); Play shows a spinner instead of failing. */
+  pending?: boolean;
   /** A remedy the app can perform itself, rendered as a button in the note. */
   action?: { label: string; onClick: () => void };
 }
@@ -83,6 +86,7 @@ const supportProgressNote = (s: Win9xSupportStatus, family: "Windows 9x" | "Scum
   return {
     key: `${family === "ScummVM" ? "scummvm" : "win9x"}-support-progress`,
     blocking: true,
+    pending: true,
     text: pct >= 100
       ? `Setting up the ${family} support files (${what})…`
       : `Downloading the ${family} support files (${what})… ${pct}%`,
@@ -109,6 +113,7 @@ function packRemedy(ctx: NoteContext, key: string, engine: string, blocking: boo
     return {
       key,
       blocking,
+      pending: true,
       text: job.phase === "extracting"
         ? `Installing ${pack.display_name}…`
         : `Downloading ${pack.display_name}… ${pct}%`,

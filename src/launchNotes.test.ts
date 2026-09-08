@@ -141,6 +141,13 @@ describe("launchNote", () => {
       expect(launchNote(x98({ emulatorPack: pack, packJob: job }))?.text).toBe("Downloading DOSBox-X… 40%");
       expect(launchNote(x98({ emulatorPack: pack, packJob: { ...job, phase: "extracting" } }))?.text).toBe("Installing DOSBox-X…");
     });
+    it("only work in flight is pending - Play spins for it and nothing else", () => {
+      const job = { phase: "downloading", progress: 0.4, downloaded_bytes: 40, total_bytes: 100, finished: false, installed: false, error: null };
+      expect(launchNote(x98({ emulatorPack: pack, packJob: job }))?.pending).toBe(true);
+      expect(launchNote(x98({ isWindows: true, support: { phase: "downloading", progress: 0.5, total_bytes: 1 } }))?.pending).toBe(true);
+      expect(launchNote(x98({ emulatorPack: pack }))?.pending).toBeUndefined();
+      expect(launchNote(x98({ isWindows: true, support: { phase: "failed", progress: 1, total_bytes: 1 } }))?.pending).toBeUndefined();
+    });
     it("offers the pack download online and points at Settings offline", () => {
       const install = vi.fn();
       const n = launchNote(x98({ emulatorPack: pack, installPack: install }));
