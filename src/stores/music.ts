@@ -367,6 +367,14 @@ let port: AudioPort | null = null;
 const reasons = new Set<PauseReason>();
 let history: Track[] = [];
 let upNext: Track | null = null;
+/** A panel autoplay that arrived while another track was audibly playing:
+ *  parked instead of cutting that track off mid-song, played when it ends.
+ *  Any explicit pick (every path through `want`) supersedes it. */
+let deferredTheme: Track | null = null;
+/** Did the CURRENT track come from a panel autoplay (as opposed to a click,
+ *  the shuffle or the list queue)? Explicit beats implicit: a chosen track
+ *  is never interrupted; among autoplays, the newest panel wins. */
+let currentAuto = false;
 let candidates: MusicCandidate[] = [];
 let refilling: Promise<void> | null = null;
 /** Where the list walk stands. Held apart from the player because a wanted
@@ -455,10 +463,17 @@ function clearSkipTimer() {
 /** Both queue modes move on by themselves; theme mode plays one track. */
 const autoAdvances = () => mode() !== "theme";
 
+/** Was the pending `wanted` put there by a panel autoplay (as opposed to a
+ *  click)? Only such a wait may be withdrawn when its panel closes. */
+let wantedAuto = false;
+
 /** Set the track the player is waiting on. It becomes the current one the
  *  moment its bytes are on disk; until then whatever plays keeps playing. */
-function want(track: Track) {
+function want(track: Track, auto = false) {
   clearSkipTimer();
+  wantedAuto = auto;
+  // Whatever is asked for now is newer than a parked panel theme.
+  deferredTheme = null;
   if (steppingBackTo !== track.gameId) { steppingBackTo = null; }
   const previous = wanted();
   // Asking for a track is an implicit "show me the player".
@@ -511,8 +526,9 @@ function reconcile() {
   if (!state) { return; }
   if (state.phase === "ready" && state.path) {
     clearSkipTimer();
+    const auto = wantedAuto;
     setWanted(null);
-    void load(w, state.path);
+    void load(w, state.path, auto);
   } else if (state.phase === "none" || state.phase === "error") {
     // No theme, or a failed read: in theme mode the previous track keeps
     // playing and the panel says what happened; a queue skips the dud.
@@ -540,7 +556,7 @@ function advancePastDud() {
   void advance();
 }
 
-async function load(track: Track, path: string) {
+async function load(track: Track, path: string, auto = false) {
   const seq = ++loadSeq;
   let url: string;
   try {
@@ -549,6 +565,13 @@ async function load(track: Track, path: string) {
     url = convertFileSrc(path);
   }
   if (seq !== loadSeq) { return; }
+  // An audibly playing track gets its fade-out before the swap - a bare
+  // setSrc cuts it at full volume.
+  if (playing()) {
+    pause();
+    await new Promise((done) => setTimeout(done, 280));
+    if (seq !== loadSeq) { return; }
+  }
   // A track that plays ends the dud streak and starts a fresh walk.
   autoSkips = 0;
   triedThisWalk.clear();
@@ -561,6 +584,7 @@ async function load(track: Track, path: string) {
     history = [...history.filter((t) => t.gameId !== previous.gameId), previous].slice(-HISTORY_MAX);
   }
   setCurrentTrack(track);
+  currentAuto = auto;
   if (upNext?.gameId === track.gameId) { upNext = null; }
   setPlaying(false);
   setPlayError(null);
@@ -575,6 +599,18 @@ async function load(track: Track, path: string) {
 function handleEnded() {
   setPlaying(false);
   ended = true;
+  // The theme parked behind this track has first claim on the silence, in
+  // every mode - the listener has moved on to that game's panel.
+  if (deferredTheme) {
+    const track = deferredTheme;
+    deferredTheme = null;
+    upNext = null;
+    setMode("theme");
+    // Still an autoplay: if its panel closes before the bytes are in, the
+    // wait is withdrawable like any other auto want.
+    want(track, true);
+    return;
+  }
   if (autoAdvances() && musicContinuous()) { void next(); }
 }
 
@@ -584,6 +620,16 @@ function handleEnded() {
 export function playTheme(game: Pick<Game, "id" | "title" | "torrent_source" | "thumbnail_key">, opts?: { auto?: boolean }) {
   if (game.id == null) { return; }
   const track = trackOf(game, game.id);
+  // A track the LISTENER chose is not cut off mid-song by browsing to
+  // another game: the panel's autoplay queues up behind it and takes over
+  // when it ends. A track that itself only came from a panel autoplay is
+  // fair game - the newest panel wins, softened by the fades. A click
+  // stays immediate either way.
+  if (opts?.auto && playing() && !currentAuto && currentTrack()?.gameId !== track.gameId) {
+    deferredTheme = track;
+    void requestTheme(track.gameId);
+    return;
+  }
   setMode("theme");
   if (opts?.auto) {
     setUserPaused(false);
@@ -593,11 +639,25 @@ export function playTheme(game: Pick<Game, "id" | "title" | "torrent_source" | "
   }
   upNext = null;
   if (currentTrack()?.gameId === track.gameId) {
+    // A click on the already-loaded track adopts it like togglePlay does.
+    if (!opts?.auto) { currentAuto = false; }
     setWanted(null);
     if (!playing() && reasons.size === 0) { play(); }
     return;
   }
-  want(track);
+  want(track, opts?.auto === true);
+}
+
+/** The panel that auto-requested this theme has closed before the bytes
+ *  arrived: stand the wait down, so a track nobody is looking at any more
+ *  does not start out of nowhere a minute later. The fetch keeps running -
+ *  the bytes land in the cache. A click's wait is never withdrawn. */
+export function withdrawAutoTheme(gameId: number) {
+  if (deferredTheme?.gameId === gameId) { deferredTheme = null; }
+  if (wantedAuto && wanted()?.gameId === gameId) {
+    clearSkipTimer();
+    setWanted(null);
+  }
 }
 
 // ── The visible list as a queue ──────────────────────────────────────────────
@@ -612,6 +672,7 @@ export function playFromList(game: Pick<Game, "id" | "title" | "torrent_source" 
   upNext = null;
   listCursor = track.gameId;
   if (currentTrack()?.gameId === track.gameId) {
+    currentAuto = false;
     setWanted(null);
     if (!playing()) { play(); }
     return;
@@ -772,6 +833,9 @@ export function togglePlay() {
     return;
   }
   listenerWantsSound();
+  // Pressing ▶ on an autoplayed track adopts it: from here on it is the
+  // listener's choice and no newer panel may replace it.
+  currentAuto = false;
   if (currentTrack()) { play(); }
 }
 
@@ -806,6 +870,8 @@ export function stop() {
   }
   setCurrentTrack(null);
   setPlayError(null);
+  deferredTheme = null;
+  currentAuto = false;
   ended = false;
   port?.setSrc(null);
   listCursor = null;
@@ -839,18 +905,25 @@ export function resumeFrom(reason: PauseReason) {
 
 /** The games currently running. The backend starts one emulator process per
  *  launch and reports each exit with its own id, so two games open at once are
- *  two reasons to stay quiet - and the first exit must not undo the second. */
-const runningGames = new Set<number>();
+ *  two reasons to stay quiet - and the first exit must not undo the second.
+ *  A SIGNAL, because the Play button reads it to become "Stop game". */
+const [runningGames, setRunningGames] = createSignal<Set<number>>(new Set());
+export { runningGames as runningGameIds };
 
 export function pauseForGame(id: number) {
-  runningGames.add(id);
+  setRunningGames((prev) => new Set(prev).add(id));
   pauseFor("game");
 }
 
 /** Withdraw one game's claim; without an id the whole set is dropped. */
 export function resumeFromGame(id?: number | null) {
-  if (id == null) { runningGames.clear(); } else { runningGames.delete(id); }
-  if (runningGames.size > 0) { return; }
+  setRunningGames((prev) => {
+    if (id == null) { return new Set<number>(); }
+    const next = new Set(prev);
+    next.delete(id);
+    return next;
+  });
+  if (runningGames().size > 0) { return; }
   resumeFrom("game");
 }
 

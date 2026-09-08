@@ -41,18 +41,72 @@ export function NowPlayingBar() {
       el.removeEventListener("durationchange", onMeta);
       el.removeEventListener("loadedmetadata", onMeta);
     });
+    // Fades: a start ramps up from silence, a pause ramps down and only then
+    // pauses the element - a track cut off at full volume is a pop, not a
+    // pause. `fadeTarget` is the user's volume preference; every ramp ends
+    // there. A new src or a new start cancels a pending fade-out, so its
+    // delayed `el.pause()` can never hit the track that came after it.
+    const FADE_IN_MS = 600;
+    const FADE_OUT_MS = 250;
+    let fadeTimer: number | undefined;
+    let fadeTarget = musicVolume();
+    /** Armed by play(): the ramp begins on the `playing` event, when sound
+     *  actually flows - started at the call, half the fade is spent on
+     *  decoder warm-up and the start still reads as a hard cut. */
+    let fadeInArmed = false;
+    const stopFade = () => {
+      fadeInArmed = false;
+      if (fadeTimer != null) { clearInterval(fadeTimer); fadeTimer = undefined; }
+    };
+    const fade = (to: number, ms: number, done?: () => void) => {
+      stopFade();
+      const from = el.volume;
+      const t0 = performance.now();
+      fadeTimer = window.setInterval(() => {
+        const k = Math.min(1, (performance.now() - t0) / ms);
+        el.volume = from + (to - from) * k;
+        if (k === 1) { stopFade(); done?.(); }
+      }, 40);
+    };
+    onCleanup(stopFade);
     const port: AudioPort = {
       setSrc(url) {
+        stopFade();
         if (url) { el.src = url; el.load(); } else { el.removeAttribute("src"); el.load(); }
       },
       play: () => {
+        stopFade();
+        el.volume = 0;
+        fadeInArmed = true;
         const p = el.play();
+        // Safety net for an engine that never fires `playing`: silence must
+        // not be the price of a missing event.
+        window.setTimeout(() => {
+          if (fadeInArmed) { fadeInArmed = false; fade(fadeTarget, FADE_IN_MS); }
+        }, 400);
         return p && typeof p.then === "function" ? p : Promise.resolve();
       },
-      pause: () => el.pause(),
-      setVolume(v) { el.volume = v; },
+      pause: () => {
+        // Not yet audibly playing (a start still in flight, or already
+        // paused): pause at once - el.pause() also aborts a pending play(),
+        // which the fade path would let slip through.
+        if (el.paused || fadeInArmed) { stopFade(); el.pause(); el.volume = fadeTarget; return; }
+        fade(0, FADE_OUT_MS, () => { el.pause(); el.volume = fadeTarget; });
+      },
+      setVolume(v) {
+        fadeTarget = v;
+        if (fadeTimer == null) { el.volume = v; }
+      },
       onEnded(cb) { el.onended = cb; },
-      onPlaying(cb) { el.onplaying = () => cb(); },
+      onPlaying(cb) {
+        el.onplaying = () => {
+          if (fadeInArmed) {
+            fadeInArmed = false;
+            fade(fadeTarget, FADE_IN_MS);
+          }
+          cb();
+        };
+      },
       onError(cb) {
         el.onerror = () => {
           const err = el.error;
@@ -62,13 +116,15 @@ export function NowPlayingBar() {
     };
     attachAudio(port);
     onCleanup(() => attachAudio(null));
+    // The preference lands after the element is attached, and can change from
+    // the slider on another instance. It moves the fade target, never a ramp
+    // in progress.
+    createEffect(() => {
+      fadeTarget = musicVolume();
+      if (fadeTimer == null) { el.volume = fadeTarget; }
+    });
   });
 
-  // The preference lands after the element is attached, and can change from
-  // the slider on another instance.
-  createEffect(() => {
-    if (audioRef) { audioRef.volume = musicVolume(); }
-  });
 
   /** What the bar shows: a loaded OR still-fetching track (a first shuffle
    *  pick can take a minute), unless hidden with ×. */

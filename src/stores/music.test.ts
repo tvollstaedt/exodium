@@ -112,6 +112,174 @@ describe("music store", () => {
     expect(store.wantedTrack()).toBeNull();
   });
 
+  it("a panel autoplay waits for the playing track to end instead of replacing it", async () => {
+    backend({ start_game_music: ({ id }: any) => ready(id) });
+    const store = await import("./music");
+    const port = fakePort();
+    store.attachAudio(port);
+
+    store.playTheme(game(1));
+    await settle(800);
+    expect(store.currentTrack()?.gameId).toBe(1);
+    expect(store.musicPlaying()).toBe(true);
+
+    // Browsing to another game's panel fetches its theme but track 1 plays on.
+    store.playTheme(game(2), { auto: true });
+    await settle(800);
+    expect(store.currentTrack()?.gameId).toBe(1);
+    expect(store.musicPlaying()).toBe(true);
+    expect(port.src).toContain("eXoDOS_1.mp3");
+
+    // When track 1 ends, the parked theme takes over.
+    port.end();
+    await settle(800);
+    expect(store.currentTrack()?.gameId).toBe(2);
+    expect(port.src).toContain("eXoDOS_2.mp3");
+    expect(store.musicPlaying()).toBe(true);
+  });
+
+  it("a click supersedes a parked panel theme", async () => {
+    backend({ start_game_music: ({ id }: any) => ready(id) });
+    const store = await import("./music");
+    const port = fakePort();
+    store.attachAudio(port);
+
+    store.playTheme(game(1));
+    await settle(800);
+    store.playTheme(game(2), { auto: true });
+    await settle(800);
+    // The listener picks track 3 by hand: it replaces track 1 at once …
+    store.playTheme(game(3));
+    await settle(800);
+    expect(store.currentTrack()?.gameId).toBe(3);
+    // … and the parked theme is forgotten - the end of 3 plays nothing new.
+    port.end();
+    await settle(800);
+    expect(store.currentTrack()?.gameId).toBe(3);
+    expect(port.src).toContain("eXoDOS_3.mp3");
+  });
+
+  it("closing the panel withdraws its auto theme before the bytes arrive", async () => {
+    let phase: any = FETCHING;
+    backend({ start_game_music: () => PROBING, get_music_status: () => phase });
+    const store = await import("./music");
+    const port = fakePort();
+    store.attachAudio(port);
+
+    store.playTheme(game(1), { auto: true });
+    await settle(10);
+    expect(store.wantedTrack()?.gameId).toBe(1);
+
+    store.withdrawAutoTheme(1);
+    expect(store.wantedTrack()).toBeNull();
+
+    // The bytes arriving later must not start a track nobody asked to hear.
+    phase = ready(1);
+    await settle(1500);
+    expect(store.currentTrack()).toBeNull();
+    expect(port.playCalls).toBe(0);
+  });
+
+  it("a click's wait is never withdrawn", async () => {
+    let phase: any = FETCHING;
+    backend({ start_game_music: () => PROBING, get_music_status: () => phase });
+    const store = await import("./music");
+    const port = fakePort();
+    store.attachAudio(port);
+
+    store.playTheme(game(1));
+    await settle(10);
+    store.withdrawAutoTheme(1);
+    expect(store.wantedTrack()?.gameId).toBe(1);
+
+    phase = ready(1);
+    await settle(1500);
+    expect(store.currentTrack()?.gameId).toBe(1);
+    expect(store.musicPlaying()).toBe(true);
+  });
+
+  it("withdrawing also drops a parked panel theme", async () => {
+    backend({ start_game_music: ({ id }: any) => ready(id) });
+    const store = await import("./music");
+    const port = fakePort();
+    store.attachAudio(port);
+
+    store.playTheme(game(1));
+    await settle(800);
+    store.playTheme(game(2), { auto: true });
+    await settle(800);
+    store.withdrawAutoTheme(2);
+
+    port.end();
+    await settle(800);
+    // Track 1 ended, the parked theme is gone: silence, not track 2.
+    expect(store.currentTrack()?.gameId).toBe(1);
+    expect(store.musicPlaying()).toBe(false);
+  });
+
+  it("a newer panel autoplay replaces a track that itself only came from autoplay", async () => {
+    backend({ start_game_music: ({ id }: any) => ready(id) });
+    const store = await import("./music");
+    const port = fakePort();
+    store.attachAudio(port);
+
+    store.playTheme(game(1), { auto: true });
+    await settle(1200);
+    expect(store.currentTrack()?.gameId).toBe(1);
+
+    // Nobody chose track 1 - the newest panel wins.
+    store.playTheme(game(2), { auto: true });
+    await settle(1200);
+    expect(store.currentTrack()?.gameId).toBe(2);
+    expect(store.musicPlaying()).toBe(true);
+  });
+
+  it("pressing play adopts an autoplayed track - a later panel queues behind it", async () => {
+    backend({ start_game_music: ({ id }: any) => ready(id) });
+    const store = await import("./music");
+    const port = fakePort();
+    store.attachAudio(port);
+
+    store.playTheme(game(1), { auto: true });
+    await settle(1200);
+    // Pause and resume by hand: that is the listener's word.
+    store.togglePlay();
+    store.togglePlay();
+    await settle(10);
+
+    store.playTheme(game(2), { auto: true });
+    await settle(1200);
+    expect(store.currentTrack()?.gameId).toBe(1);
+    port.end();
+    await settle(1200);
+    expect(store.currentTrack()?.gameId).toBe(2);
+  });
+
+  it("runningGameIds mirrors launches and exits, per game", async () => {
+    backend({});
+    const store = await import("./music");
+    expect(store.runningGameIds().size).toBe(0);
+    store.pauseForGame(7);
+    store.pauseForGame(9);
+    expect([...store.runningGameIds()].sort()).toEqual([7, 9]);
+    store.resumeFromGame(7);
+    expect(store.runningGameIds().has(9)).toBe(true);
+    store.resumeFromGame(9);
+    expect(store.runningGameIds().size).toBe(0);
+  });
+
+  it("a panel autoplay onto silence still starts at once", async () => {
+    backend({ start_game_music: ({ id }: any) => ready(id) });
+    const store = await import("./music");
+    const port = fakePort();
+    store.attachAudio(port);
+
+    store.playTheme(game(1), { auto: true });
+    await settle(800);
+    expect(store.currentTrack()?.gameId).toBe(1);
+    expect(store.musicPlaying()).toBe(true);
+  });
+
   it("names a start the element refused, and forgets it on the next track", async () => {
     backend({ start_game_music: ({ id }: any) => ready(id) });
     const store = await import("./music");
@@ -261,7 +429,7 @@ describe("music store", () => {
     expect(store.currentTrack()?.gameId).toBe(11);
 
     store.playFromList(row(1));
-    await settle(10);
+    await settle(400);
     port.end();
     await settle(10);
     expect(store.currentTrack()?.gameId).toBe(1);
@@ -354,7 +522,7 @@ describe("music store", () => {
     store.attachAudio(port);
 
     store.playFromList(row(1));
-    await settle(10);
+    await settle(400);
     port.end();
     await settle(10);
 
@@ -377,7 +545,7 @@ describe("music store", () => {
     store.attachAudio(port);
 
     store.playFromList(row(1));
-    await settle(10);
+    await settle(400);
     port.end();
     await settle(10);
 
@@ -396,7 +564,7 @@ describe("music store", () => {
     expect(store.musicMode()).toBe("list");
 
     store.playTheme(game(2));
-    await settle(10);
+    await settle(400);
     expect(store.musicMode()).toBe("theme");
     expect(store.currentTrack()?.gameId).toBe(2);
   });
@@ -687,23 +855,23 @@ describe("music store", () => {
     store.attachAudio(fakePort());
 
     await store.startShuffle();
-    await settle(10);
+    await settle(400);
     await store.next();
-    await settle(10);
+    await settle(400);
     await store.next();
-    await settle(10);
+    await settle(400);
     expect(store.currentTrack()?.gameId).toBe(3);
 
     store.prev();
-    await settle(10);
+    await settle(400);
     expect(store.currentTrack()?.gameId).toBe(2);
     store.prev();
-    await settle(10);
+    await settle(400);
     expect(store.currentTrack()?.gameId).toBe(1);
 
     // And the track stepped back over is still what ⏭ returns to.
     await store.next();
-    await settle(10);
+    await settle(400);
     expect(store.currentTrack()?.gameId).toBe(2);
   });
 
