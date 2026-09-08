@@ -274,8 +274,6 @@ body {
   color: var(--text-primary);
   text-decoration: underline;
   outline: none;
-  margin-bottom: 4px;
-  text-transform: capitalize;
 }
 
 .download-sheet-progress-row {
@@ -423,18 +421,24 @@ body {
 /* Theme-matched thin scrollbar for WebKit/Chromium (all Tauri platforms
    currently use WebView2/WKWebView/WebKitGTK - all webkit-derived). Falls
    back to the OS default on engines that don't implement these pseudos. */
+/* 12px wide with a 2px transparent inset: an 8px thumb was near-invisible on
+   a dark grid and too thin to grab (Linux report 2026-09-08); the inset keeps
+   the full 12px as hit area while the visible bar stays slim. */
 .library::-webkit-scrollbar {
-  width: 8px;
+  width: 12px;
 }
 .library::-webkit-scrollbar-track {
   background: transparent;
 }
 .library::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
-  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 .library::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.5);
+  background-clip: padding-box;
 }
 
 /* ── Tab bar ── */
@@ -731,7 +735,9 @@ body {
 /* ── Back to top: appears only while scrolling UP below the shelf. ── */
 .back-to-top {
   position: fixed;
-  bottom: 22px;
+  /* Above the now-playing bar when one is open (--player-h, like the detail
+     panel): at a plain 22px the pill sat on top of the bar's controls. */
+  bottom: calc(22px + var(--player-h));
   left: 50%;
   transform: translate(-50%, 12px);
   z-index: 50;
@@ -3363,8 +3369,14 @@ body {
   flex-shrink: 0;
 }
 
+/* Both ends spell out the full transform list. The compositing block gives
+   .btn-spinner a base `translateZ(0)`; with only a `to` keyframe WebKit then
+   interpolates mismatched lists via matrices, and rotate(360deg) IS the
+   identity matrix - the spinner stood perfectly still (measured on WebKitGTK
+   2.52.6). */
 @keyframes btn-spinner-rotate {
-  to { transform: rotate(360deg); }
+  from { transform: translateZ(0) rotate(0deg); }
+  to   { transform: translateZ(0) rotate(360deg); }
 }
 
 .btn-play {
