@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "vite build",
     "serve": "vite preview",
-    "tauri": "cross-env WEBKIT_DISABLE_DMABUF_RENDERER=1 tauri",
+    "tauri": "tauri",
     "get-dosbox": "bash scripts/get-dosbox.sh",
     "get-emulators": "bash scripts/get-emulators.sh",
     "init-dev": "bash scripts/get-dosbox.sh && bash scripts/get-emulators.sh && bash scripts/init-dev.sh",
