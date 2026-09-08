@@ -488,7 +488,14 @@ async fn fetch_entry(
         .stream_file(target.gamedata_idx)
         .await
         .map_err(|e| format!("Could not open the archive stream: {}", e))?;
-    let Some((bytes, name)) = extract(kind, &mut stream, target.archive_len, jobs, id, cancel).await? else {
+    // The read blocks until a whole 8 MB piece is in, so the chunk callback
+    // is silent for most of the wait and the bar sat at 0% until the fetch
+    // was done (measured: 53 s of "fetching" at 0.000, then ready). The
+    // session knows how many archive bytes actually arrived - publish that.
+    let ticker = spawn_stream_progress_ticker(Arc::clone(jobs), id, Arc::clone(manager), target.gamedata_idx);
+    let extracted = extract(kind, &mut stream, target.archive_len, jobs, id, cancel).await;
+    ticker.abort();
+    let Some((bytes, name)) = extracted? else {
         log::info!("Archive for game {} contains no {}", id, kind.label());
         return Ok(None);
     };
@@ -500,6 +507,38 @@ async fn fetch_entry(
         bytes.len() as f64 / 1_048_576.0
     );
     Ok(Some(path))
+}
+
+/// Publish the archive's real download growth as the job's progress while the
+/// stream read is parked on a piece. Growth since the fetch began is measured
+/// against the entry's size (media entries are stored, not deflated, so the
+/// two match closely) and capped below 1.0 - only the completed read finishes
+/// the bar. One poll per second per in-flight fetch (three at most); the
+/// session-stats rule in §11 is about summing per-torrent stats for the badge.
+fn spawn_stream_progress_ticker(
+    jobs: JobMap,
+    id: i64,
+    manager: Arc<crate::torrent::manager::DownloadManager>,
+    file_index: usize,
+) -> tauri::async_runtime::JoinHandle<()> {
+    tauri::async_runtime::spawn(async move {
+        let mut baseline: Option<u64> = None;
+        loop {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            let Some(p) = manager.file_progress(file_index).await else { continue };
+            let base = *baseline.get_or_insert(p.downloaded_bytes);
+            let got = p.downloaded_bytes.saturating_sub(base);
+            let mut guard = jobs.write().await;
+            let Some(job) = guard.get_mut(&id) else { return };
+            if job.status.phase != "fetching" || job.status.total_bytes == 0 {
+                continue;
+            }
+            let frac = (got as f64 / job.status.total_bytes as f64).min(0.99);
+            if frac > job.status.progress {
+                job.status.progress = frac;
+            }
+        }
+    })
 }
 
 /// A stream waits for unseeded pieces forever, so both reads have deadlines;
@@ -621,6 +660,20 @@ pub async fn video_playback_supported() -> bool {
     }
     #[cfg(not(target_os = "linux"))]
     true
+}
+
+/// Should the frontend paint video frames itself (videoCanvas.ts, §14)?
+/// Linux with the proprietary NVIDIA driver only - exactly the stack whose
+/// DMABuf sink startup disables; everywhere else the engine's own
+/// presentation is correct and the mirror would only add risk and copies.
+#[tauri::command]
+pub async fn video_mirror_needed() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        crate::nvidia_proprietary_in_use()
+    }
+    #[cfg(not(target_os = "linux"))]
+    false
 }
 
 /// The AppImage's lib dir when it carries its own GStreamer core.
@@ -1227,7 +1280,17 @@ fn start_media_server(
         tower_http::services::ServeFile::new(file)
             .oneshot(req)
             .await
-            .map(|res| res.map(Body::new))
+            .map(|res| {
+                // Tokens are the guard, not the origin: with CORS open, a
+                // canvas may read the frames back (used by diagnostics; a
+                // poster grab would need it too).
+                let mut res = res.map(Body::new);
+                res.headers_mut().insert(
+                    axum::http::header::ACCESS_CONTROL_ALLOW_ORIGIN,
+                    axum::http::HeaderValue::from_static("*"),
+                );
+                res
+            })
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
     }
 
