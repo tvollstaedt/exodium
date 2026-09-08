@@ -312,6 +312,52 @@ pub(crate) fn running_games() -> &'static Mutex<std::collections::HashSet<String
     RUNNING.get_or_init(|| Mutex::new(std::collections::HashSet::new()))
 }
 
+/// Emulator pid per launched game id, so "Stop game" can end it. Inserted at
+/// spawn, removed by the reaper - a stale entry can therefore never outlive
+/// the process by more than the reaper's turnaround.
+pub(crate) fn running_pids() -> &'static Mutex<std::collections::HashMap<i64, u32>> {
+    static PIDS: OnceLock<Mutex<std::collections::HashMap<i64, u32>>> = OnceLock::new();
+    PIDS.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+/// End a running game's emulator, Steam-style. SIGTERM on Unix (Staging and
+/// DOSBox-X shut down cleanly on it; for a booted Win9x guest this is the
+/// same as closing the window - the Start-menu shutdown stays the clean way,
+/// §5); `taskkill /T` on Windows so a bat-launched chain goes with it. The
+/// reaper notices the exit and emits `game-exited` as for any other quit.
+#[tauri::command]
+pub async fn stop_game(id: i64) -> Result<(), String> {
+    let pid = running_pids()
+        .lock()
+        .map_err(|e| e.to_string())?
+        .get(&id)
+        .copied()
+        .ok_or("Game is not running")?;
+    #[cfg(unix)]
+    {
+        let rc = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+        if rc != 0 {
+            return Err(format!("Could not stop the emulator (pid {})", pid));
+        }
+    }
+    #[cfg(windows)]
+    {
+        let out = std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .output()
+            .map_err(|e| e.to_string())?;
+        if !out.status.success() {
+            return Err(format!(
+                "Could not stop the emulator (pid {}): {}",
+                pid,
+                String::from_utf8_lossy(&out.stderr).trim()
+            ));
+        }
+    }
+    log::info!("Stopped game {} (pid {})", id, pid);
+    Ok(())
+}
+
 pub(crate) fn running_game_key(game: &Game) -> String {
     match game.shortcode.as_deref() {
         Some(sc) => format!("{}:{}", sc, game.language),
@@ -1904,6 +1950,7 @@ pub(crate) fn spawn_emulator_and_track(
     // Windows).
     let run_key = running_game_key(game);
     running_games().lock().map(|mut s| s.insert(run_key.clone())).ok();
+    running_pids().lock().map(|mut m| m.insert(id, child.id())).ok();
     let app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         match child.wait() {
@@ -1911,6 +1958,7 @@ pub(crate) fn spawn_emulator_and_track(
             Err(e) => log::warn!("Emulator wait failed for {}: {}", run_key, e),
         }
         running_games().lock().map(|mut s| s.remove(&run_key)).ok();
+        running_pids().lock().map(|mut m| m.remove(&id)).ok();
         use tauri::Emitter;
         let _ = app.emit("game-exited", GameExited { id });
     });
