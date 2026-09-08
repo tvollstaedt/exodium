@@ -444,7 +444,11 @@ fn hide_console(_cmd: &mut std::process::Command) {}
 fn detect(resolved: &Resolved, ini: &Path, run_dir: &Path, game_id: &str, grant: &Path) -> Result<Vec<String>, String> {
     let (mut cmd, _) = resolved.cmd.command(grant);
     hide_console(&mut cmd);
-    cmd.arg(format!("--config={}", ini.display()))
+    // Headless: without this every probe brings up SDL's video system, which
+    // on macOS is a Dock icon flashing once per spawn.
+    cmd.env("SDL_VIDEODRIVER", "dummy")
+        .env("SDL_AUDIODRIVER", "dummy")
+        .arg(format!("--config={}", ini.display()))
         .arg("--detect")
         .arg(format!("--path={}", run_dir.display()));
     // Same posix_spawn EBADF as the emulator spawn (see
@@ -518,6 +522,7 @@ fn pin_first_part(
     run_dir: &Path,
     game_id: &str,
     grant: &Path,
+    want: u32,
 ) -> Option<String> {
     let engine_and_id: Vec<&str> = game_id.split(':').collect();
     let (engine, id) = (engine_and_id.first()?, engine_and_id.get(1)?);
@@ -543,6 +548,11 @@ fn pin_first_part(
         let part = rows.iter().filter_map(|d| part_number(d)).min().unwrap_or(u32::MAX);
         if best.as_ref().is_none_or(|(p, _)| part < *p) {
             best = Some((part, name.clone()));
+        }
+        // The lowest part the directory holds is known from the first
+        // detection; once found there is nothing left to probe.
+        if part == want {
+            break;
         }
     }
     let _ = std::fs::remove_dir_all(&probe);
@@ -632,7 +642,8 @@ async fn launch_inner(
 
     let detections = detect(&resolved, &ini, &variant.run_dir, &entry.game_id, &torrent_root)?;
     let launch_target = if detections.len() > 1 && entry.game_id.contains(':') {
-        pin_first_part(&resolved, &ini, &variant.run_dir, &entry.game_id, &torrent_root)
+        let want = detections.iter().filter_map(|d| part_number(d)).min().unwrap_or(1);
+        pin_first_part(&resolved, &ini, &variant.run_dir, &entry.game_id, &torrent_root, want)
             .unwrap_or_else(|| entry.game_id.clone())
     } else {
         entry.game_id.clone()
