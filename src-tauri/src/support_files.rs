@@ -489,9 +489,11 @@ mod tests {
     fn a_pack_leaves_its_siblings_under_a_shared_parent_alone() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
+        // Lowercase like eXo's real payload: `staged_dir` keeps the zip's
+        // case, and on Linux `DOSBox/` would be a different directory.
         let inner = zip_bytes(&[
-            ("emulators/DOSBox/x98/dosbox-x.exe", b"x98"),
-            ("emulators/DOSBox/options9x.conf", b"conf"),
+            ("emulators/dosbox/x98/dosbox-x.exe", b"x98"),
+            ("emulators/dosbox/options9x.conf", b"conf"),
         ]);
         let util = root.join("util.zip");
         std::fs::write(&util, zip_bytes(&[("INNER.zip", &inner)])).unwrap();
