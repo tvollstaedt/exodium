@@ -384,6 +384,13 @@ const triedThisWalk = new Set<number>();
 /** The pick `prev()` is walking back to: its load must not push the outgoing
  *  track onto the history it came from, or ⏮ bounces between two songs. */
 let steppingBackTo: number | null = null;
+/** The current track ran to its end (theme mode stops there). A withdrawn
+ *  pause reason must not start it over; only the listener or a new track
+ *  does. */
+let ended = false;
+/** Only the latest `play()` may report its outcome: an earlier one that a
+ *  `pause()` or a new source aborted is not news. */
+let playSeq = 0;
 
 export function attachAudio(next: AudioPort | null) {
   port = next;
@@ -395,9 +402,15 @@ export function attachAudio(next: AudioPort | null) {
 }
 
 /** `play()` rejections carry a DOMException name worth showing verbatim
- *  (NotSupportedError: no decoder; NotAllowedError: autoplay policy). */
-export function describePlayError(e: unknown): string {
-  if (e instanceof Error) { return e.message ? `${e.name}: ${e.message}` : e.name; }
+ *  (NotSupportedError: no decoder). Null for an AbortError: that is a
+ *  `pause()` or a new source landing on a start still in flight, not a
+ *  failure. NotAllowedError is the autoplay policy, so it names the way out. */
+export function describePlayError(e: unknown): string | null {
+  if (e instanceof Error) {
+    if (e.name === "AbortError") { return null; }
+    if (e.name === "NotAllowedError") { return "autoplay blocked - press ▶ (NotAllowedError)"; }
+    return e.message ? `${e.name}: ${e.message}` : e.name;
+  }
   return String(e);
 }
 
@@ -411,11 +424,18 @@ function trackOfCandidate(c: MusicCandidate): Track {
 
 function play() {
   if (!port || !currentTrack()) { return; }
+  ended = false;
+  const seq = ++playSeq;
   const started = port.play();
   if (started && typeof started.then === "function") {
     started
-      .then(() => { setPlaying(true); setPlayError(null); })
-      .catch((e) => { setPlaying(false); setPlayError(describePlayError(e)); });
+      .then(() => { if (seq === playSeq) { setPlaying(true); setPlayError(null); } })
+      .catch((e) => {
+        if (seq !== playSeq) { return; }
+        setPlaying(false);
+        const why = describePlayError(e);
+        if (why) { setPlayError(why); }
+      });
   } else {
     setPlaying(true);
     setPlayError(null);
@@ -423,6 +443,7 @@ function play() {
 }
 
 function pause() {
+  playSeq++;
   port?.pause();
   setPlaying(false);
 }
@@ -543,6 +564,8 @@ async function load(track: Track, path: string) {
   if (upNext?.gameId === track.gameId) { upNext = null; }
   setPlaying(false);
   setPlayError(null);
+  ended = false;
+  playSeq++;
   port?.setSrc(url);
   if (!userPaused() && reasons.size === 0) { play(); }
   // No prefetch when nothing will follow: the bytes would never be played.
@@ -551,16 +574,23 @@ async function load(track: Track, path: string) {
 
 function handleEnded() {
   setPlaying(false);
+  ended = true;
   if (autoAdvances() && musicContinuous()) { void next(); }
 }
 
-/** Play a game's theme: the panel's autoplay, and the row's play button. */
-export function playTheme(game: Pick<Game, "id" | "title" | "torrent_source" | "thumbnail_key">) {
+/** Play a game's theme. A click overrides whatever holds the speakers; the
+ *  panel's autoplay (`auto`) does not - it loads the track and lets a running
+ *  preview or game keep them. */
+export function playTheme(game: Pick<Game, "id" | "title" | "torrent_source" | "thumbnail_key">, opts?: { auto?: boolean }) {
   if (game.id == null) { return; }
   const track = trackOf(game, game.id);
   setMode("theme");
-  setUserPaused(false);
-  setBarHidden(false);
+  if (opts?.auto) {
+    setUserPaused(false);
+    setBarHidden(false);
+  } else {
+    listenerWantsSound();
+  }
   upNext = null;
   if (currentTrack()?.gameId === track.gameId) {
     setWanted(null);
@@ -578,13 +608,12 @@ export function playFromList(game: Pick<Game, "id" | "title" | "torrent_source" 
   if (game.id == null) { return; }
   const track = trackOf(game, game.id);
   setMode("list");
-  setUserPaused(false);
-  setBarHidden(false);
+  listenerWantsSound();
   upNext = null;
   listCursor = track.gameId;
   if (currentTrack()?.gameId === track.gameId) {
     setWanted(null);
-    if (!playing() && reasons.size === 0) { play(); }
+    if (!playing()) { play(); }
     return;
   }
   want(track);
@@ -725,16 +754,24 @@ export function prev() {
   want(previous);
 }
 
+/** A click on a play control is the listener's word: it overrides the pause
+ *  of their own and whatever else claimed the speakers (§14). */
+function listenerWantsSound() {
+  setUserPaused(false);
+  setBarHidden(false);
+  if (reasons.size > 0) {
+    reasons.clear();
+    setPauseReasons([]);
+  }
+}
+
 export function togglePlay() {
   if (playing()) {
     setUserPaused(true);
     pause();
     return;
   }
-  // The click is the listener's word: it overrides whatever paused the music.
-  setUserPaused(false);
-  reasons.clear();
-  setPauseReasons([]);
+  listenerWantsSound();
   if (currentTrack()) { play(); }
 }
 
@@ -768,6 +805,8 @@ export function stop() {
     if (track && getMusicState(track.gameId)?.phase !== "ready") { abandonFetch(track.gameId); }
   }
   setCurrentTrack(null);
+  setPlayError(null);
+  ended = false;
   port?.setSrc(null);
   listCursor = null;
   autoSkips = 0;
@@ -795,7 +834,7 @@ export function pauseFor(reason: PauseReason) {
 export function resumeFrom(reason: PauseReason) {
   if (!reasons.delete(reason)) { return; }
   setPauseReasons([...reasons]);
-  if (reasons.size === 0 && !userPaused() && currentTrack() && !playing()) { play(); }
+  if (reasons.size === 0 && !userPaused() && !ended && currentTrack() && !playing()) { play(); }
 }
 
 /** The games currently running. The backend starts one emulator process per

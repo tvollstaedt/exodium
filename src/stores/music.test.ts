@@ -717,11 +717,12 @@ describe("music store", () => {
     const port = fakePort();
     store.attachAudio(port);
 
-    // The preview is already playing with sound when the listener presses ▶.
+    // The preview is already playing with sound when the panel's autoplay
+    // asks for the theme.
     store.pauseFor("video");
     expect(store.pauseReasons()).toEqual(["video"]);
 
-    store.playTheme(game(1));
+    store.playTheme(game(1), { auto: true });
     await settle(10);
     expect(store.currentTrack()?.gameId).toBe(1);
     expect(store.musicPlaying()).toBe(false);
@@ -732,6 +733,55 @@ describe("music store", () => {
     await settle(0);
     expect(store.musicPlaying()).toBe(true);
     expect(port.playCalls).toBe(1);
+  });
+
+  it("a click on play overrides a held reason, for the loaded track and a new one", async () => {
+    backend({ start_game_music: ({ id }: any) => ready(id) });
+    const store = await import("./music");
+    const port = fakePort();
+    store.attachAudio(port);
+
+    store.pauseFor("video");
+    store.playTheme(game(1));
+    await settle(10);
+    expect(store.pauseReasons()).toEqual([]);
+    expect(store.musicPlaying()).toBe(true);
+
+    // Loaded, then silenced by a game: the panel's Play is the listener's word.
+    store.pauseForGame(7);
+    expect(store.musicPlaying()).toBe(false);
+    store.playTheme(game(1));
+    await settle(0);
+    expect(store.musicPlaying()).toBe(true);
+    expect(store.pauseReasons()).toEqual([]);
+    // The game's later exit finds nothing of its own to withdraw.
+    store.resumeFromGame(7);
+    expect(store.musicPlaying()).toBe(true);
+  });
+
+  it("a track that ran to its end is not restarted by a withdrawn reason", async () => {
+    backend({ start_game_music: ({ id }: any) => ready(id) });
+    const store = await import("./music");
+    const port = fakePort();
+    store.attachAudio(port);
+
+    store.playTheme(game(1));
+    await settle(10);
+    expect(store.musicPlaying()).toBe(true);
+    port.end();
+    expect(store.musicPlaying()).toBe(false);
+
+    store.pauseFor("video");
+    store.resumeFrom("video");
+    await settle(0);
+    expect(store.musicPlaying()).toBe(false);
+    expect(port.playCalls).toBe(1);
+
+    // ▶ starts it over.
+    store.togglePlay();
+    await settle(0);
+    expect(store.musicPlaying()).toBe(true);
+    expect(port.playCalls).toBe(2);
   });
 
   /** The backend dropped the job (a cancel, a restart) while the player was

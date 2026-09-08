@@ -564,7 +564,7 @@ export function GameDetailPanel(props: Props) {
       // hidden and paused flags, which is right for a click on ▶ and wrong
       // here - it made the × last only until the next game was opened.
       const dismissed = musicUserPaused() || playerHidden();
-      if (musicAutoplay() && !dismissed) { playTheme(g); } else { void requestTheme(id); }
+      if (musicAutoplay() && !dismissed) { playTheme(g, { auto: true }); } else { void requestTheme(id); }
     }, 400);
     onCleanup(() => clearTimeout(timer));
   });
@@ -626,14 +626,20 @@ export function GameDetailPanel(props: Props) {
     if (!videoReady() || id == null || id === autoplayFor) { return; }
     autoplayFor = id;
     setVideoError(null);
+    // A preview about to play with sound claims the speakers NOW, not at its
+    // first frame: the theme starts within the cover beat otherwise and is
+    // cut off two seconds later. Every exit below that ends up silent hands
+    // them back.
+    if (!previewMuted()) { pauseFor("video"); }
     // Two seconds of cover first; a trailer mid-slide reads as an ad.
     autoplayTimer = window.setTimeout(() => {
       autoplayTimer = undefined;
       const el = heroVideoRef;
-      if (!el) { return; }
+      if (!el) { resumeFrom("video"); return; }
       try {
         el.currentTime = 0;
         el.muted = previewMuted();
+        if (el.muted) { resumeFrom("video"); }
         const started = el.play();
         // Older WebKit returns undefined instead of a promise.
         if (started && typeof started.then === "function") {
@@ -641,6 +647,7 @@ export function GameDetailPanel(props: Props) {
             // Autoplay with sound needs a user gesture the webview may not
             // have seen. A silent preview beats no preview - but do NOT write
             // that back to the preference: the user did not choose it.
+            resumeFrom("video");
             el.muted = true;
             const retry = el.play();
             if (retry && typeof retry.then === "function") {
@@ -656,6 +663,7 @@ export function GameDetailPanel(props: Props) {
           setVideoPlaying(true);
         }
       } catch (e) {
+        resumeFrom("video");
         setVideoPlaying(false);
         setVideoError(describePlayError(e));
       }
