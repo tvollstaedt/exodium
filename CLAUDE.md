@@ -786,6 +786,58 @@ stay in the `media-src` of both CSPs in `tauri.conf.json` - 0.12.0 shipped the
 server without that entry and every preview was blocked into a silent black
 frame.**
 
+**WebKitGTK's no-DMABUF path presents no video frames at all.** Measured
+2026-09-08 (host WebKitGTK 2.52.6, Xvfb, same cached H.264 file, A/B): with
+`WEBKIT_DISABLE_DMABUF_RENDERER=1` the element plays - `play()` resolves,
+`currentTime` advances, readyState 4 - but `requestVideoFrameCallback` fires
+ZERO times in 2 s; without the flag, 60-120 frames. So a "playing" video on
+that path is a frozen cover, with no error for the instrumentation to name.
+The `pnpm tauri` script used to force that flag on every dev run (an
+initial-commit relic that predates §17) - removed the same day; dev now takes
+`choose_render_path` like production. Note what remains: §17's X11+NVIDIA arm
+still chooses disable_dmabuf, so previews on that combination paint nothing -
+if that setup ever matters, `video_playback_supported` is the place to say no.
+
+**On NVIDIA, WebKit's DMABuf VIDEO sink is the broken piece - startup
+disables it, and the canvas mirror is the second line.** Measured 2026-09-08
+on the reference box: with the zero-copy sink active, the screen shows green
+frames and `drawImage` returns real pixels only for the first moments, then
+nothing (transparent) - decoder innocent (gst-launch with `nvh264dec`
+produces a perfect frame; demoting it changes nothing, it is the sink).
+`WEBKIT_GST_DMABUF_SINK_DISABLED=1` (found via `strings` on libwebkit2gtk)
+makes WebKit fall back to its GL sink and EVERYTHING is correct again -
+screen, rVFC, readback. Startup sets it next to the other render-path vars,
+NVIDIA-only and respecting an already-set value: on Mesa the zero-copy sink
+is the fast path and works. `videoCanvas.ts` additionally mirrors the
+element into a canvas twin on exactly the same stacks
+(`video_mirror_needed`, backend-answered; hero cover-fit, lightbox
+contain-fit without native controls - a click on the mirror toggles
+playback; the element keeps opacity 0.02, NEAR-zero so nothing suspends an
+"invisible" video, and stays the audio source, clock and click target). The
+mirror must never widen beyond that predicate: where the sink works,
+readback is not guaranteed, and the mirror would break a healthy platform.
+The media server sends CORS `*` (tokens are the guard), so canvases may read
+frames back.
+
+**Env A/B tests through `pnpm tauri dev` are VOID: the chain drops inline
+env vars before they reach the app.** Measured: `WEBKIT_GST_...=1 pnpm tauri
+dev` starts an exodium whose `/proc/<pid>/environ` does not contain the
+variable, while plain `cargo run` (vite started separately) delivers it into
+the app AND its WebProcess. An entire afternoon of "the switch changed
+nothing" results came from this. Always verify with
+`tr '\0' '\n' < /proc/$(pgrep -x exodium)/environ | grep <VAR>` before
+trusting any env experiment - and remember `pkill -f "tauri dev"` kills the
+wrapper, not the app: the window survives reparented to systemd, and the
+user keeps testing yesterday's binary.
+
+**A media fetch's % must come from the session, not the reader.** The stream's
+`read_exact` parks on a whole 8 MB piece, so the chunk callback is silent for
+most of the wait - measured: 53 s of "fetching" at 0.000, then ready. The
+fetch task therefore runs a 1 Hz ticker publishing the archive's
+`file_progress` growth (capped at 0.99; only the completed read finishes the
+bar). §11's "don't poll per-torrent stats" is about the badge summing all
+torrents, not this bounded per-fetch poll.
+
 ### 15. eXoWin3x is the first non-DOS collection
 
 1,138 Windows 3.x games, 345.8 GB. Structurally the same pack shape as eXoDOS -
@@ -1164,11 +1216,17 @@ Exodium involved:
 
 | backend | DMA-BUF | explicit sync | result |
 |---|---|---|---|
-| Wayland | on | on | Gdk "Error 71" protocol error, process dies |
+| Wayland | on | on | Gdk "Error 71" protocol error, process dies (re-measured 2026-09-08 on WebKitGTK 2.52.6: unchanged - and the driver reads `__NV_DISABLE_EXPLICIT_SYNC=0` as "not disabled", so presetting 0 is how to reproduce it) |
 | Wayland | off | - | 10.6 fps, WebProcess 95% CPU, 7 nvidia fds |
 | Wayland | on | off | **60.8 fps, WebProcess 14% CPU, 38 nvidia fds** |
 | X11 | on | - | "Failed to create GBM buffer", 0% CPU, never paints |
 | X11 | off | - | 37.9 fps, WebProcess 95% CPU |
+
+The fast path's known cost: window RESIZE shimmers/jitters (reported on the
+first dev run that took it, 2026-09-08). That is what disabling explicit sync
+means on NVIDIA/Wayland - implicit sync artifacts show exactly under rapid
+buffer reallocation - and the alternative is the Error 71 crash above, so it
+is accepted, not a bug to fix here.
 
 So NVIDIA needs a workaround on both backends but a DIFFERENT one, and the
 blanket `WEBKIT_DISABLE_DMABUF_RENDERER=1` we used to set on all of Linux was
@@ -1182,7 +1240,12 @@ one on Intel/AMD and disabling it would be a regression. **The backend is read
 the way GTK reads it** (`GDK_BACKEND` first, then `WAYLAND_DISPLAY`), so
 whatever forces that variable decides the render path with it. **An
 already-set variable is left alone**, which is the escape hatch when this
-guess is wrong on someone's box.
+guess is wrong on someone's box - which is also why the `pnpm tauri` script
+must never export a render variable again: its initial-commit
+`WEBKIT_DISABLE_DMABUF_RENDERER=1` silently pinned every dev run on every
+platform to the software path until 2026-09-08 (10 fps hover/scroll, and no
+video frames at all, §14), while release builds ran the fast path - the two
+were not testing the same renderer.
 
 **Two more things have to line up before an AppImage sees any of this, and
 each one alone is worth the whole difference.** linuxdeploy's GTK hook
