@@ -402,19 +402,31 @@ fn scan_game_metadata(
     let mut roots: Vec<PathBuf> = vec![base.join(collection)];
     roots.extend(asset_fallback(collection).map(|c| base.join(c)));
 
-    // Media subtrees are per LaunchBox platform, not per collection.
+    // Media subtrees are per LaunchBox platform, not per collection - and a
+    // collection can span two: eXoScummVM files its "may be unstable" titles
+    // under `ScummVM SVN` beside `ScummVM` (§18). Every platform dir that
+    // starts with the collection's name counts.
     let platform = collection_def(collection).map(|c| c.platform).unwrap_or("MS-DOS");
+    let image_roots: Vec<PathBuf> = roots
+        .iter()
+        .flat_map(|root| {
+            let images = root.join("Images");
+            std::fs::read_dir(&images)
+                .into_iter()
+                .flatten()
+                .filter_map(|e| e.ok())
+                .map(|e| e.path())
+                .filter(|p| p.is_dir() && p.file_name().is_some_and(|n| n.to_string_lossy().starts_with(platform)))
+                .collect::<Vec<_>>()
+        })
+        .collect();
 
     let target_norm = normalize_alnum(title);
     let mut by_category: std::collections::BTreeMap<usize, Vec<String>> =
         std::collections::BTreeMap::new();
 
-    for root in &roots {
-        let images_root = root.join("Images").join(platform);
-        if !images_root.is_dir() {
-            continue;
-        }
-        let Ok(dir_iter) = std::fs::read_dir(&images_root) else { continue };
+    for images_root in &image_roots {
+        let Ok(dir_iter) = std::fs::read_dir(images_root) else { continue };
         for entry in dir_iter.flatten() {
             let category_path = entry.path();
             if !category_path.is_dir() {

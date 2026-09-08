@@ -140,3 +140,9 @@
 - Verworfen: die alphabetisch erste Datei nehmen (Heuristik ueber Dateinamen, die ScummVM selbst besser kennt); `--massadd` (in den Builds nicht einkompiliert).
 - Grund: Der nackte Start mit `engine:gameid` nimmt den ersten Treffer der Verzeichnisliste - NTFS alphabetisch (Teil 1, darum laeuft eXos Bat), APFS in Hash-Reihenfolge (Teil 2: "you've started in the middle of the game").
 - Gotcha: Gemessen mit dem 2.8.0-Pack auf macOS; die Probe kostet einen `--detect` pro Datendatei, nur wenn es mehrere Treffer gibt.
+
+## 2026-09-08 - eXoScummVM: Poster- und Metadata-Pack
+- Entscheidung: `posters-eXoScummVM-v1.tar.gz` (832 Cover, 46 MB) auf `content-v7` nachgeschoben - dasselbe Release wie die Emulatoren, bestehende Assets unangetastet; Metadata als Torrent-Pack (`Content/XOScummVMMetadata.zip`, 4,2 GB) ohne Upload. Der Galerie-Scan nimmt jeden `Images/<platform>`-Ordner mit dem Plattform-Praefix der Sammlung.
+- Verworfen: `!ScummVMmetadata.zip` (8 GB, PDF/UHS-Extras) als zweites Pack - erst, wenn jemand die Extras im Panel vermisst.
+- Grund: eXo fuehrt 109 Titel unter `ScummVM SVN`; mit dem festen Plattformnamen aus `CollectionDef` blieb ihre Galerie leer.
+- Gotcha: Alle Poster-Tarballs jetzt mit `COPYFILE_DISABLE=1 --no-mac-metadata`; die drei aelteren tragen noch AppleDouble-Eintraege (harmlos, §16).

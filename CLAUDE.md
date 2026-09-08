@@ -1361,8 +1361,13 @@ Linux binary at all. The Linux AppImages were verified under qemu-user on
 the ARM64 lab guest (`--version`, engine list, features) - there is no
 x86_64 Linux machine in the lab, so a native run is still owed.
 
+Poster pack `posters-eXoScummVM-v1` (content-v7) and the torrent-sourced
+metadata pack (`Content/XOScummVMMetadata.zip`) are in the manifest;
+`scan_game_metadata` reads every `Images/<platform>` dir that starts with the
+collection's platform name, so the `ScummVM SVN` titles get their gallery too.
+
 **Still open:** snapshot builds from their commits; `Feria D'Arles` has no
-cover (apostrophe in the image name); poster pack.
+cover (apostrophe in the image name).
 
 ## Conventions
 

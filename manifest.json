@@ -184,6 +184,27 @@
       "torrent_infohash": "8d490e5c405dc30161c16bd907372ac01523f5c7",
       "game_count": 832,
       "content_packs": {
+        "posters": {
+          "display_name": "Box Art",
+          "description": "HD box art for the ScummVM collection",
+          "url": "https://github.com/tvollstaedt/exodium/releases/download/content-v7/posters-eXoScummVM-v1.tar.gz",
+          "sha256": "283288b889edf30004d8fdc2f3b2aea6c04003ceaa08417eb5100991c43c130c",
+          "size_bytes": 46357010,
+          "version": 1,
+          "install_path": "content/posters/eXoScummVM",
+          "supersedes": []
+        },
+        "metadata": {
+          "display_name": "Metadata Pack",
+          "description": "Box art, screenshots, manuals and theme music for the ScummVM collection (sourced from the eXoScummVM torrent)",
+          "url": "",
+          "sha256": "",
+          "torrent_file_path": "Content/XOScummVMMetadata.zip",
+          "size_bytes": 4186832178,
+          "version": 1,
+          "install_path": "content/metadata/eXoScummVM",
+          "supersedes": []
+        },
         "scummvm-2.5.0": {
           "display_name": "ScummVM 2.5.0",
           "description": "The ScummVM build eXo pins these games to. Downloads automatically with your first game that needs 2.5.0.",
