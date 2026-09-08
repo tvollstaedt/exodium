@@ -9,7 +9,7 @@ import { FieldIcon, IconSoundOn, IconSoundOff, IconZoom, type FieldIconName } fr
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Button } from "./Button";
 import type { Game, GameMetadata } from "../api/tauri";
-import { launchGame, gameEngineInfo, gamePrintingUnavailable, scummvmEngineInfo, scummvmVariants, setScummvmOptions, win9xMultiplayerInfo, dismissWin9xNetworkPrompt, enableWin9xNetwork, mediaUrl } from "../api/tauri";
+import { launchGame, stopGame, gameEngineInfo, gamePrintingUnavailable, scummvmEngineInfo, scummvmVariants, setScummvmOptions, win9xMultiplayerInfo, dismissWin9xNetworkPrompt, enableWin9xNetwork, mediaUrl } from "../api/tauri";
 import type { GameEngineInfo, ScummVmEngineInfo, ScummVmVariants } from "../api/tauri";
 import { createWin9xStatus } from "./win9xStatus";
 import { formatBytes, parseLangEntries, langBadgeClass, performUninstall, performReset } from "../util";
@@ -26,7 +26,7 @@ import { ensureDismissedNotesLoaded, isNoteDismissed, dismissedNotesLoaded, dism
 import { packsByCollection, activeJobs, installedPacks, startContentPackInstall } from "../stores/contentPacks";
 import { ensurePreviewMutedLoaded, previewMuted, setPreviewMuted } from "../stores/playback";
 import { attachCanvasPainter, ensureVideoMirrorKnown, needsCanvasVideo } from "../videoCanvas";
-import { musicJobs, getMusicState, requestTheme, playTheme, withdrawAutoTheme, pauseFor, resumeFrom, pauseForGame, resumeFromGame, togglePlay, currentTrack, wantedTrack, musicPlaying, musicAutoplay, musicUserPaused, playerHidden, ensureMusicAutoplayLoaded, musicUnsupported, MUSIC_QUEUED, describePlayError } from "../stores/music";
+import { musicJobs, getMusicState, requestTheme, playTheme, withdrawAutoTheme, pauseFor, resumeFrom, pauseForGame, resumeFromGame, runningGameIds, togglePlay, currentTrack, wantedTrack, musicPlaying, musicAutoplay, musicUserPaused, playerHidden, ensureMusicAutoplayLoaded, musicUnsupported, MUSIC_QUEUED, describePlayError } from "../stores/music";
 
 interface Props {
   game: Game | null;
@@ -885,21 +885,58 @@ export function GameDetailPanel(props: Props) {
     </Button>
   );
 
+  // A running game's Play button becomes "Stop game", Steam-style. The
+  // `runningGameIds` set is armed at launch and cleared by `game-exited`, so
+  // the button reverts by itself however the game ends.
+  const [stoppingId, setStoppingId] = createSignal<number | null>(null);
+  createEffect(() => {
+    const s = stoppingId();
+    if (s != null && !runningGameIds().has(s)) { setStoppingId(null); }
+  });
+  const handleStop = async (gameId: number) => {
+    if (stoppingId() != null) { return; }
+    setStoppingId(gameId);
+    try {
+      await stopGame(gameId);
+      // The reaper's game-exited clears the running set; the effect above
+      // then puts the button back.
+    } catch (e) {
+      setStoppingId(null);
+      showToast("Couldn't stop the game", "error", { detail: String(e).replace(/^Error:\s*/, "") });
+    }
+  };
+
   // Shared "Play" button - same disabled+spinner UX whether it's the main
   // single-language action or one row of the multi-language variant list.
   // A pending note (emulator or support files still downloading) keeps it
-  // spinning: a launch would only fail with the note's own message.
+  // spinning: a launch would only fail with the note's own message. While
+  // the game runs (and the Starting… beat is over), it is the Stop button.
   const PlayButton = (p: { id: number; class?: string; disabled?: boolean }) => (
-    <Button
-      variant="action"
-      class={p.class}
-      onClick={() => handleLaunch(p.id)}
-      disabled={p.disabled}
-      loading={launchingId() === p.id || note()?.pending === true}
-      loadingLabel={launchingId() === p.id ? "Starting…" : "Preparing…"}
+    <Show
+      when={!runningGameIds().has(p.id) || launchingId() === p.id}
+      fallback={
+        <Button
+          variant="action"
+          class={`${p.class ?? ""} is-stop`}
+          onClick={() => handleStop(p.id)}
+          loading={stoppingId() === p.id}
+          loadingLabel="Stopping…"
+        >
+          ■ Stop game
+        </Button>
+      }
     >
-      ▶ Play
-    </Button>
+      <Button
+        variant="action"
+        class={p.class}
+        onClick={() => handleLaunch(p.id)}
+        disabled={p.disabled}
+        loading={launchingId() === p.id || note()?.pending === true}
+        loadingLabel={launchingId() === p.id ? "Starting…" : "Preparing…"}
+      >
+        ▶ Play
+      </Button>
+    </Show>
   );
 
   // Genre column is semicolon-joined. The hero chip shows the first piece

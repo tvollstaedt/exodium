@@ -3330,6 +3330,16 @@ body {
   min-height: 36px;
 }
 
+/* The Play button while its game runs: same geometry, danger tint. */
+.game-detail-btn.is-stop {
+  background: rgba(233, 69, 96, 0.15);
+  color: var(--danger);
+}
+
+.game-detail-btn.is-stop:hover {
+  background: rgba(233, 69, 96, 0.28);
+}
+
 .game-detail-btn {
   padding: 7px 16px;
   border: none;

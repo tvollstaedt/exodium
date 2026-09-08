@@ -613,6 +613,11 @@ export async function videoPlaybackSupported(): Promise<boolean> {
   return invoke("video_playback_supported");
 }
 
+/** End a running game's emulator (the Play button's "Stop game"). */
+export async function stopGame(id: number): Promise<void> {
+  return invoke("stop_game", { id });
+}
+
 /** True where the frontend must paint video frames itself
  *  (Linux + proprietary NVIDIA, videoCanvas.ts). */
 export async function videoMirrorNeeded(): Promise<boolean> {
