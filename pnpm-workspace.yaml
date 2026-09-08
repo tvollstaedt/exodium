@@ -1,3 +1,8 @@
+# The root is the only package: this file exists for the build-script
+# approvals below, and newer pnpm refuses a workspace file without `packages`.
+packages:
+  - "."
+
 # Build-script approvals. `allowBuilds` is pnpm 11.3+'s scheme; the two lists
 # below are the pnpm 10 spelling the e2e VMs (pinned 10.27) still read.
 # esbuild's postinstall pins its native binary - without it vite won't start.
