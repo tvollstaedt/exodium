@@ -613,6 +613,12 @@ export async function videoPlaybackSupported(): Promise<boolean> {
   return invoke("video_playback_supported");
 }
 
+/** True where the frontend must paint video frames itself
+ *  (Linux + proprietary NVIDIA, videoCanvas.ts). */
+export async function videoMirrorNeeded(): Promise<boolean> {
+  return invoke("video_mirror_needed");
+}
+
 export async function startGameVideo(id: number): Promise<VideoStatus> {
   return invoke("start_game_video", { id });
 }

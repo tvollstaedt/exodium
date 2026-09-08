@@ -29,7 +29,7 @@ use commands::{
     create_playlist, delete_playlist, get_game_playlists, get_playlists, rename_playlist,
     set_playlist_membership,
     get_setup_status, get_torrent_info, init_download_manager,
-    game_printing_unavailable, game_engine_info, init_log_dir, init_resource_dir, install_content_pack, launch_game,
+    game_printing_unavailable, game_engine_info, init_log_dir, init_resource_dir, install_content_pack, launch_game, stop_game,
     list_content_packs,
     get_transfer_stats, open_log_folder, open_manual, scan_installed_games, set_config, set_rate_limits,
     set_seeding_enabled, setup_from_local, setup_import,
@@ -439,7 +439,7 @@ pub fn choose_render_path(nvidia: bool, wayland: bool, accel_known_bad: bool) ->
 /// True when the proprietary NVIDIA driver is loaded. nouveau creates neither
 /// of these, so Intel/AMD/nouveau fall through to the upstream default.
 #[cfg(target_os = "linux")]
-fn nvidia_proprietary_in_use() -> bool {
+pub(crate) fn nvidia_proprietary_in_use() -> bool {
     Path::new("/sys/module/nvidia_drm").exists() || Path::new("/dev/nvidia0").exists()
 }
 
@@ -511,6 +511,25 @@ fn apply_render_path() {
     if path.disable_explicit_sync && std::env::var_os("__NV_DISABLE_EXPLICIT_SYNC").is_none() {
         std::env::set_var("__NV_DISABLE_EXPLICIT_SYNC", "1");
         applied.push("__NV_DISABLE_EXPLICIT_SYNC=1");
+    }
+    // WebKit's zero-copy DMABuf VIDEO sink hands the decoder's frames straight
+    // to the compositor; on the proprietary driver that path delivers green
+    // frames on screen and, a few frames in, nothing at all to drawImage
+    // (measured 2026-09-08, §14). Disabling it makes WebKit fall back to its
+    // GL sink, and every frame - screen, canvas mirror, readback - is correct
+    // again. NVIDIA only: everywhere else the zero-copy sink is the fast path
+    // and works.
+    if nvidia && std::env::var_os("WEBKIT_GST_DMABUF_SINK_DISABLED").is_none() {
+        std::env::set_var("WEBKIT_GST_DMABUF_SINK_DISABLED", "1");
+        applied.push("WEBKIT_GST_DMABUF_SINK_DISABLED=1");
+    }
+    // The canvas mirror keeps the element at near-zero opacity, and WebKit
+    // suspends MUTED "invisible" videos after a few seconds - the mirror then
+    // froze mid-preview (report 2026-09-08). Audible ones are exempt, which
+    // is why it only showed up muted. Same scope as the mirror itself.
+    if nvidia && std::env::var_os("WEBKIT_GST_ALLOW_PLAYBACK_OF_INVISIBLE_VIDEOS").is_none() {
+        std::env::set_var("WEBKIT_GST_ALLOW_PLAYBACK_OF_INVISIBLE_VIDEOS", "1");
+        applied.push("WEBKIT_GST_ALLOW_PLAYBACK_OF_INVISIBLE_VIDEOS=1");
     }
 
     // Logging is not up yet (init_logger needs the app handle), so this goes
@@ -727,6 +746,7 @@ pub fn run() {
             get_game_variants,
             get_genres,
             launch_game,
+            stop_game,
             game_printing_unavailable,
             game_engine_info,
             get_config,
@@ -747,6 +767,7 @@ pub fn run() {
             commands::media::get_video_status,
             commands::media::media_url,
             commands::media::video_playback_supported,
+            commands::media::video_mirror_needed,
             commands::media::cancel_game_video,
             commands::media::start_game_music,
             commands::media::get_music_status,

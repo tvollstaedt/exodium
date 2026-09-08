@@ -3,6 +3,7 @@ import { Portal } from "solid-js/web";
 import { Dialog } from "@ark-ui/solid/dialog";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { previewMuted } from "../stores/playback";
+import { attachCanvasPainter, ensureVideoMirrorKnown, needsCanvasVideo } from "../videoCanvas";
 
 interface LightboxProps {
   images: string[];
@@ -23,6 +24,8 @@ export function Lightbox(props: LightboxProps) {
   const [panY, setPanY] = createSignal(0);
   const [imgLoadError, setImgLoadError] = createSignal(false);
   let stageRef: HTMLDivElement | undefined;
+  let lbVideoRef: HTMLVideoElement | undefined;
+  ensureVideoMirrorKnown();
 
   const resetZoom = () => { setZoomed(false); setPanX(0); setPanY(0); setImgLoadError(false); };
 
@@ -154,15 +157,40 @@ export function Lightbox(props: LightboxProps) {
               {/* Same global preference as the hero preview - opening the
                   lightbox is a bigger view of the same trailer, not a reason
                   to start making noise. Its own controls can override. */}
-              <video
-                class="lightbox-video"
-                src={props.video!}
-                controls
-                autoplay
-                muted={previewMuted()}
-                playsinline
-                onClick={(e) => e.stopPropagation()}
-              />
+              <div class="lightbox-video-box" onClick={(e) => e.stopPropagation()}>
+                {/* Linux paints the frames itself and drops the native
+                    controls (they would sit under the canvas, videoCanvas.ts);
+                    a click on the mirror toggles playback instead. */}
+                <video
+                  ref={(el) => {
+                    lbVideoRef = el;
+                    // Same rule as the hero video: a detached element keeps
+                    // playing audio unless paused on unmount.
+                    onCleanup(() => el.pause());
+                  }}
+                  class={`lightbox-video${needsCanvasVideo() ? " has-canvas" : ""}`}
+                  src={props.video!}
+                  controls={!needsCanvasVideo()}
+                  autoplay
+                  muted={previewMuted()}
+                  playsinline
+                />
+                <Show when={needsCanvasVideo()}>
+                  <canvas
+                    ref={(c) => {
+                      if (lbVideoRef) {
+                        onCleanup(attachCanvasPainter(lbVideoRef, c, "contain"));
+                      }
+                    }}
+                    class="lightbox-video-canvas"
+                    onClick={() => {
+                      const el = lbVideoRef;
+                      if (!el) { return; }
+                      if (el.paused) { void el.play(); } else { el.pause(); }
+                    }}
+                  />
+                </Show>
+              </div>
             </Show>
             <Show when={!isVideoAt(idx()) && srcAt(idx()) && !imgLoadError()} fallback={
               <Show when={!isVideoAt(idx())}>

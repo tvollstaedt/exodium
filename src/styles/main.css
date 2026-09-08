@@ -4510,6 +4510,31 @@ body {
 .game-detail-hero-video.is-visible {
   opacity: 1;
   pointer-events: auto;
+  /* An ANIMATION, not only the transition below: when the element mounts and
+     turns visible in the same style flush (a fetch that just finished starts
+     with no cover beat), a transition has no rendered before-state and is
+     skipped - the video popped in hard. The animation plays on every class
+     add; fading OUT stays with the transition. */
+  animation: heroVideoFadeIn 0.45s ease;
+}
+
+@keyframes heroVideoFadeIn {
+  from { opacity: 0; }
+}
+
+/* Linux: the element's own presentation is untrusted (green/stale frames on
+   NVIDIA, videoCanvas.ts) - the canvas twin above it shows the pixels. The
+   element keeps a NEAR-zero opacity rather than zero, so no engine heuristic
+   reads it as invisible and suspends its playback; it stays the click target. */
+.game-detail-hero-video.has-canvas,
+.game-detail-hero-video.has-canvas.is-visible {
+  opacity: 0.02;
+}
+
+/* The twin fades exactly like the element it mirrors and never takes a
+   click - those belong to the video underneath. */
+.game-detail-hero-video.game-detail-hero-canvas {
+  pointer-events: none;
 }
 
 /* The cover stays mounted AND fully opaque underneath: the video covers it
@@ -4650,6 +4675,32 @@ body {
   border-radius: var(--border-radius);
   background: #000;
   animation: lightboxFadeIn 0.25s ease;
+}
+
+/* Shrink-wraps the video so the Linux canvas twin (videoCanvas.ts) can sit
+   exactly on its box; the element still defines the size and aspect. */
+.lightbox-video-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+/* Same rationale as .game-detail-hero-video.has-canvas: near-zero, not zero. */
+.lightbox-video.has-canvas {
+  opacity: 0.02;
+}
+
+.lightbox-video-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: var(--border-radius);
+  background: #000;
+  cursor: pointer;
 }
 
 @keyframes lightboxFadeIn {

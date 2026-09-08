@@ -25,7 +25,8 @@ import { videos, requestVideo, releaseVideo, setForegroundVideo, getVideoState, 
 import { ensureDismissedNotesLoaded, isNoteDismissed, dismissedNotesLoaded, dismissNote } from "../stores/notes";
 import { packsByCollection, activeJobs, installedPacks, startContentPackInstall } from "../stores/contentPacks";
 import { ensurePreviewMutedLoaded, previewMuted, setPreviewMuted } from "../stores/playback";
-import { musicJobs, getMusicState, requestTheme, playTheme, pauseFor, resumeFrom, pauseForGame, resumeFromGame, togglePlay, currentTrack, wantedTrack, musicPlaying, musicAutoplay, musicUserPaused, playerHidden, ensureMusicAutoplayLoaded, musicUnsupported, MUSIC_QUEUED, describePlayError } from "../stores/music";
+import { attachCanvasPainter, ensureVideoMirrorKnown, needsCanvasVideo } from "../videoCanvas";
+import { musicJobs, getMusicState, requestTheme, playTheme, withdrawAutoTheme, pauseFor, resumeFrom, pauseForGame, resumeFromGame, togglePlay, currentTrack, wantedTrack, musicPlaying, musicAutoplay, musicUserPaused, playerHidden, ensureMusicAutoplayLoaded, musicUnsupported, MUSIC_QUEUED, describePlayError } from "../stores/music";
 
 interface Props {
   game: Game | null;
@@ -547,10 +548,13 @@ export function GameDetailPanel(props: Props) {
   // Same beat as the video. Autoplay on: it becomes the wanted track; off:
   // fetched so the row can offer it.
   ensureMusicAutoplayLoaded();
+  ensureVideoMirrorKnown();
   /** The theme belongs to the GROUP, not the selected variant: extras live in
    *  the EN archive only (every LP row has a NULL gamedata index, §14), so
    *  switching the language chip must neither restart nor re-request it. */
   const themeOwner = () => variants().find((v) => v.language === "EN") ?? props.game ?? selected();
+  /** The theme this panel's autoplay asked for, so it can be withdrawn. */
+  let autoThemeFor: number | null = null;
   createEffect(() => {
     const g = themeOwner();
     const id = g?.id;
@@ -564,10 +568,18 @@ export function GameDetailPanel(props: Props) {
       // hidden and paused flags, which is right for a click on ▶ and wrong
       // here - it made the × last only until the next game was opened.
       const dismissed = musicUserPaused() || playerHidden();
-      if (musicAutoplay() && !dismissed) { playTheme(g, { auto: true }); } else { void requestTheme(id); }
+      if (musicAutoplay() && !dismissed) { playTheme(g, { auto: true }); autoThemeFor = id; } else { void requestTheme(id); }
     }, 400);
     onCleanup(() => clearTimeout(timer));
   });
+  // A theme this panel auto-requested is withdrawn when the panel goes away
+  // before the bytes arrive - or a track nobody is looking at starts out of
+  // nowhere a minute later (report 2026-09-08). A click's track stays.
+  const dropAutoTheme = () => {
+    if (autoThemeFor != null) { withdrawAutoTheme(autoThemeFor); autoThemeFor = null; }
+  };
+  createEffect(() => { if (!props.game) { dropAutoTheme(); } });
+  onCleanup(dropAutoTheme);
   const musicState = () => {
     const id = themeOwner()?.id;
     musicJobs(); // subscribe
@@ -615,6 +627,23 @@ export function GameDetailPanel(props: Props) {
   /** Why the preview did not start (both the unmuted and the muted attempt
    *  rejected, or the element errored): shown in the hero's status line. */
   const [videoError, setVideoError] = createSignal<string | null>(null);
+  /** The row whose media error already got its one silent retry. */
+  let videoRetriedFor: number | null | undefined;
+  /** The preview's sound eases in over the music's fade-out instead of
+   *  cutting across it (report 2026-09-08). One-shot; a new start replaces
+   *  a running ramp. */
+  let videoFadeTimer: number | undefined;
+  const fadeVideoIn = (el: HTMLVideoElement) => {
+    if (videoFadeTimer) { clearInterval(videoFadeTimer); }
+    el.volume = 0;
+    const t0 = performance.now();
+    videoFadeTimer = window.setInterval(() => {
+      const k = Math.min(1, (performance.now() - t0) / 600);
+      el.volume = k;
+      if (k === 1) { clearInterval(videoFadeTimer); videoFadeTimer = undefined; }
+    }, 40);
+  };
+  onCleanup(() => { if (videoFadeTimer) { clearInterval(videoFadeTimer); } });
   onCleanup(() => { if (autoplayTimer) { clearTimeout(autoplayTimer); } });
   createEffect(() => {
     const id = selected()?.id;
@@ -622,6 +651,7 @@ export function GameDetailPanel(props: Props) {
       // Row changed - drop a start still pending for the previous one.
       if (autoplayTimer) { clearTimeout(autoplayTimer); autoplayTimer = undefined; }
       autoplayFor = undefined;
+      videoRetriedFor = undefined;
     }
     if (!videoReady() || id == null || id === autoplayFor) { return; }
     autoplayFor = id;
@@ -639,7 +669,7 @@ export function GameDetailPanel(props: Props) {
       try {
         el.currentTime = 0;
         el.muted = previewMuted();
-        if (el.muted) { resumeFrom("video"); }
+        if (el.muted) { resumeFrom("video"); } else { fadeVideoIn(el); }
         const started = el.play();
         // Older WebKit returns undefined instead of a promise.
         if (started && typeof started.then === "function") {
@@ -677,6 +707,7 @@ export function GameDetailPanel(props: Props) {
     void setPreviewMuted(next);
     if (heroVideoRef) {
       heroVideoRef.muted = next;
+      if (!next) { fadeVideoIn(heroVideoRef); }
       if (!next && heroVideoRef.paused) { void heroVideoRef.play(); }
       // Silent, the preview no longer needs the speakers; with sound, it does.
       if (next) { resumeFrom("video"); } else if (!heroVideoRef.paused) { pauseFor("video"); }
@@ -925,8 +956,15 @@ export function GameDetailPanel(props: Props) {
                 back out - it stays reachable in the lightbox afterwards. */}
             <Show when={videoSrc()}>
               <video
-                ref={heroVideoRef}
-                class={`game-detail-hero-video${videoPlaying() ? " is-visible" : ""}`}
+                ref={(el) => {
+                  heroVideoRef = el;
+                  // A media element removed from the document keeps playing
+                  // its AUDIO by spec; WebKitGTK honors that where macOS
+                  // WebKit pauses it - so the unmount must pause explicitly,
+                  // or a closed panel leaves a ghost soundtrack behind.
+                  onCleanup(() => el.pause());
+                }}
+                class={`game-detail-hero-video${needsCanvasVideo() ? " has-canvas" : ""}${videoPlaying() ? " is-visible" : ""}`}
                 src={videoSrc()!}
                 playsinline
                 preload="auto"
@@ -940,12 +978,49 @@ export function GameDetailPanel(props: Props) {
                 }}
                 onPlay={(e) => { setVideoPlaying(true); setVideoError(null); if (!e.currentTarget.muted) { pauseFor("video"); } }}
                 onError={(e) => {
-                  const err = e.currentTarget.error;
+                  const el = e.currentTarget;
+                  const err = el.error;
                   setVideoPlaying(false);
+                  // One silent retry per row: a valid file failed with
+                  // MediaError 4 exactly once on the NVIDIA path and played
+                  // fine on replay (measured 2026-09-08) - a transient
+                  // pipeline failure is not worth an error line. A source
+                  // that fails again gets named.
+                  const id = selected()?.id;
+                  if (id != null && id !== videoRetriedFor) {
+                    videoRetriedFor = id;
+                    const src = el.src;
+                    window.setTimeout(() => {
+                      // isConnected: the panel may have closed meanwhile, and
+                      // replaying a detached element is audio from nowhere.
+                      if (!heroVideoRef || !heroVideoRef.isConnected || heroVideoRef.src !== src) { return; }
+                      heroVideoRef.load();
+                      if (!heroVideoRef.muted) { fadeVideoIn(heroVideoRef); }
+                      heroVideoRef.play().then(() => setVideoPlaying(true)).catch((e2) => {
+                        setVideoPlaying(false);
+                        const why = describePlayError(e2);
+                        if (why) { setVideoError(why); }
+                      });
+                    }, 800);
+                    return;
+                  }
                   setVideoError(err ? `MediaError ${err.code}${err.message ? `: ${err.message}` : ""}` : "media error");
                 }}
                 onClick={() => { setLightboxStart(0); setLightboxOpen(true); }}
               />
+              {/* Linux: the frames are painted here, not by the element -
+                  WebKitGTK's own video path is untrusted (videoCanvas.ts). */}
+              <Show when={needsCanvasVideo()}>
+                <canvas
+                  ref={(c) => {
+                    if (heroVideoRef) {
+                      onCleanup(attachCanvasPainter(heroVideoRef, c, "cover"));
+                    }
+                  }}
+                  class={`game-detail-hero-video game-detail-hero-canvas${videoPlaying() ? " is-visible" : ""}`}
+                  aria-hidden="true"
+                />
+              </Show>
             </Show>
 
             {/* Status while the bytes are still coming over the torrent. */}
