@@ -751,6 +751,21 @@ music/video" (music.ts `put`, videos.ts `put`), or one offline visit would
 blacklist the game for the rest of the session. A queue that walks past
 `AUTO_SKIP_MAX` duds in a row stops instead of asking the backend forever.
 
+**The hero preview has ONE `<video>` element and one owner,
+`stores/heroVideo.ts`.** The panel mounts the element for its lifetime and
+never sets `src` itself; the controller does (`showPreview`/`clearPreview`),
+and every transition first cancels the previous one - timer, play sequence,
+source. A `<video>` inside a `<Show>` is the bug this replaces: an element
+removed while its `play()` was still pending kept playing detached (audible,
+invisible, unreachable), and the stale ref plus the old promise's handlers
+wrote into the next game's state. The "video" pause reason is claimed and
+released there only, on scheduling an unmuted start (not on the first frame),
+so the theme cannot start inside the cover beat. Its public transitions run
+under `untrack`: they are called from effects and write the very signals they
+read, which otherwise makes the caller re-run itself. A backend `timed out`
+(no peers yet, §14 deadlines) gets one automatic second try per game and
+session in both media stores; the pill names it as such.
+
 **Browse is the jukebox; there is no music tab and no music collection.**
 Every track belongs to a game, so a second list over the same rows would be
 a duplicate, and a pseudo-collection would inherit every `COLLECTION_MAP`

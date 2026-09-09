@@ -27,12 +27,27 @@ export function getVideoState(gameId: number): VideoStatus | undefined {
   return videos()[gameId];
 }
 
+/** A deadline the archive read ran into (§14): no peers yet, typically right
+ *  after install or beside a large download - not a broken video. */
+export const isVideoTimeout = (s: VideoStatus | undefined): boolean =>
+  s?.phase === "error" && /^timed out/i.test(s.error ?? "");
+
+const TIMEOUT_RETRY_MS = 10_000;
+/** One automatic second try per game and session; after that the button. */
+const timeoutRetried = new Set<number>();
+
 function put(gameId: number, status: VideoStatus) {
   // A "none" with a non-null error is provisional (offline, no session):
   // shown once, then forgotten, or the game is blacklisted for the session.
   const provisional = status.phase === "none" && status.error != null;
   setVideos((prev) => ({ ...prev, [gameId]: status }));
   if (provisional) { forgetVideo(gameId); }
+  if (isVideoTimeout(status) && !timeoutRetried.has(gameId)) {
+    timeoutRetried.add(gameId);
+    setTimeout(() => {
+      if (isVideoTimeout(videos()[gameId])) { void requestVideo(gameId); }
+    }, TIMEOUT_RETRY_MS);
+  }
 }
 
 /** Forget the entry, so the next `requestVideo` probes again instead of

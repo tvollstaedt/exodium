@@ -122,11 +122,11 @@ describe("GameDetailPanel", () => {
     dispose(); host.remove();
   });
 
-  /** The preview claims the speakers on play, so it has to give them back the
-   *  moment it stops using them. It used to hold the reason until the video
-   *  ended or the panel closed, and the lightbox pauses the hero on open - so
-   *  looking at a screenshot left the theme silent with nothing playing. */
-  it("hands the speakers back when the preview is paused", async () => {
+  /** The preview claims the speakers as soon as an unmuted start is
+   *  scheduled (the theme would otherwise start inside the cover beat), and
+   *  gives them back the moment it stops using them - a pause, the lightbox
+   *  aside. */
+  it("claims the speakers for an unmuted preview and hands them back when it pauses", async () => {
     vi.useFakeTimers();
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === "get_game_metadata") { return EMPTY_META; }
@@ -143,11 +143,10 @@ describe("GameDetailPanel", () => {
 
     const video = host.ownerDocument.querySelector("video.game-detail-hero-video");
     expect(video, "the hero video element should be mounted").not.toBeNull();
+    expect(music.pauseFor).toHaveBeenCalledWith("video");
+    expect(music.resumeFrom).not.toHaveBeenCalled();
 
     video!.dispatchEvent(new Event("play"));
-    expect(music.pauseFor).toHaveBeenCalledWith("video");
-
-    music.resumeFrom.mockClear();
     video!.dispatchEvent(new Event("pause"));
     expect(music.resumeFrom).toHaveBeenCalledWith("video");
 
@@ -173,13 +172,15 @@ describe("GameDetailPanel", () => {
     const video = host.ownerDocument.querySelector("video.game-detail-hero-video");
     expect(video, "the hero video element should be mounted").not.toBeNull();
 
-    music.pauseFor.mockClear();
+    // The unmuted preview holds the speakers since it was scheduled.
+    expect(music.pauseFor).toHaveBeenCalledWith("video");
     music.resumeFrom.mockClear();
+    video!.dispatchEvent(new Event("play"));
 
-    // Clicking the hero opens the lightbox on entry 0 - the video itself.
+    // Clicking the hero opens the lightbox on entry 0 - the video itself,
+    // which inherits the claim...
     (video as HTMLVideoElement).click();
     await vi.advanceTimersByTimeAsync(0);
-    expect(music.pauseFor).toHaveBeenCalledWith("video");
 
     // ...and only now does the hero's own pause event land.
     video!.dispatchEvent(new Event("pause"));

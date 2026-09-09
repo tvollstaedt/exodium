@@ -1,11 +1,11 @@
-import { createSignal, createEffect, on, Show, For, onCleanup, onMount } from "solid-js";
+import { createSignal, createEffect, on, untrack, Show, For, onCleanup, onMount } from "solid-js";
 import { Portal } from "solid-js/web";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { AutoProgress } from "./ProgressBar";
 import { Lightbox } from "./Lightbox";
 import { ManualViewer } from "./ManualViewer";
 import { GameActionsMenu } from "./GameActionsMenu";
-import { FieldIcon, IconSoundOn, IconSoundOff, IconZoom, type FieldIconName } from "./icons";
+import { FieldIcon, IconPlay, IconSoundOn, IconSoundOff, IconZoom, type FieldIconName } from "./icons";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Button } from "./Button";
 import type { Game, GameMetadata } from "../api/tauri";
@@ -21,12 +21,13 @@ import { loadGameMetadata } from "../stores/metadata";
 import { isOffline } from "../stores/network";
 import { loadVariants } from "../stores/variants";
 import { toggleFavorite, updateGameFavorited } from "../stores/games";
-import { videos, requestVideo, releaseVideo, setForegroundVideo, getVideoState, videoPlaybackUnsupported, PHASE_QUEUED, PHASE_PROBING } from "../stores/videos";
+import { videos, requestVideo, releaseVideo, setForegroundVideo, getVideoState, videoPlaybackUnsupported, PHASE_QUEUED, PHASE_PROBING, isVideoTimeout } from "../stores/videos";
 import { ensureDismissedNotesLoaded, isNoteDismissed, dismissedNotesLoaded, dismissNote } from "../stores/notes";
 import { packsByCollection, activeJobs, installedPacks, startContentPackInstall } from "../stores/contentPacks";
 import { ensurePreviewMutedLoaded, previewMuted, setPreviewMuted } from "../stores/playback";
 import { attachCanvasPainter, ensureVideoMirrorKnown, needsCanvasVideo } from "../videoCanvas";
-import { musicJobs, getMusicState, requestTheme, playTheme, withdrawAutoTheme, pauseFor, resumeFrom, pauseForGame, resumeFromGame, runningGameIds, togglePlay, currentTrack, wantedTrack, musicPlaying, musicAutoplay, musicUserPaused, playerHidden, ensureMusicAutoplayLoaded, musicUnsupported, MUSIC_QUEUED, describePlayError } from "../stores/music";
+import { musicJobs, getMusicState, requestTheme, playTheme, withdrawAutoTheme, pauseForGame, resumeFromGame, runningGameIds, togglePlay, currentTrack, wantedTrack, musicPlaying, musicAutoplay, musicUserPaused, playerHidden, ensureMusicAutoplayLoaded, musicUnsupported, MUSIC_QUEUED, isTimeoutError } from "../stores/music";
+import { attachVideo, showPreview, clearPreview, replayPreview, setPreviewMutedNow, setLightbox, heroPlayingFor, heroGameId, heroError, type VideoPort } from "../stores/heroVideo";
 
 interface Props {
   game: Game | null;
@@ -111,7 +112,8 @@ export function GameDetailPanel(props: Props) {
   // Preview video. Fetching starts on open (see the effect below); this is only
   // the playback state - the video takes over the hero while it plays and hands
   // the cover back when it ends.
-  const [videoPlaying, setVideoPlaying] = createSignal(false);
+  /** The hero shows frames for the selected row (stores/heroVideo owns the element). */
+  const videoPlaying = () => heroPlayingFor(selected()?.id);
   // 13 eXoDOS titles print as their core feature; Staging has no printer
   // emulation yet, so those get a heads-up note. The backend owns the whole
   // answer (conf + engine selection), so no platform logic lives here.
@@ -192,7 +194,36 @@ export function GameDetailPanel(props: Props) {
     if (!n || n.blocking) { return n; }
     return dismissedNotesLoaded() && !isNoteDismissed(n.key) ? n : null;
   };
-  let heroVideoRef: HTMLVideoElement | undefined;
+  /** The one `<video>`: attached to the controller while the panel is open,
+   *  stopped and unloaded when it closes - never left with a source. */
+  let heroEl: HTMLVideoElement | undefined;
+  const attachHero = (el: HTMLVideoElement) => {
+    heroEl = el;
+    const port: VideoPort = {
+      setSrc(url) {
+        if (url) { el.src = url; } else { el.removeAttribute("src"); }
+        el.load();
+      },
+      play: () => el.play(),
+      pause: () => el.pause(),
+      setMuted(m) { el.muted = m; },
+      isMuted: () => el.muted,
+      setVolume(v) { el.volume = v; },
+      reload: () => el.load(),
+      seekStart() { try { el.currentTime = 0; } catch { /* no metadata yet */ } },
+      onPlay(cb) { el.onplay = cb; },
+      onPause(cb) { el.onpause = cb; },
+      onEnded(cb) { el.onended = cb; },
+      onError(cb) {
+        el.onerror = () => {
+          const err = el.error;
+          cb(err ? `MediaError ${err.code}${err.message ? `: ${err.message}` : ""}` : "media error");
+        };
+      },
+    };
+    attachVideo(port);
+    onCleanup(() => { attachVideo(null); heroEl = undefined; });
+  };
   /** The ⋯ button must never open an empty menu; Playlist needs only an id. */
   const hasMoreActions = () => selected()?.id != null;
 
@@ -351,7 +382,6 @@ export function GameDetailPanel(props: Props) {
     setLightboxOpen(false);
     setManualOpen(false);
     setSelectedId(g.id ?? null);
-    setVideoPlaying(false);
     setPrintingUnavailable(false);
     setEngineInfo(null);
     if (g.id != null) {
@@ -599,13 +629,6 @@ export function GameDetailPanel(props: Props) {
     return id != null && currentTrack()?.gameId === id && musicPlaying();
   };
 
-  // A preview with sound is the foreground; the music yields to it and comes
-  // back when it ends. Switching games or closing the panel takes the video
-  // away without an `ended`, so both withdraw the reason too.
-  createEffect(on(() => selected()?.id, () => resumeFrom("video"), { defer: true }));
-  createEffect(() => { if (!props.game) { resumeFrom("video"); } });
-  onCleanup(() => resumeFrom("video"));
-
   // Was a fetch phase observed for the current game? Then the user already
   // spent the wait looking at the cover, and the ready video starts at once.
   // A cache hit reports "ready" as its first state and keeps the cover beat.
@@ -620,118 +643,36 @@ export function GameDetailPanel(props: Props) {
     }
   });
 
-  // Autoplay with sound, muted on rejection. Latched per row: `videoState()`
-  // reads the whole store, which every background poll rewrites.
-  let autoplayTimer: number | undefined;
-  let autoplayFor: number | null | undefined;
-  /** Why the preview did not start (both the unmuted and the muted attempt
-   *  rejected, or the element errored): shown in the hero's status line. */
-  const [videoError, setVideoError] = createSignal<string | null>(null);
-  /** The row whose media error already got its one silent retry. */
-  let videoRetriedFor: number | null | undefined;
-  /** The preview's sound eases in over the music's fade-out instead of
-   *  cutting across it (report 2026-09-08). One-shot; a new start replaces
-   *  a running ramp. */
-  let videoFadeTimer: number | undefined;
-  const fadeVideoIn = (el: HTMLVideoElement) => {
-    if (videoFadeTimer) { clearInterval(videoFadeTimer); }
-    el.volume = 0;
-    const t0 = performance.now();
-    videoFadeTimer = window.setInterval(() => {
-      const k = Math.min(1, (performance.now() - t0) / 600);
-      el.volume = k;
-      if (k === 1) { clearInterval(videoFadeTimer); videoFadeTimer = undefined; }
-    }, 40);
-  };
-  onCleanup(() => { if (videoFadeTimer) { clearInterval(videoFadeTimer); } });
-  onCleanup(() => { if (autoplayTimer) { clearTimeout(autoplayTimer); } });
+  // The hero follows the selected row and its source, nothing else: a row
+  // with a ready video is shown (the controller waits out the cover beat),
+  // anything else clears it. The mute preference is read at start time.
   createEffect(() => {
     const id = selected()?.id;
-    if (id !== autoplayFor) {
-      // Row changed - drop a start still pending for the previous one.
-      if (autoplayTimer) { clearTimeout(autoplayTimer); autoplayTimer = undefined; }
-      autoplayFor = undefined;
-      videoRetriedFor = undefined;
+    const url = videoSrc();
+    if (id == null || !url) {
+      clearPreview();
+      return;
     }
-    if (!videoReady() || id == null || id === autoplayFor) { return; }
-    autoplayFor = id;
-    setVideoError(null);
-    // A preview about to play with sound claims the speakers NOW, not at its
-    // first frame: the theme starts within the cover beat otherwise and is
-    // cut off two seconds later. Every exit below that ends up silent hands
-    // them back.
-    if (!previewMuted()) { pauseFor("video"); }
-    // Two seconds of cover first; a trailer mid-slide reads as an ad.
-    autoplayTimer = window.setTimeout(() => {
-      autoplayTimer = undefined;
-      const el = heroVideoRef;
-      if (!el) { resumeFrom("video"); return; }
-      try {
-        el.currentTime = 0;
-        el.muted = previewMuted();
-        if (el.muted) { resumeFrom("video"); } else { fadeVideoIn(el); }
-        const started = el.play();
-        // Older WebKit returns undefined instead of a promise.
-        if (started && typeof started.then === "function") {
-          started.then(() => setVideoPlaying(true)).catch(() => {
-            // Autoplay with sound needs a user gesture the webview may not
-            // have seen. A silent preview beats no preview - but do NOT write
-            // that back to the preference: the user did not choose it.
-            resumeFrom("video");
-            el.muted = true;
-            const retry = el.play();
-            if (retry && typeof retry.then === "function") {
-              retry.then(() => setVideoPlaying(true)).catch((e) => {
-                setVideoPlaying(false);
-                setVideoError(describePlayError(e));
-              });
-            } else {
-              setVideoPlaying(true);
-            }
-          });
-        } else {
-          setVideoPlaying(true);
-        }
-      } catch (e) {
-        resumeFrom("video");
-        setVideoPlaying(false);
-        setVideoError(describePlayError(e));
-      }
-    }, videoJustFetched() ? 0 : VIDEO_START_DELAY_MS);
+    showPreview(id, url, untrack(() => ({
+      muted: previewMuted(),
+      delayMs: videoJustFetched() ? 0 : VIDEO_START_DELAY_MS,
+    })));
   });
+  /** Why the preview did not start, for this row. */
+  const videoError = () => (heroGameId() === selected()?.id ? heroError() : null);
 
-  /** Toggling mute mid-playback also un-mutes a fallback-muted video, since
-   *  the click is itself the gesture autoplay was missing. */
   const toggleMute = () => {
     const next = !previewMuted();
     void setPreviewMuted(next);
-    if (heroVideoRef) {
-      heroVideoRef.muted = next;
-      if (!next) { fadeVideoIn(heroVideoRef); }
-      if (!next && heroVideoRef.paused) { void heroVideoRef.play(); }
-      // Silent, the preview no longer needs the speakers; with sound, it does.
-      if (next) { resumeFrom("video"); } else if (!heroVideoRef.paused) { pauseFor("video"); }
-    }
+    setPreviewMutedNow(next);
   };
 
-  // The lightbox plays the same preview; the hero steps aside.
-  createEffect(() => {
-    if (lightboxOpen()) { heroVideoRef?.pause(); }
-  });
-
-  // That pause would hand the speakers back to the theme, so the lightbox
-  // holds the reason while it plays the trailer (entry 0) with sound.
+  // The lightbox plays the same preview in its own element; the hero steps
+  // aside, and while the lightbox has the trailer with sound (entry 0) the
+  // speakers stay claimed.
   const lightboxHoldsAudio = () =>
     lightboxOpen() && !!videoSrc() && !previewMuted() && lightboxStart() === 0;
-
-  // Only a hold-to-no-hold transition withdraws the reason: an unconditional
-  // resume would undo the hero's pauseFor the moment the mute preference
-  // changes.
-  createEffect((wasHolding: boolean) => {
-    const holding = lightboxHoldsAudio();
-    if (holding) { pauseFor("video"); } else if (wasHolding) { resumeFrom("video"); }
-    return holding;
-  }, false);
+  createEffect(() => setLightbox(lightboxOpen(), lightboxHoldsAudio()));
 
   const handleManualClick = () => {
     if (metadata()?.manual_path) { setManualOpen(true); }
@@ -991,73 +932,27 @@ export function GameDetailPanel(props: Props) {
 
             {/* The preview takes the cover's place while it runs, then fades
                 back out - it stays reachable in the lightbox afterwards. */}
-            <Show when={videoSrc()}>
-              <video
-                ref={(el) => {
-                  heroVideoRef = el;
-                  // A media element removed from the document keeps playing
-                  // its AUDIO by spec; WebKitGTK honors that where macOS
-                  // WebKit pauses it - so the unmount must pause explicitly,
-                  // or a closed panel leaves a ghost soundtrack behind.
-                  onCleanup(() => el.pause());
-                }}
-                class={`game-detail-hero-video${needsCanvasVideo() ? " has-canvas" : ""}${videoPlaying() ? " is-visible" : ""}`}
-                src={videoSrc()!}
-                playsinline
-                preload="auto"
-                onEnded={() => { setVideoPlaying(false); resumeFrom("video"); }}
-                // A paused preview releases the speakers - unless the
-                // lightbox holds them: this event lands after the effect
-                // above took the reason over.
-                onPause={() => {
-                  setVideoPlaying(false);
-                  if (!lightboxHoldsAudio()) { resumeFrom("video"); }
-                }}
-                onPlay={(e) => { setVideoPlaying(true); setVideoError(null); if (!e.currentTarget.muted) { pauseFor("video"); } }}
-                onError={(e) => {
-                  const el = e.currentTarget;
-                  const err = el.error;
-                  setVideoPlaying(false);
-                  // One silent retry per row: a valid file failed with
-                  // MediaError 4 exactly once on the NVIDIA path and played
-                  // fine on replay (measured 2026-09-08) - a transient
-                  // pipeline failure is not worth an error line. A source
-                  // that fails again gets named.
-                  const id = selected()?.id;
-                  if (id != null && id !== videoRetriedFor) {
-                    videoRetriedFor = id;
-                    const src = el.src;
-                    window.setTimeout(() => {
-                      // isConnected: the panel may have closed meanwhile, and
-                      // replaying a detached element is audio from nowhere.
-                      if (!heroVideoRef || !heroVideoRef.isConnected || heroVideoRef.src !== src) { return; }
-                      heroVideoRef.load();
-                      if (!heroVideoRef.muted) { fadeVideoIn(heroVideoRef); }
-                      heroVideoRef.play().then(() => setVideoPlaying(true)).catch((e2) => {
-                        setVideoPlaying(false);
-                        const why = describePlayError(e2);
-                        if (why) { setVideoError(why); }
-                      });
-                    }, 800);
-                    return;
+            {/* Always mounted, never given a `src` from here: the controller
+                sets and clears it, so no element is ever detached mid-start. */}
+            <video
+              ref={attachHero}
+              class={`game-detail-hero-video${needsCanvasVideo() ? " has-canvas" : ""}${videoPlaying() ? " is-visible" : ""}`}
+              playsinline
+              preload="auto"
+              onClick={() => { setLightboxStart(0); setLightboxOpen(true); }}
+            />
+            {/* Linux: the frames are painted here, not by the element -
+                WebKitGTK's own video path is untrusted (videoCanvas.ts). */}
+            <Show when={needsCanvasVideo()}>
+              <canvas
+                ref={(c) => {
+                  if (heroEl) {
+                    onCleanup(attachCanvasPainter(heroEl, c, "cover"));
                   }
-                  setVideoError(err ? `MediaError ${err.code}${err.message ? `: ${err.message}` : ""}` : "media error");
                 }}
-                onClick={() => { setLightboxStart(0); setLightboxOpen(true); }}
+                class={`game-detail-hero-video game-detail-hero-canvas${videoPlaying() ? " is-visible" : ""}`}
+                aria-hidden="true"
               />
-              {/* Linux: the frames are painted here, not by the element -
-                  WebKitGTK's own video path is untrusted (videoCanvas.ts). */}
-              <Show when={needsCanvasVideo()}>
-                <canvas
-                  ref={(c) => {
-                    if (heroVideoRef) {
-                      onCleanup(attachCanvasPainter(heroVideoRef, c, "cover"));
-                    }
-                  }}
-                  class={`game-detail-hero-video game-detail-hero-canvas${videoPlaying() ? " is-visible" : ""}`}
-                  aria-hidden="true"
-                />
-              </Show>
             </Show>
 
             {/* Status while the bytes are still coming over the torrent. */}
@@ -1089,7 +984,7 @@ export function GameDetailPanel(props: Props) {
                 class="game-detail-video-status game-detail-video-retry"
                 title={videoState()?.error ?? undefined}
                 onClick={() => { const id = selected()?.id; if (id != null) { requestVideo(id); } }}
-              >↻ Video retry</button>
+              >{isVideoTimeout(videoState()) ? "↻ No peers yet - video retry" : "↻ Video retry"}</button>
             </Show>
 
             {/* Nothing about a cover says it can be opened larger. The hint
@@ -1118,13 +1013,8 @@ export function GameDetailPanel(props: Props) {
               <button
                 class="game-detail-video-replay"
                 title="Play the preview again"
-                onClick={() => {
-                  // The click is the gesture autoplay lacked; honour the
-                  // mute button.
-                  if (heroVideoRef) { heroVideoRef.muted = previewMuted(); }
-                  heroVideoRef?.play();
-                }}
-              >▶</button>
+                onClick={() => replayPreview(previewMuted())}
+              ><IconPlay size={22} /></button>
             </Show>
             </div>
 
@@ -1429,7 +1319,7 @@ export function GameDetailPanel(props: Props) {
                         variant="small"
                         title={musicState()?.error ?? undefined}
                         onClick={() => { const id = themeOwner()?.id; if (id != null) { void requestTheme(id); } }}
-                      >↻ Theme retry</Button>
+                      >{isTimeoutError(musicState()) ? "↻ No peers yet - theme retry" : "↻ Theme retry"}</Button>
                     </Show>
                   </div>
                 </div>

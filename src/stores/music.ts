@@ -115,6 +115,17 @@ const keyOf = (gameId: number) => `${KEY_PREFIX}${gameId}`;
  *  here any more gives the slot straight back. */
 const requested = new Set<number>();
 
+/** A deadline the archive read ran into (§14): no peers yet, not a track
+ *  that is broken. */
+export const isTimeoutError = (s: MediaStatus | undefined): boolean =>
+  s?.phase === "error" && /^timed out/i.test(s.error ?? "");
+
+const TIMEOUT_RETRY_MS = 10_000;
+/** One automatic second try per game and session; a queue walks on
+ *  regardless (`reconcile` treats the error as a dud), the panel's own
+ *  probe gets the retry. */
+const timeoutRetried = new Set<number>();
+
 function put(gameId: number, status: MediaStatus) {
   // A "none" with a non-null error is provisional (offline, no session):
   // remembered nowhere, or the game is blacklisted for the session (§14).
@@ -123,6 +134,12 @@ function put(gameId: number, status: MediaStatus) {
   if (!provisional) { noteInIndex(gameId, status.phase); }
   reconcile();
   if (provisional) { forgetJob(gameId); }
+  if (isTimeoutError(status) && !timeoutRetried.has(gameId)) {
+    timeoutRetried.add(gameId);
+    setTimeout(() => {
+      if (isTimeoutError(musicJobs()[gameId])) { void requestTheme(gameId); }
+    }, TIMEOUT_RETRY_MS);
+  }
 }
 
 /** Drop the entry entirely, so the next request probes again rather than
