@@ -3,7 +3,7 @@ import { Portal } from "solid-js/web";
 import type { Game } from "../api/tauri";
 import { GameSettingsDialog } from "./GameSettingsDialog";
 import { PlaylistMenu } from "./PlaylistMenu";
-import { performReset, performUninstall, installedGroupIds } from "../util";
+import { performReset, performUninstall, installedGroupIds, parseLangEntries } from "../util";
 
 export interface GameActionsMenuProps {
   game: Game;
@@ -64,8 +64,18 @@ export function GameActionsMenu(props: GameActionsMenuProps) {
   const id = () => props.game.id;
   const canSettings = () => props.game.installed && id() != null;
   const canReset = () => props.game.installed && id() != null;
+  /** A merged card is backed by its English row, which can be the one
+   *  version NOT installed - the entry has to follow the group, or the
+   *  German-only installs have no uninstall at all. Reset and Settings stay
+   *  on the backing row: both act on exactly one variant. */
+  const groupHasFiles = () =>
+    parseLangEntries(props.game).some((e) => e.state > 0);
   const canUninstall = () =>
-    !props.downloading && (props.game.installed || props.game.in_library) && id() != null;
+    !props.downloading
+    && id() != null
+    && (props.uninstallsGroup
+      ? groupHasFiles()
+      : props.game.installed || props.game.in_library);
   const canPlaylist = () => id() != null;
 
   const dismiss = () => {
