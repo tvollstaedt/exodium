@@ -20,6 +20,47 @@ use crate::commands::paths::bundled_torrent_path;
 use crate::models::Game;
 use crate::torrent::TorrentIndex;
 
+/// eXo's own answer: `util/<lang>/multilanguage.txt` from the pack's
+/// metadata archive, bundled as `metadata/multilanguage_<lang>.txt`. Its
+/// entries are launcher-bat names without the extension, which is exactly
+/// the `%GameName%` eXo's installer looks up before it unpacks the English
+/// archive into the language folder. Empty when a pack ships no list.
+fn exo_list(lang_dir: &str) -> &'static [String] {
+    static CACHE: OnceLock<Mutex<HashMap<String, &'static Vec<String>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let Ok(mut map) = cache.lock() else { return &[] };
+    let lang = lang_dir.trim_start_matches('!').to_string();
+    if let Some(hit) = map.get(&lang) {
+        return hit.as_slice();
+    }
+    let entries = crate::commands::paths::bundled_metadata_dir()
+        .ok()
+        .and_then(|dir| std::fs::read_to_string(dir.join(format!("multilanguage_{lang}.txt"))).ok())
+        .map(|text| {
+            text.lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                .map(str::to_ascii_lowercase)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if entries.is_empty() {
+        log::warn!("lp_overlay: no bundled multilanguage list for '{lang}' - falling back to size");
+    }
+    let leaked: &'static Vec<String> = Box::leak(Box::new(entries));
+    map.insert(lang, leaked);
+    leaked.as_slice()
+}
+
+/// The launcher bat's name without the extension - eXo's `%GameName%`.
+fn bat_stem(application_path: Option<&str>) -> Option<String> {
+    let leaf = application_path?.replace('/', "\\");
+    let leaf = leaf.rsplit('\\').next()?;
+    leaf.strip_suffix(".bat")
+        .or_else(|| leaf.strip_suffix(".BAT"))
+        .map(str::to_ascii_lowercase)
+}
+
 /// A patch is a tiny fraction of its English counterpart AND small in
 /// absolute terms. The ratio alone is not enough: the English row is often
 /// the CD release while the translation is the complete FLOPPY release, and
@@ -69,14 +110,27 @@ pub fn base_for(conn: &rusqlite::Connection, game: &Game) -> Option<Game> {
         return None;
     }
     let source = game.torrent_source.as_deref()?;
-    collection_def(source).filter(|c| c.lang_dir.is_some())?;
+    let lang_dir = collection_def(source).and_then(|c| c.lang_dir)?;
     let shortcode = game.shortcode.as_deref()?;
-    let lp_size = archive_size(source, game.game_torrent_index?)?;
 
     let base = crate::db::queries::fetch_game_variants(conn, shortcode, source)
         .ok()?
         .into_iter()
         .find(|g| g.language == "EN")?;
+
+    // eXo's list decides where it exists. It is the same lookup eXo's own
+    // installer does, so a variant is treated exactly as the pack intends.
+    let list = exo_list(lang_dir);
+    if !list.is_empty() {
+        let stem = bat_stem(game.application_path.as_deref())?;
+        return list.contains(&stem).then_some(base);
+    }
+
+    // No list for this pack: fall back to size. Measured against eXo's own
+    // answer this misses cases but invents none, which is the safe direction
+    // - a missed patch fails at launch and can be re-fetched, an invented one
+    // pulls a multi-hundred-megabyte download nobody asked for.
+    let lp_size = archive_size(source, game.game_torrent_index?)?;
     let base_size = archive_size(base.torrent_source.as_deref()?, base.game_torrent_index?)?;
     if lp_size > OVERLAY_MAX_BYTES
         || base_size == 0
@@ -275,6 +329,37 @@ mod tests {
             requires_base: false,
             installed_with: None,
         }
+    }
+
+    /// eXo's list is keyed on the launcher bat's name, which is what the
+    /// row's `application_path` ends in.
+    #[test]
+    fn the_bat_stem_is_exos_game_name() {
+        assert_eq!(
+            bat_stem(Some("eXo\\eXoDOS\\!dos\\!german\\AlienOdy\\Alien Odyssey (1995).bat")),
+            Some("alien odyssey (1995)".to_string())
+        );
+        // Forward slashes and upper case survive; anything else is not a bat.
+        assert_eq!(
+            bat_stem(Some("eXo/eXoDOS/!spanish/Alien Odyssey (1995).BAT")),
+            Some("alien odyssey (1995)".to_string())
+        );
+        assert_eq!(bat_stem(Some("eXo/eXoDOS/!dos/SQ5/dosbox.conf")), None);
+        assert_eq!(bat_stem(None), None);
+    }
+
+    /// The bundled lists must stay readable and keyed the way eXo writes
+    /// them: one bat name per line, comments with '#'.
+    #[test]
+    fn the_bundled_lists_name_alien_odyssey() {
+        let german = exo_list("!german");
+        if german.is_empty() {
+            return; // not running from the repo
+        }
+        assert!(german.iter().any(|n| n == "alien odyssey (1995)"));
+        // The measured false positives of the old size rule are NOT in it.
+        assert!(!german.iter().any(|n| n.starts_with("king's quest vi")));
+        assert!(!exo_list("!spanish").is_empty());
     }
 
     /// Both halves of the rule, against measured catalogue rows. The ratio

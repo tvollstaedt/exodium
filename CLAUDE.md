@@ -457,19 +457,21 @@ it says nothing at all. What DOES measure a suspected mount failure is running
 the Z:\ prompt - the error appears in the emulator window.
 
 **Some localized variants are PATCHES, not games, and install the English
-one as a dependency.** About 140 GLP/SLP/PLP archives hold only localized
-config and launcher files (Alien Odyssey DE: `GAME.CFG` + `run.bat`, whose
-`call game` lives in the English tree) and expect eXo's installer to have
-laid the English game down first. `commands::lp_overlay` detects that from
-the BUNDLED TORRENTS, and the test is BOTH a tiny ratio (under 5% of the
-English archive) AND a small absolute size (64 KB). The ratio ALONE is not a
-classifier: the English row is often the CD release while the translation is
-the complete FLOPPY release, and 57 rows - German King's Quest VI at 24.9 MB
-against a 710 MB English CD - read as 3% and are whole games. Guessing wrong
-costs an unwanted multi-hundred-megabyte download and a mixed-language
-install, so anything that could hold a game is treated as one.
-`games.download_size` cannot be used at all: it is archive plus the shared
-English GameData (§6).
+one as a dependency.** They hold only localized config and launcher files
+(Alien Odyssey DE: `GAME.CFG` + `run.bat`, whose `call game` lives in the
+English tree). eXo's own installer handles them by unpacking the ENGLISH
+archive into the language folder and the localized one over it, gated on a
+list it ships: `util/<lang>/multilanguage.txt`. That list is bundled as
+`metadata/multilanguage_<lang>.txt` and is what `commands::lp_overlay` reads,
+keyed on the launcher bat's name (eXo's `%GameName%`, the leaf of
+`application_path`). Do NOT go back to guessing by archive size: measured
+against eXo's answer, a size rule found 67 of 228 Spanish cases and 70 of 92
+German ones, and a ratio without an absolute cap also invented 57 false ones
+(German King's Quest VI, 24.9 MB of floppy release against a 710 MB English
+CD, reads as 3%). The size rule survives only as the fallback for a pack
+with no bundled list, because it invents nothing. `games.download_size` is
+useless for this either way: it is archive plus the shared English
+GameData (§6).
 The English row is then queued as its own library entry
 (`dependency-download-started`, so the frontend tracks it - the poll is what
 extracts), and the extraction copies the English tree into the LP directory
