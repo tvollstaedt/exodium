@@ -266,3 +266,14 @@
 - Verworfen: die Basis am `in_library`-Flag zu erkennen - ein selbst gestarteter englischer Download sieht genauso aus und wurde mit abgebrochen, samt Meldung "wurde mit abgebrochen, weil die Uebersetzung sie braucht", was das Gegenteil des Geschehenen war.
 - Grund: Review-Befunde. Die Vorabpruefung verlangte fuer spanisches Phantasmagoria 2 rund 20 GB frei, wo 3,2 GB geholt werden. Und wer die englische Fassung deinstallierte, waehrend eine Uebersetzung auf sie wartete, bekam einen Wartezustand ueber Neustarts hinweg, aus dem nur Abbrechen herausfuehrte.
 - Gotcha: `dependents_of(.., false)` liefert die wartenden (in_library, nicht installiert), `true` die installierten - beide Aufrufe stehen jetzt in `uninstall_game` bzw. `get_game_variants`.
+
+## 2026-09-11 - Kopiert wird erst, wenn die englische Extraktion FERTIG ist
+- Entscheidung: `base_ready` = `installed` UND Verzeichnis vorhanden; Installation und Zuruecksetzen warten darauf. Das Verzeichnis allein gilt nicht mehr.
+- Verworfen: auf `base_game_dir` allein zu gatern - genau das war der Fehler.
+- Grund: Im Feld gemessen bei deutschem Alien Odyssey: das CD-Abbild lag mit 43.861.320 statt 558.480.048 Bytes in der deutschen Kopie, weil das englische Archiv noch entpackt wurde. Das Spiel startete in ein schwarzes Fenster und beendete sich nach zehn Sekunden mit Status 0.
+- Gotcha: Ein Verzeichnis entsteht mit der ERSTEN Datei, die der Entpacker schreibt. Bestehende halbe Kopien heilen nicht von selbst - "Zuruecksetzen" im Panel ist der Weg.
+
+## 2026-09-11 - Der cd-Zielpfad wird ohne Ruecksicht auf Gross- und Kleinschreibung aufgeloest
+- Entscheidung: `resolve_ignoring_case` sucht bei einem Fehlschlag den Eintrag des Elternverzeichnisses, der sich nur in der Schreibweise unterscheidet.
+- Grund: CI auf ubuntu-22.04 fiel ueber `lp_probe_follows_the_mount_target_into_a_subdirectory`; macOS und Windows bestanden ihn, weil ihre Dateisysteme die Schreibweise ignorieren. eXo schreibt `cd odyssey`, der Ordner heisst `ODYSSEY` - unter Linux verwarf die Pruefung deshalb funktionierende Konfigurationen und fiel auf den Ersatz-Autoexec zurueck.
+- Gotcha: Der Test dazu haelt auf allen Plattformen, weil er das Ergebnis auf `is_dir()` prueft statt auf die Schreibweise.

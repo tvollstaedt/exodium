@@ -644,6 +644,21 @@ fn build_lp_overlay(
 
 /// Can the EN autoexec run against the LP dir through the overlay? Simulates
 /// the cd chain and requires the launch command's program to exist there.
+/// A path as the emulator would see it: exact match first, then the one
+/// entry of the parent whose name differs only in case.
+fn resolve_ignoring_case(path: &std::path::Path) -> Option<PathBuf> {
+    if path.exists() {
+        return Some(path.to_path_buf());
+    }
+    let name = path.file_name()?.to_string_lossy().to_ascii_lowercase();
+    let parent = path.parent()?;
+    std::fs::read_dir(parent)
+        .ok()?
+        .filter_map(Result::ok)
+        .find(|e| e.file_name().to_string_lossy().to_ascii_lowercase() == name)
+        .map(|e| e.path())
+}
+
 fn lp_autoexec_compatible(
     en_conf: &str,
     shortcode: &str,
@@ -697,13 +712,17 @@ fn lp_autoexec_compatible(
                 }
                 (Some(dir), _) => dir.join(target),
             };
-            if !next.exists() {
+            // DOS is case-insensitive and so is the emulator's view of the
+            // mounted host directory; the conf says `cd odyssey` where the
+            // folder is `ODYSSEY`. Only Linux cares, and there this check
+            // rejected perfectly good confs.
+            let Some(next) = resolve_ignoring_case(&next) else {
                 log::info!(
                     "LP launch: EN autoexec cd target '{}' missing under LP layout",
                     target
                 );
                 return false;
-            }
+            };
             cwd = Some(next);
             continue;
         }
@@ -2035,6 +2054,19 @@ pub(crate) fn spawn_emulator_and_track(
 
 #[cfg(test)]
 mod tests {
+
+    /// The emulator's view of a mounted host directory is case-insensitive,
+    /// so the probe's must be too. Only Linux can fail this - which is where
+    /// CI caught it - but the assertion holds on every platform.
+    #[test]
+    fn a_cd_target_resolves_regardless_of_case() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(tmp.path().join("ODYSSEY")).unwrap();
+        let found = resolve_ignoring_case(&tmp.path().join("odyssey"))
+            .expect("a differently-cased directory must still resolve");
+        assert!(found.is_dir(), "{}", found.display());
+        assert!(resolve_ignoring_case(&tmp.path().join("nothing-here")).is_none());
+    }
 
     /// eXo mounts the game directory as C: and then cds into a subdirectory
     /// of it. Reading the mount is what makes that `cd` resolvable; without

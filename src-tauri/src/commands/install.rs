@@ -570,10 +570,11 @@ pub async fn get_download_progress(
                         // one, so the wait is bounded by that transfer.
                         let base_src = match base.as_ref() {
                             Some(b) => {
-                                match crate::commands::lp_overlay::base_game_dir(
-                                    &manager.torrent_root(),
-                                    b,
-                                ) {
+                                let root = manager.torrent_root();
+                                match crate::commands::lp_overlay::base_ready(&root, b)
+                                    .then(|| crate::commands::lp_overlay::base_game_dir(&root, b))
+                                    .flatten()
+                                {
                                     Some(dir) => Some((dir, b.shortcode.clone(), b.id)),
                                     None => {
                                         let _ = std::fs::remove_file(&lock_path);

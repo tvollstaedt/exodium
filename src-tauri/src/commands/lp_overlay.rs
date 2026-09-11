@@ -183,7 +183,17 @@ pub fn archive_size_of(game: &Game) -> Option<u64> {
     archive_size(game.torrent_source.as_deref()?, game.game_torrent_index?)
 }
 
-/// The English game directory for a base row, if it has been extracted.
+/// The English tree is ready to be copied FROM: its row is marked installed
+/// AND the directory is there. The directory alone is not enough - it exists
+/// from the first file the extractor writes, and copying then yields a
+/// truncated tree (measured: a 558 MB CD image copied at 43 MB, the game
+/// booted to a black screen).
+pub fn base_ready(torrent_root: &Path, base: &Game) -> bool {
+    base.installed && base_game_dir(torrent_root, base).is_some()
+}
+
+/// The English game directory for a base row, if it is on disk. Says nothing
+/// about whether the extraction has finished - use `base_ready` for that.
 pub fn base_game_dir(torrent_root: &Path, base: &Game) -> Option<std::path::PathBuf> {
     let rel = collection_rel_game_dir(
         base.torrent_source.as_deref()?,
@@ -279,6 +289,90 @@ fn copy_file(src: &Path, dst: &Path) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn sample_game() -> Game {
+        Game {
+            id: None,
+            title: "Alien Odyssey".into(),
+            sort_title: None,
+            platform: "MS-DOS".into(),
+            developer: None,
+            publisher: None,
+            release_date: None,
+            year: None,
+            genre: None,
+            series: None,
+            play_mode: None,
+            rating: None,
+            rating_votes: None,
+            description: None,
+            notes: None,
+            source: None,
+            application_path: None,
+            dosbox_conf: None,
+            status: None,
+            region: None,
+            max_players: None,
+            language: "EN".into(),
+            shortcode: None,
+            available_languages: None,
+            variant_titles: None,
+            torrent_source: None,
+            in_library: false,
+            installed: false,
+            favorited: false,
+            game_torrent_index: None,
+            gamedata_torrent_index: None,
+            download_size: None,
+            has_thumbnail: false,
+            dosbox_variant: None,
+            thumbnail_key: None,
+            manual_path: None,
+            last_played: None,
+            music_file: None,
+            requires_base: false,
+            installed_with: None,
+        }
+    }
+
+    /// A localized row is never a base, and a base with no installed
+    /// translations has no dependents.
+    #[test]
+    fn dependents_are_only_installed_overlays_of_the_same_group() {
+        let tmp = tempfile::tempdir().unwrap();
+        let conn = rusqlite::Connection::open(tmp.path().join("t.db")).unwrap();
+        crate::db::schema::create_tables(&conn).unwrap();
+        let mut row = Game {
+            id: Some(1),
+            shortcode: Some("AlienOdy".into()),
+            torrent_source: Some("eXoDOS".into()),
+            ..sample_game()
+        };
+        assert!(dependents_of(&conn, &row, true).is_empty());
+        row.language = "DE".into();
+        assert!(dependents_of(&conn, &row, true).is_empty());
+    }
+
+    /// The directory alone is not proof: the extractor creates it with its
+    /// first file. Copying from it then yields a truncated tree.
+    #[test]
+    fn a_base_is_only_ready_once_its_row_says_installed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut base = Game {
+            id: Some(1),
+            language: "EN".into(),
+            shortcode: Some("AlienOdy".into()),
+            torrent_source: Some("eXoDOS".into()),
+            application_path: Some("eXo\\eXoDOS\\!dos\\AlienOdy\\x.bat".into()),
+            installed: false,
+            ..sample_game()
+        };
+        std::fs::create_dir_all(tmp.path().join("eXo/eXoDOS/AlienOdy")).unwrap();
+        assert!(base_game_dir(tmp.path(), &base).is_some(), "directory is there");
+        assert!(!base_ready(tmp.path(), &base), "but the extraction is not done");
+        base.installed = true;
+        assert!(base_ready(tmp.path(), &base));
+    }
 
     /// A row whose launcher path is missing must not be silently declared a
     /// standalone game - the size rule still gets its turn.

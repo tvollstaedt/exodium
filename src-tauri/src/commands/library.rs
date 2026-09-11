@@ -1324,7 +1324,9 @@ pub async fn reset_game_data(db_state: State<'_, DbState>, id: i64) -> Result<St
         let conn = db_state.lock()?;
         match crate::commands::lp_overlay::base_for(&conn, &game) {
             Some(base) => {
-                let dir = crate::commands::lp_overlay::base_game_dir(&torrent_root, &base)
+                let dir = crate::commands::lp_overlay::base_ready(&torrent_root, &base)
+                    .then(|| crate::commands::lp_overlay::base_game_dir(&torrent_root, &base))
+                    .flatten()
                     .ok_or_else(|| {
                         format!(
                             "'{}' is a translation of '{}', which is not installed any more - reinstall the English version first.",

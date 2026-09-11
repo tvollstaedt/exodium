@@ -488,7 +488,10 @@ game writes into it, and hardlinks would write them into the English
 install instead. `reset_game_data` lays the same tree down again - without
 it a reset leaves the two-file patch directory marked installed - and both
 paths hold the BASE row's `game_op_lock` as well as their own, or an
-uninstall of the English game races the copy.
+uninstall of the English game races the copy. Both gate on `base_ready`,
+which is `installed` AND the directory: the directory alone exists from the
+extractor's first file, and copying then yields a truncated tree (measured
+in the field: a 558 MB CD image copied at 43 MB, the game booted black).
 
 The relationship is DERIVED, never stored (`base_for` / `dependents_of`): up
 to three translations share one base, so a column on either row could not
