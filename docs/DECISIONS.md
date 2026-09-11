@@ -254,3 +254,9 @@
 - Verworfen: immer beides zu addieren (war der Zustand: 476 MB fuer einen 1.168-Byte-Patch neben einer bereits installierten englischen Fassung) und das `installed`-Flag zu befragen (kann ohne Verzeichnis gesetzt sein).
 - Grund: Report "DE zeigt volle Groesse, obwohl EN installiert ist". Gemessen nach der Aenderung: EN 476,2 MB, DE 17,9 MB (Patch plus gemeinsame GameData), ES 474,1 MB.
 - Gotcha: Die 17,9 MB sind fast vollstaendig die gemeinsamen Extras aus dem englischen Archiv (§6), der Patch selbst ist gut ein Kilobyte.
+
+## 2026-09-11 - Waehrend Zuruecksetzen und Deinstallieren steht die Leiste still
+- Entscheidung: `busyOp()` fasst beide zerstoerenden Vorgaenge zusammen; die ganze Aktionsleiste weicht einer Zeile mit Spinner, und die Sprach-Chips sind gesperrt. Vorher tat das nur die Deinstallation, ein Zuruecksetzen ersetzte lediglich den ⋯-Knopf.
+- Verworfen: nur die einzelnen Knoepfe deaktivieren - die Leiste haette ihre Hoehe behalten, aber Spielen, Handbuch und Herunterladen waeren weiter sichtbar gewesen und das Umschalten der Fassung haette den Zustand versteckt.
+- Grund: Report waehrend eines echten Zuruecksetzens: es dauert Minuten (1,1 GB Sicherung loeschen, 474 MB auspacken) und in der Zeit war alles andere anklickbar.
+- Gotcha: Das Backend serialisiert ohnehin ueber `game_op_lock`, ein zweiter Klick waere also nicht gefaehrlich, aber er sah aus wie ein haengendes Programm.

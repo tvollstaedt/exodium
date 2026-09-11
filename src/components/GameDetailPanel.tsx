@@ -261,6 +261,17 @@ export function GameDetailPanel(props: Props) {
   const [launchingId, setLaunchingId] = createSignal<number | null>(null);
   const [uninstallingId, setUninstallingId] = createSignal<number | null>(null);
   const [resettingId, setResettingId] = createSignal<number | null>(null);
+  /** A destructive operation is running on this row. Both take minutes on a
+   *  large game - a reset of a language variant deletes its backup and
+   *  unpacks the archive again - and neither tolerates a second action on
+   *  the same files, so the whole bar stands down while one runs. */
+  const busyOp = (): "Uninstalling" | "Resetting" | null => {
+    const id = selected()?.id;
+    if (id == null) { return null; }
+    if (uninstallingId() === id) { return "Uninstalling"; }
+    if (resettingId() === id) { return "Resetting"; }
+    return null;
+  };
   // The panel describes exactly ONE row; the chip switcher picks it (§12).
   const [selectedId, setSelectedId] = createSignal<number | null>(null);
   let launchTimer: number | undefined;
@@ -1162,8 +1173,11 @@ export function GameDetailPanel(props: Props) {
                       <button
                         class={`variant-chip${selected()?.id === vId() ? " is-selected" : ""}`}
                         data-testid="variant-chip"
+                        // Switching rows mid-operation would hide the busy
+                        // state and offer actions on files being rewritten.
+                        disabled={busyOp() != null}
                         onClick={() => { if (vId() != null) { setSelectedId(vId()!); } }}
-                        title={languageName(variant.language)}
+                        title={busyOp() != null ? `${busyOp()}…` : languageName(variant.language)}
                       >
                         <span class={`badge badge-lang ${langBadgeClass(state())}`}>
                           {variant.language}
@@ -1193,10 +1207,10 @@ export function GameDetailPanel(props: Props) {
                 open the German manual without a second code path. */}
             <Show when={selected()}>
               {(sel) => (
-                <Show when={uninstallingId() !== sel().id} fallback={
+                <Show when={busyOp() == null} fallback={
                   <div class="game-detail-actions fade-swap">
                     <div class="game-detail-btn btn-uninstalling">
-                      <span class="btn-spinner" /> Uninstalling…
+                      <span class="btn-spinner" /> {busyOp()}…
                     </div>
                   </div>
                 }>
@@ -1257,22 +1271,16 @@ export function GameDetailPanel(props: Props) {
                         compete with three that are rarely wanted and two of
                         which destroy data. Reset still confirms in place, so
                         the menu cannot turn a stray click into a wipe. */}
-                    <Show when={resettingId() !== sel().id} fallback={
-                      <div class="game-detail-btn btn-uninstalling">
-                        <span class="btn-spinner" /> Resetting…
-                      </div>
-                    }>
-                      <Show when={hasMoreActions()}>
-                        <Button
-                          variant="action"
-                          class="btn-more"
-                          title="More actions"
-                          aria-label="More actions"
-                          onClick={openMoreMenu}
-                        >
-                          ⋯
-                        </Button>
-                      </Show>
+                    <Show when={hasMoreActions()}>
+                      <Button
+                        variant="action"
+                        class="btn-more"
+                        title="More actions"
+                        aria-label="More actions"
+                        onClick={openMoreMenu}
+                      >
+                        ⋯
+                      </Button>
                     </Show>
                   </div>
                 </Show>

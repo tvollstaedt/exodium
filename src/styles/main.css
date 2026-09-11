@@ -3540,7 +3540,12 @@ body {
   transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
 
-.variant-chip:hover {
+.variant-chip:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.variant-chip:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.06);
 }
 
