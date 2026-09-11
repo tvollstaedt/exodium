@@ -5,7 +5,7 @@
 <h1 align="center">Exodium</h1>
 
 <p align="center">
-  A cross-platform launcher for the <a href="https://www.retro-exo.com/exodos.html">eXoDOS</a> collections. Browse, download, and play DOS, Windows 3.x, and Windows 9x games on Linux, macOS, and Windows.
+  A cross-platform launcher for the <a href="https://www.retro-exo.com/exodos.html">eXoDOS</a> collections. Browse, download, and play DOS, Windows 3.x, Windows 9x, and ScummVM games on Linux, macOS, and Windows.
 </p>
 
 <p align="center">
@@ -31,7 +31,7 @@
    [all downloads](https://github.com/tvollstaedt/exodium/releases/latest)
 2. **Install and launch** - see [Installation](#installation) for platform notes.
 3. **Pick a games folder** in the setup wizard - this is where downloaded games are stored.
-4. **Browse and play** - hit download on any game; it streams from the eXoDOS torrent and launches in the bundled DOSBox Staging.
+4. **Browse and play** - hit download on any game; it streams from the eXo torrents and launches in the emulator it was configured for.
 
 ---
 
@@ -50,19 +50,21 @@ eXoDOS ships with a Windows-only LaunchBox frontend and requires downloading the
 ### Available now
 - ✅ Browse the eXoDOS catalogue alongside the German, Spanish, and Polish language packs
 - ✅ The Windows collections as well: eXoWin3x runs under DOSBox Staging, eXoWin9x boots a real Windows 95/98
+- ✅ eXoScummVM too - each game runs on the ScummVM build eXo pinned it to, fetched for you, with a picker for edition, sound hardware, and subtitles
 - ✅ Stream individual games on demand - no full collection download required
 - ✅ Launch via bundled DOSBox Staging with no external dependencies
 - ✅ MT-32 and General MIDI music - Roland ROMs and the SoundCanvas soundfont are fetched from the collection and eXoDOS' DOSBox-ECE configs are translated for DOSBox Staging automatically
 - ✅ Game manuals and per-game media galleries - box scans, in-game screenshots, and ads
 - ✅ Preview videos read straight out of the collection's archives, without downloading the game first
+- ✅ A theme player - a game's theme streams from its archive when you open its details, and Browse doubles as a jukebox over the games that have one
 - ✅ Per-game settings - CRT shader, fullscreen, CPU cycles, and a free-form DOSBox config editor
 - ✅ Favorites, playlists, and a personal library of installed games
 
-> **Compatibility note:** DOS and Windows 3.x games run under the bundled DOSBox Staging. A handful are tuned for DOSBox-ECE specials such as 3dfx Voodoo settings or the GunStick light gun and may look or behave slightly differently than under the original Windows eXoDOS setup. Windows 9x games need DOSBox-X or 86Box, which Exodium fetches with your first Windows 9x download.
+> **Compatibility note:** DOS and Windows 3.x games run under the bundled DOSBox Staging, ScummVM games under the pinned ScummVM build Exodium fetches for them. A handful are tuned for DOSBox-ECE specials such as 3dfx Voodoo settings or the GunStick light gun and may look or behave slightly differently than under the original Windows eXoDOS setup. Windows 9x games need DOSBox-X or 86Box, which Exodium fetches with your first Windows 9x download.
 
 ### Planned
 - 🔲 Pausing and resuming downloads, and a history of what has been fetched
-- 🔲 Support for other eXo collections - eXoScummVM, eXoDREAMM, eXoIF, and future releases
+- 🔲 Support for other eXo collections - eXoDREAMM, eXoIF, and future releases
 
 ---
 
