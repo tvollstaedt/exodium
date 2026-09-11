@@ -165,7 +165,15 @@ pub async fn toggle_favorite(state: State<'_, DbState>, id: i64) -> Result<bool,
 #[tauri::command]
 pub async fn get_game(state: State<'_, DbState>, id: i64) -> Result<Option<Game>, String> {
     let conn = state.lock()?;
-    queries::fetch_game_by_id(&conn, id).map_err(|e| e.to_string())
+    let game = queries::fetch_game_by_id(&conn, id).map_err(|e| e.to_string())?;
+    // The panel re-reads its row through here after every library change, and
+    // the language chips live on `available_languages`. `fetch_game_by_id` is
+    // also the hot path of the 1 Hz download poll, so the group query is
+    // attached HERE rather than inside it.
+    let Some(game) = game else { return Ok(None) };
+    let mut rows = vec![game];
+    queries::attach_language_maps(&conn, &mut rows).map_err(|e| e.to_string())?;
+    Ok(rows.pop())
 }
 
 

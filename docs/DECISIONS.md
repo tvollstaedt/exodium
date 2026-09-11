@@ -223,3 +223,9 @@
 - Verworfen: den ganzen Infobereich pauschal animieren (bewegt bei jedem Chip-Klick sichtbar viel); fehlende Felder mit Gedankenstrich rendern (`field()` faellt ohnehin auf die englische Zeile zurueck, die Felder waren nie die Ursache).
 - Grund: Headless gemessen, Panelbreite 460px: Aktionsleiste bei EN auf 522px, nach dem alten Wechsel auf 625px - 103px Sprung, verursacht vom Aus- und Wiedereinhaengen der Galerie samt 10px `gap`. Nach der Aenderung 522px in beiden Zustaenden.
 - Gotcha: Die Beschreibungslaenge bleibt bewusst ungefixt - sie steht in `.game-detail-scroll` mit eigenem `overflow`, verschiebt also weder Leiste noch Galerie. Der eingeklappte Slot kostet dauerhaft 8px `gap`, aber konstant.
+
+## 2026-09-11 - `get_game` liefert die Sprachliste mit, `fetch_game_by_id` bleibt schlank
+- Entscheidung: Der Tauri-Befehl `get_game` haengt `attach_language_maps` an die einzelne Zeile; `fetch_game_by_id` selbst bleibt unveraendert.
+- Verworfen: die Gruppenabfrage in `fetch_game_by_id` - das ist der heisse Pfad des 1-Hz-Download-Polls und mehrerer Launch-Schritte, die die Sprachliste nie brauchen.
+- Grund: Nach jeder Bibliotheksaenderung liest das Panel seine Zeile ueber `get_game` neu (`Library.tsx`). Ohne `available_languages` ist `isMultiLang()` falsch, und die Sprach-Chips samt Download-Optionen der anderen Fassungen verschwanden - gemeldet als "nach Uninstall keine Sprachdownload-Optionen mehr".
+- Gotcha: Der Fehler ist aelter als die Overlay-Abhaengigkeit und trat bei jeder Deinstallation auf; er faellt erst auf, seit eine zweite Zeile derselben Gruppe interessant ist. Test `a_single_row_still_gets_its_groups_language_map`.

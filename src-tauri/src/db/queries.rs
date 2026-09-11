@@ -366,7 +366,7 @@ pub fn fetch_games_filtered(
 
 /// `available_languages` ("EN:0,DE:2"; 0 available, 1 in_library, 2
 /// installed; EN first) for multi-variant groups, None otherwise.
-fn attach_language_maps(conn: &Connection, games: &mut [Game]) -> DbResult<()> {
+pub(crate) fn attach_language_maps(conn: &Connection, games: &mut [Game]) -> DbResult<()> {
     let shortcodes: Vec<&str> = games
         .iter()
         .filter_map(|g| g.shortcode.as_deref())
@@ -797,6 +797,32 @@ mod tests {
     use super::*;
     use crate::models::Game;
     use pretty_assertions::assert_eq;
+
+    /// A single row fetched by id carries the group's language map once the
+    /// caller attaches it. The panel re-reads its row this way after every
+    /// library change; without the map its language chips disappear.
+    #[test]
+    fn a_single_row_still_gets_its_groups_language_map() {
+        let conn = open_test_db();
+        let mut en = make_game("The 11th Hour");
+        en.shortcode = Some("11thHour".to_string());
+        let mut de = make_game("Die 11. Stunde");
+        de.language = "DE".to_string();
+        de.shortcode = Some("11thHour".to_string());
+        insert_games(&conn, &[en, de]).unwrap();
+        conn.execute(
+            "UPDATE games SET installed = 1, torrent_source = 'eXoDOS_GLP' WHERE language = 'DE'", [],
+        ).unwrap();
+        conn.execute("UPDATE games SET torrent_source = 'eXoDOS' WHERE language = 'EN'", []).unwrap();
+
+        let id: i64 = conn
+            .query_row("SELECT id FROM games WHERE language = 'EN'", [], |r| r.get(0))
+            .unwrap();
+        let mut rows = vec![fetch_game_by_id(&conn, id).unwrap().unwrap()];
+        assert_eq!(rows[0].available_languages, None, "the plain fetch stays cheap");
+        attach_language_maps(&conn, &mut rows).unwrap();
+        assert_eq!(rows[0].available_languages.as_deref(), Some("EN:0,DE:2"));
+    }
 
     fn open_test_db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
