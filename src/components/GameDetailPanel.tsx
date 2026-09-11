@@ -27,7 +27,7 @@ import { packsByCollection, activeJobs, installedPacks, startContentPackInstall 
 import { ensurePreviewMutedLoaded, previewMuted, setPreviewMuted } from "../stores/playback";
 import { attachCanvasPainter, ensureVideoMirrorKnown, needsCanvasVideo } from "../videoCanvas";
 import { musicJobs, getMusicState, requestTheme, playTheme, withdrawAutoTheme, pauseForGame, resumeFromGame, runningGameIds, togglePlay, currentTrack, wantedTrack, musicPlaying, musicAutoplay, musicUserPaused, playerHidden, ensureMusicAutoplayLoaded, musicUnsupported, MUSIC_QUEUED, isTimeoutError } from "../stores/music";
-import { attachVideo, showPreview, clearPreview, replayPreview, setPreviewMutedNow, setLightbox, heroPlayingFor, heroGameId, heroError, type VideoPort } from "../stores/heroVideo";
+import { attachVideo, showPreview, clearPreview, replayPreview, setPreviewMutedNow, setLightbox, stopForGame, heroPlayingFor, heroGameId, heroError, type VideoPort } from "../stores/heroVideo";
 
 interface Props {
   game: Game | null;
@@ -463,12 +463,17 @@ export function GameDetailPanel(props: Props) {
     lastMetaKey = key;
     if (!sameGame) {
       setMetadata(null);
-      setBrokenImages(new Set<number>());
     }
+    // Indices into the PREVIOUS variant's image list mean nothing for this
+    // one; carrying them hid unrelated screenshots.
+    setBrokenImages(new Set<number>());
     // A new variant gets a fresh chance at its cover; the walk itself
     // resets in the keyed effect above.
     setImgError(false);
-    if (!sameGame) { setMetadataLoading(true); }
+    // Busy for the whole load even when the gallery stays up: the manual
+    // path belongs to the variant, so the button must not act on the
+    // previous one's file while the new one is still being read.
+    setMetadataLoading(true);
     loadGameMetadata(v.torrent_source, v.title, v.shortcode ?? null, row?.manual_path ?? null)
       .then((m) => { if (selected()?.id === v.id) { setMetadata(m); } })
       .finally(() => setMetadataLoading(false));
@@ -705,8 +710,9 @@ export function GameDetailPanel(props: Props) {
   // The lightbox plays the same preview in its own element; the hero steps
   // aside, and while the lightbox has the trailer with sound (entry 0) the
   // speakers stay claimed.
+  const [lightboxOnVideo, setLightboxOnVideo] = createSignal(false);
   const lightboxHoldsAudio = () =>
-    lightboxOpen() && !!videoSrc() && !previewMuted() && lightboxStart() === 0;
+    lightboxOpen() && !!videoSrc() && !previewMuted() && lightboxOnVideo();
   createEffect(() => setLightbox(lightboxOpen(), lightboxHoldsAudio()));
 
   const handleManualClick = () => {
@@ -736,6 +742,8 @@ export function GameDetailPanel(props: Props) {
     // The game has its own sound; the theme waits and `game-exited` brings it
     // back - only if this launch is what paused it.
     pauseForGame(gameId);
+      // The preview competes with the game for screen and speakers.
+      stopForGame();
     try {
       await launchGame(gameId);
       // DOSBox spawns immediately but the window can take 1-3s to paint
@@ -1284,12 +1292,16 @@ export function GameDetailPanel(props: Props) {
                 <Show when={descriptionSource()}>
                   {(src) => (
                     <>
-                      <div class={`game-detail-collapse${src().fallbackFrom ? " is-open" : ""}`}>
+                      <div
+                        class={`game-detail-collapse${src().fallbackFrom ? " is-open" : ""}`}
+                        aria-hidden={src().fallbackFrom ? undefined : "true"}
+                      >
                         <div>
                           <div class="game-detail-fallback-note">
-                            English description - the catalogue has no{" "}
-                            {languageName(src().fallbackFrom ?? selected()?.language ?? null)} text
-                            for this game.
+                            <Show when={src().fallbackFrom}>
+                              English description - the catalogue has no{" "}
+                              {languageName(src().fallbackFrom)} text for this game.
+                            </Show>
                           </div>
                         </div>
                       </div>
@@ -1422,6 +1434,7 @@ export function GameDetailPanel(props: Props) {
           })()}
           startIndex={lightboxStart()}
           open={lightboxOpen()}
+          onVideoShown={setLightboxOnVideo}
           onClose={() => setLightboxOpen(false)}
         />
         <ManualViewer

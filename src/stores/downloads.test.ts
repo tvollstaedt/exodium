@@ -218,7 +218,7 @@ describe("downloads state machine", () => {
         }
         return Promise.resolve(makeProgress({ progress: 0.01 }));
       }
-      if (cmd === "cancel_download") { return Promise.resolve("Cancelled"); }
+      if (cmd === "cancel_download") { return Promise.resolve([]); }
       return Promise.resolve(null);
     });
 

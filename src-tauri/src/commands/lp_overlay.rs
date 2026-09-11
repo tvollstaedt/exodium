@@ -20,10 +20,18 @@ use crate::commands::paths::bundled_torrent_path;
 use crate::models::Game;
 use crate::torrent::TorrentIndex;
 
-/// An archive this small next to its English counterpart carries no game.
-/// Measured across the three packs: overlays sit near 0.1%, the smallest
-/// genuine standalone translation near 30%.
+/// A patch is a tiny fraction of its English counterpart AND small in
+/// absolute terms. The ratio alone is not enough: the English row is often
+/// the CD release while the translation is the complete FLOPPY release, and
+/// 57 such rows - German King's Quest VI at 24.9 MB against a 710 MB English
+/// CD - read as 3% and are whole games. Anything that could hold a game has
+/// to be treated as one, because the cost of guessing wrong is an unwanted
+/// multi-hundred-megabyte download plus a mixed-up install.
 const OVERLAY_RATIO: f64 = 0.05;
+/// No DOS game fits in this, and every measured patch is far below it
+/// (Alien Odyssey German: 1,168 bytes). 142 of the 225 rows the ratio alone
+/// accepted survive it; the rest are handled as ordinary games.
+const OVERLAY_MAX_BYTES: u64 = 64 * 1024;
 
 /// Archive sizes of one collection, indexed like the torrent's file list.
 type Sizes = Option<&'static Vec<u64>>;
@@ -70,7 +78,10 @@ pub fn base_for(conn: &rusqlite::Connection, game: &Game) -> Option<Game> {
         .into_iter()
         .find(|g| g.language == "EN")?;
     let base_size = archive_size(base.torrent_source.as_deref()?, base.game_torrent_index?)?;
-    if base_size == 0 || (lp_size as f64) >= (base_size as f64) * OVERLAY_RATIO {
+    if lp_size > OVERLAY_MAX_BYTES
+        || base_size == 0
+        || (lp_size as f64) >= (base_size as f64) * OVERLAY_RATIO
+    {
         return None;
     }
     Some(base)
@@ -266,15 +277,22 @@ mod tests {
         }
     }
 
-    /// The catalogue's own numbers: Alien Odyssey's German archive is a
-    /// patch, its Spanish one a full translation. Guards the ratio against
-    /// a future catalogue where both would read the same.
+    /// Both halves of the rule, against measured catalogue rows. The ratio
+    /// alone accepts a complete floppy translation whose English sibling is
+    /// the CD release; the absolute cap is what rejects it.
     #[test]
-    fn the_ratio_separates_a_patch_from_a_full_translation() {
-        let overlay = 1_168f64 / 476_214_170f64;
-        let standalone = 474_082_680f64 / 476_214_170f64;
-        assert!(overlay < OVERLAY_RATIO, "{overlay}");
-        assert!(standalone >= OVERLAY_RATIO, "{standalone}");
+    fn a_patch_needs_both_a_tiny_ratio_and_a_tiny_size() {
+        let is_overlay = |lp: u64, base: u64| {
+            lp <= OVERLAY_MAX_BYTES && (lp as f64) < (base as f64) * OVERLAY_RATIO
+        };
+        // Alien Odyssey: German patch, Spanish full translation.
+        assert!(is_overlay(1_168, 476_214_170));
+        assert!(!is_overlay(474_082_680, 476_214_170));
+        // King's Quest VI German floppy (24.9 MB) against the English CD
+        // (710 MB): 3.5% of it, and a whole game.
+        assert!(!is_overlay(24_900_000, 710_000_000));
+        // Death Knights of Krynn German, the smallest of the false ones.
+        assert!(!is_overlay(1_350_000, 48_000_000));
     }
 
     #[test]

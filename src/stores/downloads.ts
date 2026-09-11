@@ -388,18 +388,20 @@ export async function cancelGameDownload(gameId: number) {
     // Cancelling an English base takes the translations that were waiting on
     // it: without it they can never install, and their card would sit at
     // "Waiting for…" forever.
-    const alsoCancelled = await cancelDownload(gameId);
+    // Older backends answered with a string; only a real list is acted on.
+    const answer = await cancelDownload(gameId);
+    const alsoCancelled = Array.isArray(answer) ? answer : [];
     // Second sweep after the slow backend cancel; a newer download owns
     // the entry.
     if (!trackers.has(gameId)) {
       clearState(gameId);
     }
-    for (const dep of alsoCancelled ?? []) {
+    for (const dep of alsoCancelled) {
       const dt = trackers.get(dep.id);
       if (dt) { endTracker(dt); }
       clearState(dep.id);
     }
-    if (alsoCancelled?.length) {
+    if (alsoCancelled.length > 0) {
       showToast(
         alsoCancelled.length === 1
           ? `${alsoCancelled[0].title} was cancelled too - it needs the English version`

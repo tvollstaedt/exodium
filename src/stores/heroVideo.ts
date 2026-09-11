@@ -185,6 +185,22 @@ export function clearPreview() {
   });
 }
 
+/** Something else took the screen and the speakers - a game launched. The
+ *  preview stops and stays stopped: a trailer resuming by itself when the
+ *  emulator quits is not what anyone asked for. The replay button brings it
+ *  back. */
+export function stopForGame() {
+  untrack(() => {
+    if (phase() === "idle") { return; }
+    clearTimer();
+    clearFade();
+    seq++;
+    port?.pause();
+    if (phase() !== "ended" && phase() !== "failed") { setPhase("paused"); }
+    releaseSpeakers();
+  });
+}
+
 /** The replay button: a gesture, so it starts with the real preference. */
 export function replayPreview(muted: boolean) {
   untrack(() => {
@@ -265,6 +281,9 @@ export function attachVideo(next: VideoPort | null) {
     if (phase() === "idle") { return; }
     setPhase("playing");
     setError(null);
+    // Frames are flowing, so the transient failure is spent: the next one
+    // for this game gets its reload again.
+    errorRetriedFor = null;
     if (!port?.isMuted()) { claimSpeakers(); }
   });
   port.onPause(() => {

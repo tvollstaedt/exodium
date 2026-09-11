@@ -10,6 +10,8 @@ interface LightboxProps {
   /** Preview video, shown as the first entry when present. Already an asset
    *  URL - unlike `images`, which are filesystem paths. */
   video?: string | null;
+  /** The trailer is the entry currently shown (it autoplays with sound). */
+  onVideoShown?: (shown: boolean) => void;
   startIndex: number;
   open: boolean;
   onClose: () => void;
@@ -30,6 +32,9 @@ export function Lightbox(props: LightboxProps) {
   const resetZoom = () => { setZoomed(false); setPanX(0); setPanY(0); setImgLoadError(false); };
 
   const hasVideo = () => !!props.video;
+  // The hero's speaker claim follows what is on screen: the user walks to
+  // and from the trailer with the arrows and the strip.
+  createEffect(() => props.onVideoShown?.(isVideoAt(idx())));
   const videoIndex = 0;
   const isVideoAt = (i: number) => hasVideo() && i === videoIndex;
   const imageAt = (i: number) => props.images[hasVideo() ? i - 1 : i];

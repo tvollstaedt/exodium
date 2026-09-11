@@ -457,13 +457,19 @@ it says nothing at all. What DOES measure a suspected mount failure is running
 the Z:\ prompt - the error appears in the emulator window.
 
 **Some localized variants are PATCHES, not games, and install the English
-one as a dependency.** 91 GLP, 130 SLP and 4 PLP archives hold only
-localized config and launcher files (Alien Odyssey DE: `GAME.CFG` +
-`run.bat`, whose `call game` lives in the English tree) and expect eXo's
-installer to have laid the English game down first. `commands::lp_overlay`
-detects that from the BUNDLED TORRENTS - an archive under 5% of its English
-counterpart - never from `games.download_size`, which is archive plus the
-shared English GameData (§6) and so cannot be taken apart by any threshold.
+one as a dependency.** About 140 GLP/SLP/PLP archives hold only localized
+config and launcher files (Alien Odyssey DE: `GAME.CFG` + `run.bat`, whose
+`call game` lives in the English tree) and expect eXo's installer to have
+laid the English game down first. `commands::lp_overlay` detects that from
+the BUNDLED TORRENTS, and the test is BOTH a tiny ratio (under 5% of the
+English archive) AND a small absolute size (64 KB). The ratio ALONE is not a
+classifier: the English row is often the CD release while the translation is
+the complete FLOPPY release, and 57 rows - German King's Quest VI at 24.9 MB
+against a 710 MB English CD - read as 3% and are whole games. Guessing wrong
+costs an unwanted multi-hundred-megabyte download and a mixed-language
+install, so anything that could hold a game is treated as one.
+`games.download_size` cannot be used at all: it is archive plus the shared
+English GameData (§6).
 The English row is then queued as its own library entry
 (`dependency-download-started`, so the frontend tracks it - the poll is what
 extracts), and the extraction copies the English tree into the LP directory

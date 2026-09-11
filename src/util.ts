@@ -33,8 +33,11 @@ export async function installedGroupIds(
   const ids = rows
     .filter((r) => r.id != null && (r.installed || r.in_library))
     .map((r) => r.id!);
+  // Only rows that actually have files. The card is backed by the English
+  // row, which for a German-only install is the one version NOT installed -
+  // uninstalling it would delete its archive and force a re-download.
   if (ids.length === 0) { return [self]; }
-  return [self, ...ids.filter((id) => id !== self)];
+  return ids.includes(self) ? [self, ...ids.filter((id) => id !== self)] : ids;
 }
 
 export async function performUninstall(

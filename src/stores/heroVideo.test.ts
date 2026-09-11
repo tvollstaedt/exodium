@@ -151,6 +151,22 @@ describe("hero video controller", () => {
     expect(hero.heroPhase()).toBe("idle");
   });
 
+  it("a launching game stops the preview and hands the speakers back", async () => {
+    const { hero, music, port } = await boot();
+    hero.showPreview(1, "v1", { muted: false, delayMs: 0 });
+    await settle(0);
+    port.started();
+    expect(music.pauseReasons()).toEqual(["video"]);
+    hero.stopForGame();
+    expect(port.pauseCalls).toBe(1);
+    expect(hero.heroPhase()).toBe("paused");
+    expect(music.pauseReasons()).toEqual([]);
+    // It stays stopped: the emulator quitting must not restart a trailer.
+    port.paused();
+    await settle(100);
+    expect(port.playCalls).toBe(1);
+  });
+
   it("the lightbox pauses the hero and keeps the claim only while it has the trailer with sound", async () => {
     const { hero, music, port } = await boot();
     hero.showPreview(1, "v1", { muted: false, delayMs: 0 });

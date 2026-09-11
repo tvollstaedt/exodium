@@ -596,7 +596,13 @@ pub async fn get_download_progress(
                                 let (z, d) = (zip_path.clone(), extract_dir.clone());
                                 let base_src = base_src.clone();
                                 tauri::async_runtime::spawn_blocking(move || {
-                                    if let Some((src, Some(sc), _)) = base_src {
+                                    if let Some((src, sc, _)) = base_src {
+                                        let Some(sc) = sc else {
+                                            log::error!("English base has no shortcode - refusing to unpack the patch onto nothing");
+                                            return Err(ExtractError::Other(
+                                                "the English base has no shortcode".into(),
+                                            ));
+                                        };
                                         let dst = d.join(&sc);
                                         if let Err(e) =
                                             crate::commands::lp_overlay::clone_tree(&src, &dst)
@@ -796,12 +802,14 @@ pub async fn cancel_download(
         queries::clear_in_library(&conn, id).map_err(|e| e.to_string())?;
     }
 
-    // Overlay variants waiting on this English base can never finish without
-    // it, and would sit at "waiting" forever. They go with it, and the
-    // frontend is told so it can drop their cards.
-    let dependents = cancel_dependents(&db_state, &torrent_state, id).await?;
+    // Both directions. Overlay variants waiting on this English base can
+    // never finish without it and would sit at "waiting" forever; and a base
+    // that only came along for a cancelled translation has lost its reason
+    // to keep transferring.
+    let mut cancelled = cancel_dependents(&db_state, &torrent_state, id).await?;
+    cancelled.extend(cancel_orphaned_base(&db_state, &torrent_state, id).await?);
 
-    Ok(dependents)
+    Ok(cancelled)
 }
 
 /// Cancel every not-yet-installed overlay variant that was waiting on this
@@ -846,6 +854,57 @@ async fn cancel_dependents(
         cancelled.push(CancelledDependent { id, title });
     }
     Ok(cancelled)
+}
+
+/// The English base a cancelled translation pulled in, when no other
+/// translation still wants it and it is not installed in its own right.
+async fn cancel_orphaned_base(
+    db_state: &State<'_, DbState>,
+    torrent_state: &TorrentState,
+    variant_id: i64,
+) -> Result<Vec<CancelledDependent>, String> {
+    let base = {
+        let conn = db_state.lock()?;
+        let Some(variant) = queries::fetch_game_by_id(&conn, variant_id).map_err(|e| e.to_string())?
+        else {
+            return Ok(Vec::new());
+        };
+        let Some(base) = crate::commands::lp_overlay::base_for(&conn, &variant) else {
+            return Ok(Vec::new());
+        };
+        // Installed, or still wanted by another translation: leave it be.
+        if base.installed
+            || !base.in_library
+            || !crate::commands::lp_overlay::dependents_of(&conn, &base, false).is_empty()
+            || !crate::commands::lp_overlay::dependents_of(&conn, &base, true).is_empty()
+        {
+            return Ok(Vec::new());
+        }
+        base
+    };
+    let (Some(id), Some(idx), Some(source)) = (
+        base.id,
+        base.game_torrent_index,
+        base.torrent_source.clone(),
+    ) else {
+        return Ok(Vec::new());
+    };
+    let manager = {
+        let guard = torrent_state.0.read().await;
+        guard.get(&source).cloned()
+    };
+    if let Some(manager) = manager {
+        manager.deselect_file(idx as usize).await;
+    }
+    {
+        let conn = db_state.lock()?;
+        queries::clear_in_library(&conn, id).map_err(|e| e.to_string())?;
+    }
+    log::info!(
+        "cancel_download: also cancelled '{}', which only came along for the translation",
+        base.title
+    );
+    Ok(vec![CancelledDependent { id, title: base.title }])
 }
 
 /// A localized variant cancelled along with the English game it needed.
@@ -1126,16 +1185,24 @@ pub(crate) fn extract_game_zip(zip_path: &std::path::Path, dest: &std::path::Pat
     archive.extract(dest)?;
     log::info!("Extracted: {} -> {}", zip_path.display(), dest.display());
 
-    // Restore `!save/<shortcode>` from beside the game dir or one level up
-    // (the legacy shared location).
+    // Restore `!save/<shortcode>` from beside the game dir. The legacy shared
+    // location one level up is probed ONLY for a row that lives there itself:
+    // uninstall backs up the WHOLE game directory (§5), so for a localized
+    // variant that fallback copies a complete foreign-language game over the
+    // one just extracted (Spanish Alien Odyssey came up in German).
     if let Some(sc) = shortcode {
         let game_dir = dest.join(&sc);
-        // Search for !save in dest and parent directories
-        let save_candidates = [
-            dest.join(format!("!save/{}", sc)),
-            dest.parent().map(|p| p.join(format!("!save/{}", sc))).unwrap_or_default(),
-        ];
-        for save_dir in &save_candidates {
+        let in_lang_dir = dest
+            .file_name()
+            .map(|n| n.to_string_lossy().starts_with('!'))
+            .unwrap_or(false);
+        let mut save_candidates = vec![dest.join(format!("!save/{}", sc))];
+        if !in_lang_dir {
+            if let Some(parent) = dest.parent() {
+                save_candidates.push(parent.join(format!("!save/{}", sc)));
+            }
+        }
+        for save_dir in save_candidates.iter() {
             if save_dir.exists() && game_dir.exists() {
                 log::info!("Restoring saves from {}", save_dir.display());
                 if let Err(e) = copy_dir_recursive(save_dir, &game_dir) {
@@ -1153,6 +1220,46 @@ pub(crate) fn extract_game_zip(zip_path: &std::path::Path, dest: &std::path::Pat
 mod tests {
     use super::*;
     use std::fs;
+
+    /// The shared `!save/<sc>` holds a COMPLETE game directory (§5), so a
+    /// localized variant must never restore from it: Spanish Alien Odyssey
+    /// came up in German because the English backup landed on top of it.
+    #[test]
+    fn a_localized_variant_never_restores_the_shared_save_backup() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        // The shared backup of the English game, one level up.
+        fs::create_dir_all(root.join("!save/AlienOdy/ODYSSEY")).unwrap();
+        fs::write(root.join("!save/AlienOdy/ODYSSEY/GAME.CFG"), b"Language 0").unwrap();
+
+        let zip_path = root.join("lp.zip");
+        {
+            let file = fs::File::create(&zip_path).unwrap();
+            let mut w = zip::ZipWriter::new(file);
+            let opts: zip::write::FileOptions<'_, ()> = zip::write::FileOptions::default();
+            w.add_directory("AlienOdy/ODYSSEY/", opts).unwrap();
+            w.start_file("AlienOdy/ODYSSEY/GAME.CFG", opts).unwrap();
+            use std::io::Write;
+            w.write_all(b"Language 4").unwrap();
+            w.finish().unwrap();
+        }
+
+        let lang_dest = root.join("!spanish");
+        fs::create_dir_all(&lang_dest).unwrap();
+        extract_game_zip(&zip_path, &lang_dest).unwrap();
+        assert_eq!(
+            fs::read(lang_dest.join("AlienOdy/ODYSSEY/GAME.CFG")).unwrap(),
+            b"Language 4",
+            "the shared English backup must not reach a localized install"
+        );
+
+        // The English row itself still restores from its own shared backup.
+        extract_game_zip(&zip_path, root).unwrap();
+        assert_eq!(
+            fs::read(root.join("AlienOdy/ODYSSEY/GAME.CFG")).unwrap(),
+            b"Language 0"
+        );
+    }
 
     #[test]
     fn placeholder_and_fragment_read_as_not_an_archive() {

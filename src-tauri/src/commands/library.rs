@@ -1280,7 +1280,7 @@ pub async fn reset_game_data(db_state: State<'_, DbState>, id: i64) -> Result<St
                 let dir = crate::commands::lp_overlay::base_game_dir(&torrent_root, &base)
                     .ok_or_else(|| {
                         format!(
-                            "'{}' is a translation of '{}', which is not installed any more -                              reinstall the English version first.",
+                            "'{}' is a translation of '{}', which is not installed any more - reinstall the English version first.",
                             title, base.title
                         )
                     })?;
