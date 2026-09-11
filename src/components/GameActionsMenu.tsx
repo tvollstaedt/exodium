@@ -3,7 +3,7 @@ import { Portal } from "solid-js/web";
 import type { Game } from "../api/tauri";
 import { GameSettingsDialog } from "./GameSettingsDialog";
 import { PlaylistMenu } from "./PlaylistMenu";
-import { performReset, performUninstall } from "../util";
+import { performReset, performUninstall, installedGroupIds } from "../util";
 
 export interface GameActionsMenuProps {
   game: Game;
@@ -49,6 +49,9 @@ export function GameActionsMenu(props: GameActionsMenuProps) {
   // uninstall keeps saves while reset throws them away.
   const [confirmReset, setConfirmReset] = createSignal(false);
   const [confirmUninstall, setConfirmUninstall] = createSignal(false);
+  /** How many rows the confirm would remove. Only the grid's group uninstall
+   *  can exceed one; the panel names a single variant. */
+  const [uninstallCount, setUninstallCount] = createSignal(1);
 
   createEffect(() => {
     if (phase() === "done") { props.onClose(); }
@@ -130,7 +133,14 @@ export function GameActionsMenu(props: GameActionsMenuProps) {
                 class="context-menu-item danger"
                 onMouseDown={(e) => e.stopPropagation()}
                 onClick={() => {
-                  if (!confirmUninstall()) { setConfirmUninstall(true); return; }
+                  if (!confirmUninstall()) {
+                    setConfirmUninstall(true);
+                    if (props.onUninstall) {
+                      void installedGroupIds(props.game).then((ids) =>
+                        setUninstallCount(Math.max(1, ids.length)));
+                    }
+                    return;
+                  }
                   const gameId = id()!;
                   const run = props.onUninstall
                     ?? ((gid: number) => void performUninstall(
@@ -138,7 +148,11 @@ export function GameActionsMenu(props: GameActionsMenuProps) {
                   setPhase("done");
                   run(gameId);
                 }}
-              >{confirmUninstall() ? "Confirm uninstall?" : "Uninstall"}</button>
+              >{confirmUninstall()
+                ? (uninstallCount() > 1
+                    ? `Confirm uninstall (${uninstallCount()} versions)?`
+                    : "Confirm uninstall?")
+                : "Uninstall"}</button>
             </Show>
           </div>
         </Portal>

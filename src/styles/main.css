@@ -3011,7 +3011,8 @@ body {
 
 /* Honor reduced-motion - plain color swap, no bursts. */
 @media (prefers-reduced-motion: reduce) {
-  .game-detail-note-slot {
+  .game-detail-note-slot,
+  .game-detail-collapse {
     transition: none;
   }
   .favorite-btn.animating.is-favorited .fav-star,
@@ -3239,7 +3240,8 @@ body {
    The slot animates its own height instead: `grid-template-rows` between
    0fr and 1fr is the one way to transition to a content-derived height.
    The child needs `min-height: 0` or it refuses to shrink. */
-.game-detail-note-slot {
+.game-detail-note-slot,
+.game-detail-collapse {
   display: grid;
   grid-template-rows: 0fr;
   opacity: 0;
@@ -3247,7 +3249,8 @@ body {
               opacity 0.16s ease;
 }
 
-.game-detail-note-slot.is-open {
+.game-detail-note-slot.is-open,
+.game-detail-collapse.is-open {
   grid-template-rows: 1fr;
   opacity: 1;
 }
@@ -3256,6 +3259,14 @@ body {
    element cannot be laid out shorter than those, so the note itself would
    keep 20px in the collapsed state. */
 .game-detail-note-clip {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* The description's language hint comes and goes with the chip. It sits in
+   the scroll region, so only its own height moves - but that is the line the
+   eye is reading. */
+.game-detail-collapse > * {
   min-height: 0;
   overflow: hidden;
 }

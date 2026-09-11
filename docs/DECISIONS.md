@@ -211,3 +211,15 @@
 - Verworfen: Platz fuer die Notiz dauerhaft freihalten (leerer Kasten) und die Notiz anderswo anzeigen (inkonsistent zu den uebrigen Notizen).
 - Grund: Die Abhaengigkeits-Notiz verschwindet beim Klick auf Download, und der Rumpf sprang. Und ein abgebrochener Basis-Download liess die Uebersetzung dauerhaft auf "Extracting" stehen, obwohl sie auf Dateien wartete, die nie kommen.
 - Gotcha: Der geclippte Kasten darf weder Padding noch Rahmen tragen - ein border-box-Element wird nie kuerzer als beide zusammen, die Notiz behielt so 20px im eingeklappten Zustand (gemessen headless). Deshalb die Zwischenebene `.game-detail-note-clip`.
+
+## 2026-09-11 - Abhaengigkeit wird abgeleitet, das Raster deinstalliert die Gruppe
+- Entscheidung: Die Beziehung zwischen Overlay-Variante und englischer Basis wird aus den gebuendelten Torrents abgeleitet (`base_for`, neu `dependents_of`), nicht gespeichert. Die Basis wird NIE automatisch entfernt; `installed_with` zeigt sie im Panel. Das Kontextmenue auf Karte und Listenzeile deinstalliert alle installierten Zeilen der zusammengefuehrten Karte (`performGroupUninstall`), das Panel bleibt bei genau einer Variante (§12).
+- Verworfen: eine Spalte `installed_for` auf der Basis (bis zu drei Uebersetzungen teilen sich eine Basis - gemessen an 3SKULLS, KQ5, LSL3); automatisches Mitentfernen der Basis (Thomas' Entscheidung: ein Spiel, das einmal installiert war, verschwindet nicht von selbst).
+- Grund: Report "ich kann nur EN loeschen, DE bleibt installiert". Ursache ist aelter als die Abhaengigkeit: `GameCard`/`GameRow` uebergaben die zusammengefuehrte Gruppenzeile, also meist die englische, und nur das Panel kannte die ausgewaehlte Variante.
+- Gotcha: `reset_game_data` war fuer Overlay-Varianten kaputt - es entpackte nur das Patch-Archiv und liess ein Verzeichnis mit zwei Dateien als installiert zurueck. Beide Kopierpfade nehmen jetzt zusaetzlich das Lock der Basiszeile.
+
+## 2026-09-11 - Layout-Sprung beim Sprachwechsel: die Galerie bleibt stehen
+- Entscheidung: Der Metadaten-Effekt leert `metadata()` nur noch beim Wechsel des SPIELS, nicht der Variante (`lastMetaCard`) - Galerie und Ladezeile bleiben, wo sie sind. Die Hinweiszeile "English description" wird eingeklappt statt ausgehaengt, ueber dieselben Slot-Klassen wie die Panel-Notiz (`.game-detail-collapse`).
+- Verworfen: den ganzen Infobereich pauschal animieren (bewegt bei jedem Chip-Klick sichtbar viel); fehlende Felder mit Gedankenstrich rendern (`field()` faellt ohnehin auf die englische Zeile zurueck, die Felder waren nie die Ursache).
+- Grund: Headless gemessen, Panelbreite 460px: Aktionsleiste bei EN auf 522px, nach dem alten Wechsel auf 625px - 103px Sprung, verursacht vom Aus- und Wiedereinhaengen der Galerie samt 10px `gap`. Nach der Aenderung 522px in beiden Zustaenden.
+- Gotcha: Die Beschreibungslaenge bleibt bewusst ungefixt - sie steht in `.game-detail-scroll` mit eigenem `overflow`, verschiebt also weder Leiste noch Galerie. Der eingeklappte Slot kostet dauerhaft 8px `gap`, aber konstant.

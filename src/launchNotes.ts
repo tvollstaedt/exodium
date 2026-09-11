@@ -265,6 +265,16 @@ export function launchNote(ctx: NoteContext): PanelNote | null {
         + "version downloads and installs with it. Both appear in My Games.",
     };
   }
+  // The English row of a group whose translation needed it. Removing it is
+  // safe - the translation owns a real copy - and saying so is the only
+  // place that relationship is visible.
+  if (g?.installed_with && ctx.installed) {
+    return {
+      key: "lp-installed-with",
+      text: `Installed together with ${g.installed_with}, which needed it. `
+        + "Removing this one keeps that version working - it has its own copy.",
+    };
+  }
   if (isScummVm(g)) { return scummVmNote(ctx, engine); }
   if (v === "pcbox") {
     return {

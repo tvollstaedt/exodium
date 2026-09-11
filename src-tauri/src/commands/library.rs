@@ -1270,6 +1270,31 @@ pub async fn reset_game_data(db_state: State<'_, DbState>, id: i64) -> Result<St
     let save_dir = torrent_root.join(&rel_save_dir);
     let title = game.title.clone();
 
+    // An overlay variant is a patch: re-extracting its archive alone leaves a
+    // two-file directory marked installed. The English tree goes back down
+    // first, exactly as the install path does.
+    let base_src = {
+        let conn = db_state.lock()?;
+        match crate::commands::lp_overlay::base_for(&conn, &game) {
+            Some(base) => {
+                let dir = crate::commands::lp_overlay::base_game_dir(&torrent_root, &base)
+                    .ok_or_else(|| {
+                        format!(
+                            "'{}' is a translation of '{}', which is not installed any more -                              reinstall the English version first.",
+                            title, base.title
+                        )
+                    })?;
+                Some((dir, base.id))
+            }
+            None => None,
+        }
+    };
+    // The English tree must not be uninstalled while it is being copied.
+    let _base_guard = match base_src.as_ref().and_then(|(_, id)| *id) {
+        Some(base_id) => Some(game_op_lock(base_id).lock_owned().await),
+        None => None,
+    };
+
     tauri::async_runtime::spawn_blocking(move || {
         // Validate first: opening the archive reads its central directory,
         // which is exactly what distinguishes a real ZIP from librqbit's
@@ -1299,6 +1324,11 @@ pub async fn reset_game_data(db_state: State<'_, DbState>, id: i64) -> Result<St
             let _ = std::fs::remove_dir_all(&save_dir);
         }
 
+        if let Some((src, _)) = base_src {
+            crate::commands::lp_overlay::clone_tree(&src, &game_dir).map_err(|e| {
+                format!("Could not restore the English base at {}: {e}", game_dir.display())
+            })?;
+        }
         let dest = game_dir.parent().map(PathBuf::from).unwrap_or_else(|| torrent_root.clone());
         extract_game_zip(&zip, &dest).map_err(String::from)
     })

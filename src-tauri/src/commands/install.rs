@@ -552,7 +552,7 @@ pub async fn get_download_progress(
                                     &manager.torrent_root(),
                                     b,
                                 ) {
-                                    Some(dir) => Some((dir, b.shortcode.clone())),
+                                    Some(dir) => Some((dir, b.shortcode.clone(), b.id)),
                                     None => {
                                         let _ = std::fs::remove_file(&lock_path);
                                         log::debug!(
@@ -579,6 +579,12 @@ pub async fn get_download_progress(
                             // would back up a half-extracted dir.
                             let op_lock = game_op_lock(game_id);
                             let _op_guard = op_lock.lock().await;
+                            // The English tree must not be uninstalled while
+                            // it is being copied into this variant.
+                            let _base_guard = match base_src.as_ref().and_then(|(_, _, id)| *id) {
+                                Some(base_id) => Some(game_op_lock(base_id).lock_owned().await),
+                                None => None,
+                            };
                             // Re-check: uninstall/cancel may have removed the ZIP
                             // while we waited for the lock.
                             if !zip_path.exists() {
@@ -590,7 +596,7 @@ pub async fn get_download_progress(
                                 let (z, d) = (zip_path.clone(), extract_dir.clone());
                                 let base_src = base_src.clone();
                                 tauri::async_runtime::spawn_blocking(move || {
-                                    if let Some((src, Some(sc))) = base_src {
+                                    if let Some((src, Some(sc), _)) = base_src {
                                         let dst = d.join(&sc);
                                         if let Err(e) =
                                             crate::commands::lp_overlay::clone_tree(&src, &dst)
@@ -810,16 +816,8 @@ async fn cancel_dependents(
         let Some(base) = queries::fetch_game_by_id(&conn, base_id).map_err(|e| e.to_string())? else {
             return Ok(Vec::new());
         };
-        if base.language != "EN" {
-            return Ok(Vec::new());
-        }
-        let Some(shortcode) = base.shortcode.as_deref() else { return Ok(Vec::new()) };
-        let Some(source) = base.torrent_source.as_deref() else { return Ok(Vec::new()) };
-        queries::fetch_game_variants(&conn, shortcode, source)
-            .map_err(|e| e.to_string())?
+        crate::commands::lp_overlay::dependents_of(&conn, &base, false)
             .into_iter()
-            .filter(|g| g.in_library && !g.installed && g.id != Some(base_id))
-            .filter(|g| crate::commands::lp_overlay::base_for(&conn, g).is_some())
             .filter_map(|g| {
                 Some((
                     g.id?,

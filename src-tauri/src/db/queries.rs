@@ -53,6 +53,7 @@ fn row_to_game(row: &Row) -> rusqlite::Result<Game> {
         rating_votes: row.get(34)?,
         music_file: row.get(35)?,
         requires_base: false,
+        installed_with: None,
     })
 }
 
@@ -844,6 +845,7 @@ mod tests {
             last_played: None,
             music_file: None,
             requires_base: false,
+            installed_with: None,
         }
     }
 

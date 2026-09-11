@@ -48,6 +48,8 @@ export interface Game {
   music_file: string | null;
   /** This localized variant is a patch: the English game installs with it. */
   requires_base?: boolean;
+  /** Installed translations that sit on this English row, comma-joined. */
+  installed_with?: string | null;
 }
 
 export interface GameList {

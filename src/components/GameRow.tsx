@@ -1,7 +1,7 @@
 import { createSignal, createEffect, on, Show, For } from "solid-js";
 import type { Game } from "../api/tauri";
 import { loadVariants } from "../stores/variants";
-import { formatBytes, parseLangEntries, langBadgeClass, platformTag } from "../util";
+import { formatBytes, parseLangEntries, langBadgeClass, platformTag, performGroupUninstall } from "../util";
 import { downloads, cancelGameDownload } from "../stores/downloads";
 import { isOffline } from "../stores/network";
 import { toggleFavorite, collectionFilter } from "../stores/games";
@@ -198,6 +198,9 @@ export function GameRow(props: GameRowProps) {
           downloading={isDownloading()}
           setStatus={setStatus}
           onDetail={props.onDetail}
+          // The grid removes "the game": every installed row of the merged
+          // card, not just the one that happens to back it.
+          onUninstall={() => { void performGroupUninstall(props.game, setStatus); }}
           onClose={() => setContextMenu(null)}
         />
       </Show>

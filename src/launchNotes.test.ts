@@ -140,6 +140,14 @@ describe("launchNote", () => {
       expect(key(over({ installed: true }))).not.toBe("lp-requires-base");
       expect(key(over({ downloading: true }))).not.toBe("lp-requires-base");
     });
+    it("the English base names the translation it came with, once installed", () => {
+      const withDep = (extra: any = {}) =>
+        ctx({ game: game({ installed_with: "Alien Odyssey (Deutsch)" } as any), ...extra });
+      expect(key(withDep({ installed: true }))).toBe("lp-installed-with");
+      expect(launchNote(withDep({ installed: true }))?.blocking).toBeUndefined();
+      // Nothing to say while it is not installed yet.
+      expect(key(withDep())).not.toBe("lp-installed-with");
+    });
     it("pcbox blocks regardless of anything else", () => {
       expect(key(ctx({ game: game({ dosbox_variant: "pcbox" }) }))).toBe("pcbox");
     });

@@ -127,11 +127,25 @@ pub async fn get_game_variants(
         queries::fetch_game_variants(&conn, &shortcode, &collection).map_err(|e| e.to_string())?;
     // An overlay variant is installed as English-plus-patch, so its price is
     // both archives. The stored size is the patch plus the shared GameData.
+    let mut dependents_by_base: Vec<(i64, String)> = Vec::new();
+    for game in &games {
+        let names: Vec<String> = crate::commands::lp_overlay::dependents_of(&conn, game, true)
+            .into_iter()
+            .map(|g| g.title)
+            .collect();
+        if let (Some(id), false) = (game.id, names.is_empty()) {
+            dependents_by_base.push((id, names.join(", ")));
+        }
+    }
     for game in &mut games {
         if let Some(base) = crate::commands::lp_overlay::base_archive_size(&conn, game) {
             game.requires_base = true;
             game.download_size = Some(game.download_size.unwrap_or(0) + base as i64);
         }
+        game.installed_with = dependents_by_base
+            .iter()
+            .find(|(id, _)| Some(*id) == game.id)
+            .map(|(_, names)| names.clone());
     }
     Ok(games)
 }

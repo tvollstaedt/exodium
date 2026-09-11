@@ -471,7 +471,18 @@ before unpacking the patch over it, reflinked where the filesystem allows
 (`clonefile`, `FICLONE`). The copy must be real and writable: the staging
 dir is rebuilt per launch, so a symlink farm would drop every savegame the
 game writes into it, and hardlinks would write them into the English
-install instead.
+install instead. `reset_game_data` lays the same tree down again - without
+it a reset leaves the two-file patch directory marked installed - and both
+paths hold the BASE row's `game_op_lock` as well as their own, or an
+uninstall of the English game races the copy.
+
+The relationship is DERIVED, never stored (`base_for` / `dependents_of`): up
+to three translations share one base, so a column on either row could not
+hold it. The English base is never removed automatically - `installed_with`
+puts it in the panel instead, and the grid's context menu now removes every
+installed row of a merged card (`performGroupUninstall`) rather than only the
+row that happens to back it, which is why uninstalling from the grid could
+leave the translation behind.
 
 ### 10. The manifest, and why there is no catalogue update check
 

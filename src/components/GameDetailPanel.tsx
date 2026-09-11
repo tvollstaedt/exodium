@@ -387,6 +387,9 @@ export function GameDetailPanel(props: Props) {
   // the object for the same id.
   let lastGameId: number | null | undefined = undefined;
   let lastMetaKey: string | null = null;
+  /** The CARD the last metadata load belonged to. Two variants of one card
+   *  differ in `torrent_source`, so the load key cannot answer "same game". */
+  let lastMetaCard: number | null = null;
   createEffect(() => {
     const g = props.game;
     if (!g) { lastGameId = null; return; }
@@ -450,13 +453,22 @@ export function GameDetailPanel(props: Props) {
     if (key === lastMetaKey) { return; }
     // Held until settled; the loading flag keeps the Manual button busy.
     if (!panelSettled()) { setMetadataLoading(true); return; }
+    // Switching the language chip keeps the gallery on screen: the media
+    // belongs to the collection and title, not to the variant, and clearing
+    // it here unmounted the strip and mounted a loading line in its place -
+    // two layout jumps per click. Only a different GAME starts empty.
+    const card = props.game?.id ?? null;
+    const sameGame = lastMetaCard != null && lastMetaCard === card;
+    lastMetaCard = card;
     lastMetaKey = key;
-    setMetadata(null);
-    setBrokenImages(new Set<number>());
+    if (!sameGame) {
+      setMetadata(null);
+      setBrokenImages(new Set<number>());
+    }
     // A new variant gets a fresh chance at its cover; the walk itself
     // resets in the keyed effect above.
     setImgError(false);
-    setMetadataLoading(true);
+    if (!sameGame) { setMetadataLoading(true); }
     loadGameMetadata(v.torrent_source, v.title, v.shortcode ?? null, row?.manual_path ?? null)
       .then((m) => { if (selected()?.id === v.id) { setMetadata(m); } })
       .finally(() => setMetadataLoading(false));
@@ -1272,12 +1284,15 @@ export function GameDetailPanel(props: Props) {
                 <Show when={descriptionSource()}>
                   {(src) => (
                     <>
-                      <Show when={src().fallbackFrom}>
-                        <div class="game-detail-fallback-note">
-                          English description - the catalogue has no{" "}
-                          {languageName(src().fallbackFrom)} text for this game.
+                      <div class={`game-detail-collapse${src().fallbackFrom ? " is-open" : ""}`}>
+                        <div>
+                          <div class="game-detail-fallback-note">
+                            English description - the catalogue has no{" "}
+                            {languageName(src().fallbackFrom ?? selected()?.language ?? null)} text
+                            for this game.
+                          </div>
                         </div>
-                      </Show>
+                      </div>
                       <div class="game-detail-description">{src().text}</div>
                       <Show when={src().notes}>
                         <div class="game-detail-notes">{src().notes}</div>

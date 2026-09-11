@@ -1,7 +1,41 @@
-import { uninstallGame, resetGameData } from "./api/tauri";
+import { uninstallGame, resetGameData, type Game } from "./api/tauri";
+import { loadVariants } from "./stores/variants";
 import { refreshLoadedGames, notifyGameLibraryChanged } from "./stores/games";
 import { getDownloadState, cancelGameDownload, stopGameDownloadTracking } from "./stores/downloads";
 import { showToast } from "./stores/toasts";
+
+/** Every installed row of a merged card's group. The grid removes "the
+ *  game", which for a multi-language card is more than one row - and with an
+ *  overlay translation the English base is one of them. The panel stays
+ *  single-variant on purpose (§12). */
+export async function performGroupUninstall(
+  game: Pick<Game, "id" | "shortcode" | "torrent_source" | "title">,
+  setStatus: (s: string) => void,
+  onSuccess?: () => void | Promise<void>,
+): Promise<void> {
+  const ids = await installedGroupIds(game);
+  for (const id of ids) {
+    // The last one carries the callback, so the list refreshes once.
+    const last = id === ids[ids.length - 1];
+    await performUninstall(id, setStatus, last ? onSuccess : undefined, game.title);
+  }
+}
+
+/** Ids of the group's installed (or in-library) rows, the selected one first
+ *  so a failure part-way still removes what the user pointed at. */
+export async function installedGroupIds(
+  game: Pick<Game, "id" | "shortcode" | "torrent_source">,
+): Promise<number[]> {
+  const self = game.id;
+  if (self == null) { return []; }
+  let rows: Game[] = [];
+  try { rows = await loadVariants(game, true); } catch { return [self]; }
+  const ids = rows
+    .filter((r) => r.id != null && (r.installed || r.in_library))
+    .map((r) => r.id!);
+  if (ids.length === 0) { return [self]; }
+  return [self, ...ids.filter((id) => id !== self)];
+}
 
 export async function performUninstall(
   gameId: number,

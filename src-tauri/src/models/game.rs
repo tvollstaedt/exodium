@@ -54,4 +54,8 @@ pub struct Game {
     /// installed with it. Set by `get_game_variants`, never stored.
     #[serde(default)]
     pub requires_base: bool,
+    /// This English row was installed alongside these translations, which
+    /// need it. Set by `get_game_variants`, never stored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub installed_with: Option<String>,
 }
