@@ -158,10 +158,19 @@ pub async fn download_game(
             if scummvm_support_missing {
                 needed += 3 * 1024 * 1024 * 1024;
             }
-            if let Some(b) = base.as_ref().and_then(|b| b.download_size) {
-                // Archive plus its own extraction, plus the second copy in
-                // the overlay's directory.
-                needed = needed.saturating_add((b as u64).saturating_mul(3));
+            // Only what this download will actually fetch. An installed base
+            // is not downloaded again, and its GameData is already inside the
+            // variant's own `download_size` (§6) - charging `base.download_size`
+            // asked for 20 GB free where 3.2 GB were needed.
+            if let Some(b) = base.as_ref() {
+                let root = crate::commands::paths::game_root(dir);
+                if crate::commands::lp_overlay::base_game_dir(&root, b).is_none() {
+                    if let Some(archive) = crate::commands::lp_overlay::archive_size_of(b) {
+                        // Archive, its extraction, and the copy in the
+                        // variant's own directory.
+                        needed = needed.saturating_add(archive.saturating_mul(3));
+                    }
+                }
             }
             if let Some((_, info)) = &emulator_pack {
                 // Same 2.2x factor as the pack installer's own preflight
@@ -267,6 +276,16 @@ pub async fn download_game(
     Ok(format!("Downloading: {}", game.title))
 }
 
+/// Bases this session queued on a translation's behalf. Nothing on disk
+/// records WHO asked for a download, and a base the user started himself
+/// looks exactly like one we pulled in - cancelling that one would stop a
+/// transfer he is waiting for. Session-scoped on purpose: after a restart
+/// the set is empty and nothing is auto-cancelled, which is the safe answer.
+fn auto_queued_bases() -> &'static Mutex<std::collections::HashSet<i64>> {
+    static SET: OnceLock<Mutex<std::collections::HashSet<i64>>> = OnceLock::new();
+    SET.get_or_init(|| Mutex::new(std::collections::HashSet::new()))
+}
+
 /// Select the English base game's archive and put it in the library, so the
 /// overlay variant has something to sit on. The frontend hears about it
 /// through `dependency-download-started` and shows it like any download.
@@ -294,6 +313,9 @@ async fn queue_base_game(
     {
         let conn = db_state.lock()?;
         queries::set_in_library(&conn, id).map_err(|e| e.to_string())?;
+    }
+    if let Ok(mut set) = auto_queued_bases().lock() {
+        set.insert(id);
     }
     let _ = app.emit(
         "dependency-download-started",
@@ -872,7 +894,11 @@ async fn cancel_orphaned_base(
         let Some(base) = crate::commands::lp_overlay::base_for(&conn, &variant) else {
             return Ok(Vec::new());
         };
-        // Installed, or still wanted by another translation: leave it be.
+        // Only a base this session queued itself, and only while nothing
+        // else wants it.
+        if !auto_queued_bases().lock().is_ok_and(|s| s.contains(&base.id.unwrap_or(-1))) {
+            return Ok(Vec::new());
+        }
         if base.installed
             || !base.in_library
             || !crate::commands::lp_overlay::dependents_of(&conn, &base, false).is_empty()
@@ -899,6 +925,9 @@ async fn cancel_orphaned_base(
     {
         let conn = db_state.lock()?;
         queries::clear_in_library(&conn, id).map_err(|e| e.to_string())?;
+    }
+    if let Ok(mut set) = auto_queued_bases().lock() {
+        set.remove(&id);
     }
     log::info!(
         "cancel_download: also cancelled '{}', which only came along for the translation",

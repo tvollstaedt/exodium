@@ -790,10 +790,14 @@ export function GameDetailPanel(props: Props) {
     try {
       await performUninstall(gameId, statusSink, async () => {
         if (shortcode) {
-          const v = props.game
-            ? await loadVariants(props.game, true).catch(() => [])
-            : [];
-          setVariants(v);
+          // A failed reload must keep the old list: an empty one makes
+          // `rows()` fall back to the card's own row, which drops the busy
+          // gate and puts the action bar back while the work finishes.
+          if (props.game) {
+            await loadVariants(props.game, true)
+              .then(setVariants)
+              .catch((e) => console.warn("[panel] variant reload failed:", e));
+          }
         }
       }, title);
     } finally {

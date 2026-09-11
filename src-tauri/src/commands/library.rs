@@ -1214,7 +1214,54 @@ pub async fn uninstall_game(
         }
     }
 
-    Ok(format!("Uninstalled: {}", game.title))
+    // Translations still waiting for THIS English tree can never finish -
+    // the extraction blocks on its directory, which is now in `!save`. They
+    // are stood down here, the same way `cancel_download` does it.
+    let stranded = {
+        let waiting: Vec<(i64, String)> = {
+            let conn = db_state.lock()?;
+            crate::commands::lp_overlay::dependents_of(&conn, &game, false)
+                .into_iter()
+                .filter_map(|g| Some((g.id?, g.title.clone())))
+                .collect()
+        };
+        let mut names = Vec::new();
+        for (dep_id, title) in waiting {
+            let (idx, src) = {
+                let conn = db_state.lock()?;
+                match queries::fetch_game_by_id(&conn, dep_id) {
+                    Ok(Some(g)) => (g.game_torrent_index, g.torrent_source),
+                    _ => (None, None),
+                }
+            };
+            if let (Some(idx), Some(src)) = (idx, src) {
+                let mgr = {
+                    let guard = torrent_state.0.read().await;
+                    guard.get(&src).cloned()
+                };
+                if let Some(mgr) = mgr {
+                    mgr.deselect_file(idx as usize).await;
+                }
+            }
+            {
+                let conn = db_state.lock()?;
+                queries::clear_in_library(&conn, dep_id).map_err(|e| e.to_string())?;
+            }
+            log::info!("uninstall: '{title}' was waiting for this English tree - cancelled");
+            names.push(title);
+        }
+        names
+    };
+
+    if stranded.is_empty() {
+        Ok(format!("Uninstalled: {}", game.title))
+    } else {
+        Ok(format!(
+            "Uninstalled: {} - {} was still waiting for it and was cancelled",
+            game.title,
+            stranded.join(", ")
+        ))
+    }
 }
 
 /// Back to the freshly-installed state: delete the game dir AND its `!save`
@@ -1313,6 +1360,29 @@ pub async fn reset_game_data(db_state: State<'_, DbState>, id: i64) -> Result<St
                 title
             )
         })?;
+
+        // Re-check under the lock and budget the copy BEFORE anything is
+        // deleted: an uninstall of the base between the lookup and the lock,
+        // or a full disk, would otherwise leave no game and no backup.
+        if let Some((src, _)) = base_src.as_ref() {
+            if !src.is_dir() {
+                return Err(format!(
+                    "The English base for '{title}' disappeared - reinstall it, then reset again."
+                ));
+            }
+            let need = crate::commands::lp_overlay::dir_size(src)
+                .saturating_add(512 * 1024 * 1024);
+            if let Ok(free) = fs4::available_space(&torrent_root) {
+                if free < need {
+                    let gib = |b: u64| b as f64 / (1024.0 * 1024.0 * 1024.0);
+                    return Err(format!(
+                        "Not enough disk space to reset '{title}': needs about {:.1} GB free,                          but only {:.1} GB is available.",
+                        gib(need),
+                        gib(free)
+                    ));
+                }
+            }
+        }
 
         if game_dir.exists() {
             std::fs::remove_dir_all(&game_dir)

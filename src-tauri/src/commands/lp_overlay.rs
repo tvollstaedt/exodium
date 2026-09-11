@@ -122,8 +122,15 @@ pub fn base_for(conn: &rusqlite::Connection, game: &Game) -> Option<Game> {
     // installer does, so a variant is treated exactly as the pack intends.
     let list = exo_list(lang_dir);
     if !list.is_empty() {
-        let stem = bat_stem(game.application_path.as_deref())?;
-        return list.contains(&stem).then_some(base);
+        match bat_stem(game.application_path.as_deref()) {
+            Some(stem) => return list.contains(&stem).then_some(base),
+            // No launcher path to look up. Rather than silently call it a
+            // standalone game, fall through to the size rule below.
+            None => log::info!(
+                "lp_overlay: '{}' has no launcher path - falling back to size",
+                game.title
+            ),
+        }
     }
 
     // No list for this pack: fall back to size. Measured against eXo's own
@@ -185,6 +192,18 @@ pub fn base_game_dir(torrent_root: &Path, base: &Game) -> Option<std::path::Path
     );
     let dir = torrent_root.join(rel);
     dir.is_dir().then_some(dir)
+}
+
+/// Bytes a directory tree occupies, for the reset preflight. Cheap enough:
+/// a game directory is thousands of files, not millions.
+pub fn dir_size(root: &Path) -> u64 {
+    walkdir::WalkDir::new(root)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter_map(|e| e.metadata().ok())
+        .filter(|m| m.is_file())
+        .map(|m| m.len())
+        .sum()
 }
 
 /// Copy the English tree into the overlay variant's own directory, sharing
@@ -260,6 +279,19 @@ fn copy_file(src: &Path, dst: &Path) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A row whose launcher path is missing must not be silently declared a
+    /// standalone game - the size rule still gets its turn.
+    #[test]
+    fn a_row_without_a_launcher_path_falls_through_to_size() {
+        assert_eq!(bat_stem(None), None);
+        // The three GLP rows in this state are not in eXo's list either way,
+        // so the fallback is what decides them.
+        let german = exo_list("!german");
+        if !german.is_empty() {
+            assert!(!german.contains(&"cybermage: darklight awakening (1995)".to_string()));
+        }
+    }
 
     /// eXo's list is keyed on the launcher bat's name, which is what the
     /// row's `application_path` ends in.
