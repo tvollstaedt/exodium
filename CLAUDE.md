@@ -650,6 +650,14 @@ are the same code path with one row - do not reintroduce a separate
 multi-language branch, which is how the Manual and Settings buttons ended up
 existing only for single-language games.
 
+The GRID is the opposite: its context menu removes "the game", so uninstall
+there takes every installed row of the merged card
+(`performGroupUninstall`) and is gated on the GROUP's state, read from
+`available_languages` - the card is backed by the English row, which for a
+German-only install is the one version not installed, and gating on it hid
+the entry entirely. Reset and Settings stay on the backing row: both act on
+exactly one variant.
+
 Catalogue coverage drives the fallbacks: LP rows carry a title and little else
 (own description: GLP 98/648, PLP 0/238, SLP 0/642; own manual: GLP 56/648).
 So `field()` falls back to the EN row per field, `descriptionSource()` falls
