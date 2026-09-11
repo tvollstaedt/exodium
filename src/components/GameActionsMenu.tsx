@@ -26,6 +26,10 @@ export interface GameActionsMenuProps {
    *  bar); absent, the menu runs the shared helper. */
   onReset?: (gameId: number) => void;
   onUninstall?: (gameId: number) => void;
+  /** The host's uninstall removes every installed row of the merged card,
+   *  not just this one. Only the grid does that; the panel is scoped to the
+   *  selected variant (§12), and the confirm text has to say which. */
+  uninstallsGroup?: boolean;
   /** Called once the menu AND anything it opened have closed - the host can
    *  drop it from the tree then, not before. */
   onClose: () => void;
@@ -135,7 +139,7 @@ export function GameActionsMenu(props: GameActionsMenuProps) {
                 onClick={() => {
                   if (!confirmUninstall()) {
                     setConfirmUninstall(true);
-                    if (props.onUninstall) {
+                    if (props.uninstallsGroup) {
                       void installedGroupIds(props.game).then((ids) =>
                         setUninstallCount(Math.max(1, ids.length)));
                     }

@@ -201,6 +201,7 @@ export function GameRow(props: GameRowProps) {
           // The grid removes "the game": every installed row of the merged
           // card, not just the one that happens to back it.
           onUninstall={() => { void performGroupUninstall(props.game, setStatus); }}
+          uninstallsGroup
           onClose={() => setContextMenu(null)}
         />
       </Show>

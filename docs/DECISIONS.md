@@ -229,3 +229,9 @@
 - Verworfen: die Gruppenabfrage in `fetch_game_by_id` - das ist der heisse Pfad des 1-Hz-Download-Polls und mehrerer Launch-Schritte, die die Sprachliste nie brauchen.
 - Grund: Nach jeder Bibliotheksaenderung liest das Panel seine Zeile ueber `get_game` neu (`Library.tsx`). Ohne `available_languages` ist `isMultiLang()` falsch, und die Sprach-Chips samt Download-Optionen der anderen Fassungen verschwanden - gemeldet als "nach Uninstall keine Sprachdownload-Optionen mehr".
 - Gotcha: Der Fehler ist aelter als die Overlay-Abhaengigkeit und trat bei jeder Deinstallation auf; er faellt erst auf, seit eine zweite Zeile derselben Gruppe interessant ist. Test `a_single_row_still_gets_its_groups_language_map`.
+
+## 2026-09-11 - Der Bestaetigungstext muss sagen, was der Aufrufer wirklich tut
+- Entscheidung: `GameActionsMenu` bekommt die Eigenschaft `uninstallsGroup`; nur Karte und Listenzeile setzen sie, und nur dann zaehlt der Bestaetigungstext die Fassungen. Das Panel bleibt bei der ausgewaehlten Variante (§12).
+- Verworfen: den Zaehler an das blosse Vorhandensein von `onUninstall` haengen - beide Aufrufer setzen die Eigenschaft, also versprach das Panel "2 versions" und entfernte eine.
+- Grund: Gemeldet als "sagt 2 Versions, loescht aber nur EN". Der Text kam vom Gruppen-Zaehler, die Handlung vom variantengenauen Panel-Handler.
+- Gotcha: `performGroupUninstall` selbst war korrekt - Test `groupUninstall.test.ts` haelt das fest, damit die naechste Aenderung nicht an der falschen Stelle sucht.
