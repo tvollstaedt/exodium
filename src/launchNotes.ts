@@ -255,6 +255,16 @@ export function launchNote(ctx: NoteContext): PanelNote | null {
   const runsUnderEce = ctx.engineInfo?.uses_ece ?? ctx.isWindows;
   const engine = emulatorName(g, ctx.svmEngine, runsUnderEce);
 
+  // This localized variant is a patch; the English game installs with it and
+  // stays playable on its own. Informational, and only while it would still
+  // cost something - once installed the note has nothing left to announce.
+  if (g?.requires_base && !ctx.installed && !ctx.downloading) {
+    return {
+      key: "lp-requires-base",
+      text: "This translation is a patch for the English game, so the English "
+        + "version downloads and installs with it. Both appear in My Games.",
+    };
+  }
   if (isScummVm(g)) { return scummVmNote(ctx, engine); }
   if (v === "pcbox") {
     return {

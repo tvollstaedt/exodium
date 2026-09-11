@@ -421,6 +421,12 @@ fallback (`find_lp_launch`, which itself prefers the EN autoexec's command)
 kick in. History: heuristics-first produced launch-and-exit bugs (Cobra
 Mission ES: bare root-level CM.EXE, no .bat - all heuristics missed it).
 
+`lp_autoexec_compatible` reads `mount c <target>` when the target names the
+game's own directory: eXo's confs mount it and then `cd` into a subdirectory
+of it, and treating that `cd` as relative to the staging root rejected every
+such conf and fell back to the generated autoexec. Every other mount target
+(the collection root, 1,570 confs) leaves the staging dir as the root.
+
 **A substituted host path must never keep a trailing separator, and must be
 quoted when it carries a space.** Both rules exist because the rewrite turns a
 short relative token into a long absolute one, and DOSBox treats the two
@@ -449,6 +455,23 @@ turn on. So do NOT read an empty log as "the emulator said nothing is wrong":
 it says nothing at all. What DOES measure a suspected mount failure is running
 `eXo/emulators/dosbox/<variant>/DOSBox.exe` by hand and typing the mount at
 the Z:\ prompt - the error appears in the emulator window.
+
+**Some localized variants are PATCHES, not games, and install the English
+one as a dependency.** 91 GLP, 130 SLP and 4 PLP archives hold only
+localized config and launcher files (Alien Odyssey DE: `GAME.CFG` +
+`run.bat`, whose `call game` lives in the English tree) and expect eXo's
+installer to have laid the English game down first. `commands::lp_overlay`
+detects that from the BUNDLED TORRENTS - an archive under 5% of its English
+counterpart - never from `games.download_size`, which is archive plus the
+shared English GameData (§6) and so cannot be taken apart by any threshold.
+The English row is then queued as its own library entry
+(`dependency-download-started`, so the frontend tracks it - the poll is what
+extracts), and the extraction copies the English tree into the LP directory
+before unpacking the patch over it, reflinked where the filesystem allows
+(`clonefile`, `FICLONE`). The copy must be real and writable: the staging
+dir is rebuilt per launch, so a symlink farm would drop every savegame the
+game writes into it, and hardlinks would write them into the English
+install instead.
 
 ### 10. The manifest, and why there is no catalogue update check
 

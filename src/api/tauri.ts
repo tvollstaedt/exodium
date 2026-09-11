@@ -46,6 +46,8 @@ export interface Game {
   /** Catalogue hint that the GameData archive holds a theme track, with its
    *  file name. A hint only - the archive decides; null means "not expected". */
   music_file: string | null;
+  /** This localized variant is a patch: the English game installs with it. */
+  requires_base?: boolean;
 }
 
 export interface GameList {

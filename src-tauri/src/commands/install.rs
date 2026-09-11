@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::db;
 use crate::db::queries;
@@ -95,6 +95,14 @@ pub async fn download_game(
         queries::get_config(&conn, "data_dir").ok().flatten()
     };
 
+    // A localized variant that is only a patch needs the English game on
+    // disk; it is installed alongside as a real dependency, not folded in
+    // silently, so it shows up in the library and can be played on its own.
+    let base: Option<crate::models::Game> = {
+        let conn = db_state.lock()?;
+        crate::commands::lp_overlay::base_for(&conn, &game)
+    };
+
     // macOS/Linux: the emulator pack rides along. Win9x is resolver-gated so
     // a system install never pays for it; ScummVM queues unless eXo's build
     // or the pack itself is present - a system ScummVM ignores the pin.
@@ -149,6 +157,11 @@ pub async fn download_game(
             }
             if scummvm_support_missing {
                 needed += 3 * 1024 * 1024 * 1024;
+            }
+            if let Some(b) = base.as_ref().and_then(|b| b.download_size) {
+                // Archive plus its own extraction, plus the second copy in
+                // the overlay's directory.
+                needed = needed.saturating_add((b as u64).saturating_mul(3));
             }
             if let Some((_, info)) = &emulator_pack {
                 // Same 2.2x factor as the pack installer's own preflight
@@ -235,6 +248,15 @@ pub async fn download_game(
         .await
         .map_err(|e| format!("Failed to queue download: {}", e))?;
 
+    // The English base rides along as its own library entry. Queued after
+    // the patch so a failure there cannot leave a dependency without the
+    // game that asked for it.
+    if let Some(base) = base.as_ref() {
+        if let Err(e) = queue_base_game(&app, &db_state, &main_mgr_opt, base).await {
+            log::warn!("English base for {} not queued: {e}", game.title);
+        }
+    }
+
     // Mark as in library only after the download is actually queued - doing
     // it earlier left a phantom "My Games" card when queueing failed.
     {
@@ -243,6 +265,47 @@ pub async fn download_game(
     }
 
     Ok(format!("Downloading: {}", game.title))
+}
+
+/// Select the English base game's archive and put it in the library, so the
+/// overlay variant has something to sit on. The frontend hears about it
+/// through `dependency-download-started` and shows it like any download.
+async fn queue_base_game(
+    app: &AppHandle,
+    db_state: &State<'_, DbState>,
+    main_mgr: &Option<std::sync::Arc<crate::torrent::manager::DownloadManager>>,
+    base: &crate::models::Game,
+) -> Result<(), String> {
+    let Some(id) = base.id else { return Err("base row has no id".into()) };
+    if base.installed {
+        return Ok(());
+    }
+    let mgr = main_mgr.as_ref().ok_or("eXoDOS manager not initialized")?;
+    let idx = base
+        .game_torrent_index
+        .ok_or("base row has no torrent index")? as usize;
+    let mut files = vec![idx];
+    if let Some(gd) = base.gamedata_torrent_index {
+        files.push(gd as usize);
+    }
+    mgr.download_files(files)
+        .await
+        .map_err(|e| e.to_string())?;
+    {
+        let conn = db_state.lock()?;
+        queries::set_in_library(&conn, id).map_err(|e| e.to_string())?;
+    }
+    let _ = app.emit(
+        "dependency-download-started",
+        serde_json::json!({
+            "id": id,
+            "title": base.title,
+            "torrentSource": base.torrent_source,
+            "thumbnailKey": base.thumbnail_key,
+        }),
+    );
+    log::info!("Queued English base '{}' for an overlay variant", base.title);
+    Ok(())
 }
 
 /// A library row whose torrent file the session has selected. Complete-but-
@@ -325,11 +388,12 @@ pub async fn get_download_progress(
     torrent_state: State<'_, TorrentState>,
     id: i64,
 ) -> Result<Option<DownloadProgress>, String> {
-    let (game_idx, gamedata_idx, title, already_installed, source) = {
+    let (game_idx, gamedata_idx, title, already_installed, source, base) = {
         let conn = db_state.lock()?;
         let game = queries::fetch_game_by_id(&conn, id)
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("Game {} not found", id))?;
+        let base = crate::commands::lp_overlay::base_for(&conn, &game);
         match game.game_torrent_index {
             Some(idx) => (
                 idx as usize,
@@ -337,6 +401,7 @@ pub async fn get_download_progress(
                 game.title,
                 game.installed,
                 game.torrent_source.unwrap_or_else(|| "eXoDOS".to_string()),
+                base,
             ),
             None => return Ok(None),
         }
@@ -478,6 +543,27 @@ pub async fn get_download_progress(
                         .is_ok()
                     {
                         let extract_dir = zip_path.parent().unwrap().to_path_buf();
+                        // An overlay variant unpacks onto a copy of the
+                        // English game. Its download is queued with this
+                        // one, so the wait is bounded by that transfer.
+                        let base_src = match base.as_ref() {
+                            Some(b) => {
+                                match crate::commands::lp_overlay::base_game_dir(
+                                    &manager.torrent_root(),
+                                    b,
+                                ) {
+                                    Some(dir) => Some((dir, b.shortcode.clone())),
+                                    None => {
+                                        let _ = std::fs::remove_file(&lock_path);
+                                        log::debug!(
+                                            "{title}: waiting for the English base before unpacking"
+                                        );
+                                        return Ok(progress);
+                                    }
+                                }
+                            }
+                            None => None,
+                        };
                         let game_id = id;
                         let db_path = {
                             let conn = db_state.lock()?;
@@ -499,7 +585,23 @@ pub async fn get_download_progress(
                             log::info!("Extracting {} from {}", title, zip_path.display());
                             let extract_result = {
                                 let (z, d) = (zip_path.clone(), extract_dir.clone());
-                                tauri::async_runtime::spawn_blocking(move || extract_game_zip(&z, &d)).await
+                                let base_src = base_src.clone();
+                                tauri::async_runtime::spawn_blocking(move || {
+                                    if let Some((src, Some(sc))) = base_src {
+                                        let dst = d.join(&sc);
+                                        if let Err(e) =
+                                            crate::commands::lp_overlay::clone_tree(&src, &dst)
+                                        {
+                                            log::error!(
+                                                "Could not place the English base at {}: {e}",
+                                                dst.display()
+                                            );
+                                            return Err(ExtractError::Other(e.to_string()));
+                                        }
+                                    }
+                                    extract_game_zip(&z, &d)
+                                })
+                                .await
                             };
                             match extract_result {
                                 Ok(Ok(())) => match db::open(&db_path) {

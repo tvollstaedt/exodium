@@ -210,6 +210,7 @@ fn xml_game_to_game(x: XmlGame, shortcode_segment: &str) -> Game {
         favorited: false,
         thumbnail_key: None, // populated by generate_db from normalized title
         music_file,
+        requires_base: false,
         manual_path: blank_to_none(x.manual_path),
         last_played: None,
     }

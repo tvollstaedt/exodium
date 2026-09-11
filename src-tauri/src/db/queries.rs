@@ -52,6 +52,7 @@ fn row_to_game(row: &Row) -> rusqlite::Result<Game> {
         last_played: row.get(33)?,
         rating_votes: row.get(34)?,
         music_file: row.get(35)?,
+        requires_base: false,
     })
 }
 
@@ -446,27 +447,14 @@ pub fn fetch_game_variants(
         family_expr("g")
     );
     let mut stmt = conn.prepare_cached(&sql)?;
-    let mut games = stmt
+    let games = stmt
         .query_map(params![shortcode, crate::collection_base_id(collection)], row_to_game)?
         .collect::<Result<Vec<_>, _>>()?;
 
-    // LP overlay ZIPs (< 1 MB) are just localized bat files - they require the EN base game
-    // to function. Always show the combined total (LP overlay + EN base) so the user sees a
-    // consistent, realistic game size regardless of whether EN is already on disk.
-    if let Some(en_game) = games.iter().find(|g| g.language == "EN") {
-        let en_size = en_game.download_size.unwrap_or(0);
-        if en_size > 0 {
-            for game in &mut games {
-                if game.language != "EN" {
-                    let lp_size = game.download_size.unwrap_or(0);
-                    if lp_size < 1_000_000 {
-                        game.download_size = Some(lp_size + en_size);
-                    }
-                }
-            }
-        }
-    }
-
+    // The overlay case (a localized variant that is a patch over the English
+    // game) is answered by `commands::lp_overlay` against the bundled
+    // torrents, and applied in `get_game_variants`: `download_size` here is
+    // archive plus shared GameData, which no threshold can take apart.
     Ok(games)
 }
 
@@ -855,6 +843,7 @@ mod tests {
             manual_path: None,
             last_played: None,
             music_file: None,
+            requires_base: false,
         }
     }
 

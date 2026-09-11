@@ -1,4 +1,5 @@
 import { createSignal } from "solid-js";
+import { listen } from "@tauri-apps/api/event";
 import { cancelDownload, downloadGame, getDownloadProgress, listActiveDownloads } from "../api/tauri";
 import { refreshLoadedGames, notifyGameLibraryChanged } from "./games";
 import { showToast } from "./toasts";
@@ -325,6 +326,23 @@ export async function resumeDownloads() {
     setState(t, { status: "Resuming download…", progress: 0, downloading: true });
     void poll(t);
   }
+}
+
+/** Pick up a download the backend started by itself: the English base an
+ *  overlay language variant sits on. Without a tracker nobody polls it, and
+ *  the poll is what extracts and installs. Registered once at mount. */
+export async function initDependencyDownloads() {
+  await listen<{ id: number; title: string; torrentSource: string | null; thumbnailKey: string | null }>(
+    "dependency-download-started",
+    (event) => {
+      const { id, title, torrentSource, thumbnailKey } = event.payload;
+      if (trackers.has(id)) { return; }
+      const cover = torrentSource ? { source: torrentSource, key: thumbnailKey } : undefined;
+      const t = newTracker(id, title, false, cover);
+      setState(t, { status: "Starting download...", progress: 0, downloading: true });
+      void poll(t);
+    },
+  );
 }
 
 /** Stop tracking a game in any phase (uninstall during extras would

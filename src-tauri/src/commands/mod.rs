@@ -5,6 +5,7 @@ pub(crate) mod assets;
 pub(crate) mod layout;
 pub(crate) mod library;
 pub(crate) mod install;
+pub(crate) mod lp_overlay;
 pub(crate) mod content_packs;
 mod games;
 mod playlists;

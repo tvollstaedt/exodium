@@ -12,7 +12,7 @@ import { WelcomeModal } from "./components/WelcomeModal";
 import { SeedingConsentDialog } from "./components/SeedingConsentDialog";
 import { ActivityBadge } from "./components/ActivityBadge";
 import { needsSeedingConsent, seedingOn, applySeeding, loadSeeding } from "./stores/seeding";
-import { resumeDownloads } from "./stores/downloads";
+import { resumeDownloads, initDependencyDownloads } from "./stores/downloads";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ContentPackSettings } from "./components/ContentPackSettings";
 import { WindowFrame } from "./components/WindowFrame";
@@ -136,6 +136,7 @@ function App() {
     // Before anything else: the backend can start pack installs on its own
     // (Win9x emulator auto-queue), and only this listener makes them visible.
     initContentPackEvents().catch(() => {});
+    initDependencyDownloads().catch(() => {});
     initMusic().catch(() => {});
     try {
       const status = await getSetupStatus();

@@ -123,7 +123,17 @@ pub async fn get_game_variants(
     collection: String,
 ) -> Result<Vec<Game>, String> {
     let conn = state.lock()?;
-    queries::fetch_game_variants(&conn, &shortcode, &collection).map_err(|e| e.to_string())
+    let mut games =
+        queries::fetch_game_variants(&conn, &shortcode, &collection).map_err(|e| e.to_string())?;
+    // An overlay variant is installed as English-plus-patch, so its price is
+    // both archives. The stored size is the patch plus the shared GameData.
+    for game in &mut games {
+        if let Some(base) = crate::commands::lp_overlay::base_archive_size(&conn, game) {
+            game.requires_base = true;
+            game.download_size = Some(game.download_size.unwrap_or(0) + base as i64);
+        }
+    }
+    Ok(games)
 }
 
 #[tauri::command]
@@ -605,8 +615,11 @@ fn lp_autoexec_compatible(
     let Some(autoexec) = en_conf.split("[autoexec]").nth(1) else {
         return false;
     };
-    // cwd: None = mount root (the overlay staging dir).
+    // cwd: None = the C: mount root. `mount c <target>` sets it - eXo's
+    // confs mount the game directory itself, so a following `cd sub` is
+    // relative to that, not to the staging dir the paths are rewritten to.
     let mut cwd: Option<PathBuf> = None;
+    let mut mount_root: Option<PathBuf> = None;
     for line in autoexec.lines() {
         let t = line.trim();
         let t = t.strip_prefix('@').unwrap_or(t).trim();
@@ -633,8 +646,9 @@ fn lp_autoexec_compatible(
                 cwd = None;
                 continue;
             }
-            let next = match &cwd {
-                None => {
+            let next = match (&cwd, &mount_root) {
+                (None, Some(root)) => root.join(target),
+                (None, None) => {
                     if target.eq_ignore_ascii_case(shortcode) {
                         lp_game_dir.to_path_buf()
                     } else {
@@ -643,7 +657,7 @@ fn lp_autoexec_compatible(
                         real_root.join(target)
                     }
                 }
-                Some(dir) => dir.join(target),
+                (Some(dir), _) => dir.join(target),
             };
             if !next.exists() {
                 log::info!(
@@ -653,6 +667,20 @@ fn lp_autoexec_compatible(
                 return false;
             }
             cwd = Some(next);
+            continue;
+        }
+
+        // `mount c <host path>` decides what C:\ is. Only the form that
+        // mounts the game's OWN directory is read here; every other target
+        // (eXo's confs often mount the collection root) leaves the staging
+        // dir as the root, which is what `cwd = None` already means.
+        if let Some(rest) = lower.strip_prefix("mount c ") {
+            let target = rest.trim().trim_matches('"').trim_end_matches(['\\', '/']);
+            let leaf = target.rsplit(['\\', '/']).next().unwrap_or(target);
+            if leaf.eq_ignore_ascii_case(shortcode) {
+                mount_root = Some(lp_game_dir.to_path_buf());
+            }
+            cwd = None;
             continue;
         }
 
@@ -687,9 +715,10 @@ fn lp_autoexec_compatible(
         if base.contains(':') || base.contains('\\') || base.contains('/') {
             return true;
         }
-        let dir = match &cwd {
-            Some(d) => d.clone(),
-            None => return true, // command at mount root - rare, trust it
+        let dir = match (&cwd, &mount_root) {
+            (Some(d), _) => d.clone(),
+            (None, Some(root)) => root.clone(),
+            (None, None) => return true, // command at mount root - rare, trust it
         };
         let base_lower = base.to_ascii_lowercase();
         if let Ok(entries) = std::fs::read_dir(&dir) {
@@ -1968,6 +1997,31 @@ pub(crate) fn spawn_emulator_and_track(
 
 #[cfg(test)]
 mod tests {
+
+    /// eXo mounts the game directory as C: and then cds into a subdirectory
+    /// of it. Reading the mount is what makes that `cd` resolvable; without
+    /// it every such conf was rejected and the launch fell back to the
+    /// generated autoexec (Alien Odyssey DE).
+    #[test]
+    fn lp_probe_follows_the_mount_target_into_a_subdirectory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let lp = tmp.path().join("!german/AlienOdy");
+        std::fs::create_dir_all(lp.join("ODYSSEY")).unwrap();
+        std::fs::write(lp.join("ODYSSEY/run.bat"), b"").unwrap();
+        let conf = "[autoexec]\ncd ..\ncd ..\nmount c .\\eXoDOS\\AlienOdy\nc:\n@cd odyssey\n@call run\nexit\n";
+        assert!(lp_autoexec_compatible(conf, "AlienOdy", &lp, tmp.path()));
+    }
+
+    /// The launch command still has to exist: a variant whose files were
+    /// restructured must keep falling through to `find_lp_launch`.
+    #[test]
+    fn lp_probe_still_rejects_a_launch_command_the_variant_lacks() {
+        let tmp = tempfile::tempdir().unwrap();
+        let lp = tmp.path().join("!german/AlienOdy");
+        std::fs::create_dir_all(lp.join("ODYSSEY")).unwrap();
+        let conf = "[autoexec]\nmount c .\\eXoDOS\\AlienOdy\nc:\n@cd odyssey\n@call run\nexit\n";
+        assert!(!lp_autoexec_compatible(conf, "AlienOdy", &lp, tmp.path()));
+    }
     // The AppImage's LD_LIBRARY_PATH is what makes an emulator hang on window
     // close, and PATH must survive the cleanup or nothing launches at all.
     #[cfg(target_os = "linux")]

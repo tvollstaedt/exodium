@@ -50,4 +50,8 @@ pub struct Game {
     /// Theme-track file name hint from LaunchBox; only its extension is used
     /// (is it worth probing?), the archive decides (§14).
     pub music_file: Option<String>,
+    /// This localized variant is a patch over the English game, which is
+    /// installed with it. Set by `get_game_variants`, never stored.
+    #[serde(default)]
+    pub requires_base: bool,
 }

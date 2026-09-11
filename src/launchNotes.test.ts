@@ -133,6 +133,13 @@ describe("launchNote", () => {
     const x98 = (over: Partial<NoteContext> = {}) =>
       ctx({ game: game({ torrent_source: "eXoWin9x", dosbox_variant: "x98" }), win9xEngineMissing: true, ...over });
 
+    it("an overlay translation announces the English base, until it is installed", () => {
+      const over = (extra: any = {}) => ctx({ game: game({ requires_base: true } as any), ...extra });
+      expect(key(over())).toBe("lp-requires-base");
+      expect(launchNote(over())?.blocking).toBeUndefined();
+      expect(key(over({ installed: true }))).not.toBe("lp-requires-base");
+      expect(key(over({ downloading: true }))).not.toBe("lp-requires-base");
+    });
     it("pcbox blocks regardless of anything else", () => {
       expect(key(ctx({ game: game({ dosbox_variant: "pcbox" }) }))).toBe("pcbox");
     });
