@@ -472,6 +472,12 @@ CD, reads as 3%). The size rule survives only as the fallback for a pack
 with no bundled list, because it invents nothing. `games.download_size` is
 useless for this either way: it is archive plus the shared English
 GameData (§6).
+The displayed download size follows what the click would ACTUALLY fetch:
+the English archive is added only while its game directory is absent, so an
+overlay variant costs the patch alone once the base is installed (Alien
+Odyssey DE: 17.9 MB instead of 476 MB), and `requires_base` - the note that
+announces the extra download - is set in exactly that case too.
+
 The English row is then queued as its own library entry
 (`dependency-download-started`, so the frontend tracks it - the poll is what
 extracts), and the extraction copies the English tree into the LP directory

@@ -137,10 +137,26 @@ pub async fn get_game_variants(
             dependents_by_base.push((id, names.join(", ")));
         }
     }
+    // Where the English trees live, so an already-installed base is not
+    // charged again.
+    let root = queries::get_config(&conn, "data_dir")
+        .ok()
+        .flatten()
+        .map(|d| crate::commands::paths::game_root(&d));
     for game in &mut games {
-        if let Some(base) = crate::commands::lp_overlay::base_archive_size(&conn, game) {
-            game.requires_base = true;
-            game.download_size = Some(game.download_size.unwrap_or(0) + base as i64);
+        if let Some(base) = crate::commands::lp_overlay::base_for(&conn, game) {
+            let on_disk = root
+                .as_ref()
+                .and_then(|r| crate::commands::lp_overlay::base_game_dir(r, &base))
+                .is_some();
+            // Only what this click would actually fetch: the patch alone once
+            // the English game is there, both together while it is not.
+            if !on_disk {
+                game.requires_base = true;
+                if let Some(size) = crate::commands::lp_overlay::archive_size_of(&base) {
+                    game.download_size = Some(game.download_size.unwrap_or(0) + size as i64);
+                }
+            }
         }
         game.installed_with = dependents_by_base
             .iter()

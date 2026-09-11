@@ -248,3 +248,9 @@
 - Grund: eXos Installer macht genau dasselbe wie wir - `unzip eXoDOS\<Spiel>.zip -d eXoDOS\!german\` und dann das Sprachpaket darueber - aber gegated auf diese Liste. Symlinks scheiden aus, weil das Spiel in seinen eigenen Ordner schreibt (Alien Odysseys `run.bat` loescht und kopiert Treiberdateien); ueber einen Link landete das in der englischen Installation.
 - Gotcha: Die Liste steckt nicht in `util.zip`, sondern im grossen `<Pack>_Metadata.zip`, und nennt englische Bat-Namen, nicht die lokalisierten Titel. Geholt mit `examples/media_pack_spike` und `EXTRACT=...`; der Befehl steht im Kopf der Dateien. Polnisch fehlt noch (Torrent gibt gerade nichts her), dort greift der Rueckfall.
 - Messung: Eine geklonte Kopie kostet auf APFS null Bytes (freier Platz vorher/nachher identisch, `du` meldet trotzdem 565 MB). Nur NTFS und aeltere Linux-Dateisysteme zahlen den vollen Preis.
+
+## 2026-09-11 - Die angezeigte Groesse ist die, die der Klick wirklich kostet
+- Entscheidung: `get_game_variants` addiert das englische Archiv nur, wenn dessen Spielverzeichnis fehlt; `requires_base` wird genau dann gesetzt. Geprueft wird das Verzeichnis, nicht das `installed`-Flag - es ist die Bedingung, an der auch die Extraktion haengt.
+- Verworfen: immer beides zu addieren (war der Zustand: 476 MB fuer einen 1.168-Byte-Patch neben einer bereits installierten englischen Fassung) und das `installed`-Flag zu befragen (kann ohne Verzeichnis gesetzt sein).
+- Grund: Report "DE zeigt volle Groesse, obwohl EN installiert ist". Gemessen nach der Aenderung: EN 476,2 MB, DE 17,9 MB (Patch plus gemeinsame GameData), ES 474,1 MB.
+- Gotcha: Die 17,9 MB sind fast vollstaendig die gemeinsamen Extras aus dem englischen Archiv (§6), der Patch selbst ist gut ein Kilobyte.

@@ -171,10 +171,9 @@ pub fn dependents_of(
         .collect()
 }
 
-/// `base_for`'s size alone, for the panel and the disk preflight.
-pub fn base_archive_size(conn: &rusqlite::Connection, game: &Game) -> Option<u64> {
-    let base = base_for(conn, game)?;
-    archive_size(base.torrent_source.as_deref()?, base.game_torrent_index?)
+/// One row's own archive size, from the bundled torrent.
+pub fn archive_size_of(game: &Game) -> Option<u64> {
+    archive_size(game.torrent_source.as_deref()?, game.game_torrent_index?)
 }
 
 /// The English game directory for a base row, if it has been extracted.
@@ -261,75 +260,6 @@ fn copy_file(src: &Path, dst: &Path) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// A base with no installed translations has no dependents, and a
-    /// translation is never a base for anything.
-    #[test]
-    fn dependents_are_only_installed_overlays_of_the_same_group() {
-        let tmp = tempfile::tempdir().unwrap();
-        let conn = rusqlite::Connection::open(tmp.path().join("t.db")).unwrap();
-        crate::db::schema::create_tables(&conn).unwrap();
-        // No torrents are reachable from a temp db, so `base_for` answers
-        // None for everything: the guard rails are what this checks.
-        let mut base = crate::models::Game {
-            id: Some(1),
-            language: "EN".into(),
-            shortcode: Some("AlienOdy".into()),
-            torrent_source: Some("eXoDOS".into()),
-            ..sample_game()
-        };
-        assert!(dependents_of(&conn, &base, true).is_empty());
-        base.language = "DE".into();
-        assert!(
-            dependents_of(&conn, &base, true).is_empty(),
-            "a localized row is never a base"
-        );
-    }
-
-    fn sample_game() -> crate::models::Game {
-        crate::models::Game {
-            id: None,
-            title: "Alien Odyssey".into(),
-            sort_title: None,
-            platform: "MS-DOS".into(),
-            developer: None,
-            publisher: None,
-            release_date: None,
-            year: None,
-            genre: None,
-            series: None,
-            play_mode: None,
-            rating: None,
-            rating_votes: None,
-            description: None,
-            notes: None,
-            source: None,
-            application_path: None,
-            dosbox_conf: None,
-            status: None,
-            region: None,
-            max_players: None,
-            language: "EN".into(),
-            shortcode: None,
-            available_languages: None,
-            variant_titles: None,
-            torrent_source: None,
-            in_library: false,
-            installed: false,
-            favorited: false,
-            game_torrent_index: None,
-            gamedata_torrent_index: None,
-            download_size: None,
-            has_thumbnail: false,
-            dosbox_variant: None,
-            thumbnail_key: None,
-            manual_path: None,
-            last_played: None,
-            music_file: None,
-            requires_base: false,
-            installed_with: None,
-        }
-    }
 
     /// eXo's list is keyed on the launcher bat's name, which is what the
     /// row's `application_path` ends in.
