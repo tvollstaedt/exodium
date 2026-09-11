@@ -182,7 +182,13 @@ async function tick(t: Tracker) {
 
   if (p.finished) {
     t.stuckSince = 0;
-    setState(t, { status: "Extracting...", progress: safeProgress, downloading: true });
+    // The archive is complete but the install needs another game's files
+    // first (an overlay translation onto its English base).
+    setState(t, {
+      status: p.waiting_for ? `Waiting for ${p.waiting_for}…` : "Extracting...",
+      progress: safeProgress,
+      downloading: true,
+    });
     return;
   }
 
@@ -379,11 +385,27 @@ export async function cancelGameDownload(gameId: number) {
   if (t) { endTracker(t); }
   clearState(gameId);
   try {
-    await cancelDownload(gameId);
+    // Cancelling an English base takes the translations that were waiting on
+    // it: without it they can never install, and their card would sit at
+    // "Waiting for…" forever.
+    const alsoCancelled = await cancelDownload(gameId);
     // Second sweep after the slow backend cancel; a newer download owns
     // the entry.
     if (!trackers.has(gameId)) {
       clearState(gameId);
+    }
+    for (const dep of alsoCancelled ?? []) {
+      const dt = trackers.get(dep.id);
+      if (dt) { endTracker(dt); }
+      clearState(dep.id);
+    }
+    if (alsoCancelled?.length) {
+      showToast(
+        alsoCancelled.length === 1
+          ? `${alsoCancelled[0].title} was cancelled too - it needs the English version`
+          : `${alsoCancelled.length} translations were cancelled too - they need the English version`,
+        "info",
+      );
     }
     refreshLoadedGames();
   } catch {}

@@ -158,6 +158,10 @@ pub struct DownloadProgress {
     /// Optional error/status message from the command layer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// The archive is here but the install waits on another game: the
+    /// English base an overlay language variant is unpacked onto (§10a).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiting_for: Option<String>,
     /// librqbit's torrent state. `initializing` (hash check, minutes on
     /// Windows) keeps `progress` at 0; the UI shows "Validating…" instead.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -635,6 +639,7 @@ impl DownloadManager {
         let torrent_state = Some(stats.state.to_string());
 
         Some(DownloadProgress {
+            waiting_for: None,
             file_index,
             file_name,
             downloaded_bytes: downloaded,
@@ -671,6 +676,7 @@ impl DownloadManager {
                         0.0
                     };
                     active_downloads.push(DownloadProgress {
+            waiting_for: None,
                         file_index: idx,
                         file_name: entry.path.clone(),
                         downloaded_bytes: downloaded,

@@ -73,7 +73,10 @@ export async function toggleFavorite(id: number): Promise<boolean> {
   return invoke("toggle_favorite", { id });
 }
 
-export async function cancelDownload(id: number): Promise<void> {
+/** Localized variants cancelled along with the English game they needed. */
+export interface CancelledDependent { id: number; title: string }
+
+export async function cancelDownload(id: number): Promise<CancelledDependent[]> {
   return invoke("cancel_download", { id });
 }
 
@@ -427,6 +430,8 @@ export interface DownloadProgress {
    *  they keep downloading after the game itself is installed. */
   extras_progress?: number | null;
   extras_done?: boolean | null;
+  /** The archive is here, but the install waits on this other game's files. */
+  waiting_for?: string | null;
 }
 
 export interface SetupStatus {

@@ -37,6 +37,8 @@ interface Props {
 
 /** How long the cover keeps the hero to itself before the preview fades in. */
 const VIDEO_START_DELAY_MS = 2000;
+/** Matches the slot's transition in main.css. */
+const NOTE_CLOSE_MS = 240;
 
 /** Fallback for the slide-in's `animationend` (main.css: 260ms). Only reached
  *  when the event cannot arrive - prefers-reduced-motion, a hidden window -
@@ -194,6 +196,27 @@ export function GameDetailPanel(props: Props) {
     if (!n || n.blocking) { return n; }
     return dismissedNotesLoaded() && !isNoteDismissed(n.key) ? n : null;
   };
+  /** The note the slot renders. It outlives `note()` by the length of the
+   *  closing transition so the panel body glides instead of jumping, and
+   *  `noteOpen` drives the slot's height between 0fr and 1fr. */
+  const [shownNote, setShownNote] = createSignal<PanelNote | null>(null);
+  const [noteOpen, setNoteOpen] = createSignal(false);
+  createEffect(() => {
+    const n = note();
+    if (n) {
+      setShownNote(n);
+      // Two frames: the slot has to be laid out closed before it opens, or
+      // the browser has nothing to transition from.
+      let frame = requestAnimationFrame(() => {
+        frame = requestAnimationFrame(() => setNoteOpen(true));
+      });
+      onCleanup(() => cancelAnimationFrame(frame));
+      return;
+    }
+    setNoteOpen(false);
+    const timer = window.setTimeout(() => setShownNote(null), NOTE_CLOSE_MS);
+    onCleanup(() => clearTimeout(timer));
+  });
   /** The one `<video>`: attached to the controller while the panel is open,
    *  stopped and unloaded when it closes - never left with a source. */
   let heroEl: HTMLVideoElement | undefined;
@@ -1055,8 +1078,10 @@ export function GameDetailPanel(props: Props) {
             {/* Exactly one note. Three stacked boxes read as a wall of
                 warnings and buried the one that mattered, so they are ordered
                 by how much the reader can do about it. */}
-            <Show when={note()}>
+            <Show when={shownNote()}>
               {(n) => (
+                <div class={`game-detail-note-slot${noteOpen() ? " is-open" : ""}`}>
+                <div class="game-detail-note-clip">
                 <div class={`game-detail-note${n().blocking ? " is-blocking" : ""}`}>
                   <span class="game-detail-note-mark" aria-hidden="true">
                     {n().blocking ? "!" : "i"}
@@ -1077,6 +1102,8 @@ export function GameDetailPanel(props: Props) {
                       onClick={() => { void dismissNote(n().key); }}
                     >✕</button>
                   </Show>
+                </div>
+                </div>
                 </div>
               )}
             </Show>

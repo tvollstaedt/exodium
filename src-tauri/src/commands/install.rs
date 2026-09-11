@@ -558,6 +558,9 @@ pub async fn get_download_progress(
                                         log::debug!(
                                             "{title}: waiting for the English base before unpacking"
                                         );
+                                        if let Some(ref mut p) = progress {
+                                            p.waiting_for = Some(b.title.clone());
+                                        }
                                         return Ok(progress);
                                     }
                                 }
@@ -715,7 +718,7 @@ pub async fn cancel_download(
     db_state: State<'_, DbState>,
     torrent_state: State<'_, TorrentState>,
     id: i64,
-) -> Result<(), String> {
+) -> Result<Vec<CancelledDependent>, String> {
     let (game_idx, gamedata_idx, source) = {
         let conn = db_state.lock()?;
         let game = queries::fetch_game_by_id(&conn, id)
@@ -787,7 +790,71 @@ pub async fn cancel_download(
         queries::clear_in_library(&conn, id).map_err(|e| e.to_string())?;
     }
 
-    Ok(())
+    // Overlay variants waiting on this English base can never finish without
+    // it, and would sit at "waiting" forever. They go with it, and the
+    // frontend is told so it can drop their cards.
+    let dependents = cancel_dependents(&db_state, &torrent_state, id).await?;
+
+    Ok(dependents)
+}
+
+/// Cancel every not-yet-installed overlay variant that was waiting on this
+/// row, and report their ids. Empty for anything that is not such a base.
+async fn cancel_dependents(
+    db_state: &State<'_, DbState>,
+    torrent_state: &TorrentState,
+    base_id: i64,
+) -> Result<Vec<CancelledDependent>, String> {
+    let waiting: Vec<(i64, String, usize, String)> = {
+        let conn = db_state.lock()?;
+        let Some(base) = queries::fetch_game_by_id(&conn, base_id).map_err(|e| e.to_string())? else {
+            return Ok(Vec::new());
+        };
+        if base.language != "EN" {
+            return Ok(Vec::new());
+        }
+        let Some(shortcode) = base.shortcode.as_deref() else { return Ok(Vec::new()) };
+        let Some(source) = base.torrent_source.as_deref() else { return Ok(Vec::new()) };
+        queries::fetch_game_variants(&conn, shortcode, source)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .filter(|g| g.in_library && !g.installed && g.id != Some(base_id))
+            .filter(|g| crate::commands::lp_overlay::base_for(&conn, g).is_some())
+            .filter_map(|g| {
+                Some((
+                    g.id?,
+                    g.title.clone(),
+                    g.game_torrent_index? as usize,
+                    g.torrent_source.clone()?,
+                ))
+            })
+            .collect()
+    };
+
+    let mut cancelled = Vec::new();
+    for (id, title, idx, source) in waiting {
+        let manager = {
+            let guard = torrent_state.0.read().await;
+            guard.get(&source).cloned()
+        };
+        if let Some(manager) = manager {
+            manager.deselect_file(idx).await;
+        }
+        {
+            let conn = db_state.lock()?;
+            queries::clear_in_library(&conn, id).map_err(|e| e.to_string())?;
+        }
+        log::info!("cancel_download: also cancelled '{title}', which needed the English base");
+        cancelled.push(CancelledDependent { id, title });
+    }
+    Ok(cancelled)
+}
+
+/// A localized variant cancelled along with the English game it needed.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CancelledDependent {
+    pub id: i64,
+    pub title: String,
 }
 
 /// (in_flight, last_failure) for the !DOSmetadata.zip extraction: one at a

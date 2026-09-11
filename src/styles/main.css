@@ -3011,6 +3011,9 @@ body {
 
 /* Honor reduced-motion - plain color swap, no bursts. */
 @media (prefers-reduced-motion: reduce) {
+  .game-detail-note-slot {
+    transition: none;
+  }
   .favorite-btn.animating.is-favorited .fav-star,
   .favorite-btn.animating:not(.is-favorited) .fav-star,
   .fav-ring,
@@ -3231,6 +3234,32 @@ body {
    the actions below, so the container is a plain hairline card and the only
    varying element is a small round mark - "i" for what merely differs, "!"
    for a launch that cannot work. No color bar, no fill tint by severity. */
+/* The note comes and goes on a user action (pressing Download clears the
+   dependency note), and an abrupt unmount shifted the whole panel body.
+   The slot animates its own height instead: `grid-template-rows` between
+   0fr and 1fr is the one way to transition to a content-derived height.
+   The child needs `min-height: 0` or it refuses to shrink. */
+.game-detail-note-slot {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 0.22s cubic-bezier(0.2, 0.7, 0.3, 1),
+              opacity 0.16s ease;
+}
+
+.game-detail-note-slot.is-open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+/* The clipped box carries no padding or border of its own: a border-box
+   element cannot be laid out shorter than those, so the note itself would
+   keep 20px in the collapsed state. */
+.game-detail-note-clip {
+  min-height: 0;
+  overflow: hidden;
+}
+
 .game-detail-note {
   display: grid;
   grid-template-columns: auto 1fr auto;
