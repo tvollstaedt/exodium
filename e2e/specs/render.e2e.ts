@@ -95,4 +95,27 @@ describe("rendering regressions", () => {
     });
     expect(hovered).toEqual([]);
   });
+
+  it("a card far outside the viewport still has a height", async () => {
+    // `content-visibility: auto` skips an offscreen card's contents, so the
+    // card's own box carries the height. An engine that rejects the
+    // remembered-size form of `contain-intrinsic-size` drops the declaration
+    // and every unrendered card collapses to nothing - the grid then shrinks
+    // until the whole catalogue sits inside the cover preloader's margin.
+    const height = await browser.execute(() => {
+      const host = document.createElement("div");
+      host.style.cssText = "position:absolute;top:20000px;left:0;width:200px";
+      const card = document.createElement("div");
+      card.className = "game-card";
+      // With a thumb present the thumbless aspect-ratio rule does not apply,
+      // which is what leaves the intrinsic size as the only source of height.
+      card.appendChild(Object.assign(document.createElement("img"), { className: "game-card-thumb" }));
+      host.appendChild(card);
+      document.body.appendChild(host);
+      const h = card.getBoundingClientRect().height;
+      host.remove();
+      return h;
+    });
+    expect(height).toBeGreaterThan(100);
+  });
 });
