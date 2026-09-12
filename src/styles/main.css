@@ -1435,10 +1435,15 @@ body {
   transition: transform 0.2s ease, box-shadow 0.2s ease;
   background: var(--bg-card);
   /* Isolate each card's layout/paint so appending new cards doesn't trigger
-     full-grid reflow. This alone does NOT keep 7000+ cards cheap - every card
-     stays rendered and its cover stays decoded; skipping offscreen ones is
-     tracked in #24. */
+     full-grid reflow, and skip layout and paint entirely while the card is
+     offscreen. The body is absolutely positioned, so a card is exactly its
+     cover: 4/3 of the grid track, which the fallback approximates until the
+     card has rendered once and the browser remembers its real size. The
+     preload observer watches this element, not the cover, so it keeps its
+     full margin - only the contents are skipped, the box stays laid out. */
   contain: layout style paint;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 280px;
 }
 
 .game-card:hover {
