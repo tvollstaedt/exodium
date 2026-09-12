@@ -546,8 +546,8 @@ body {
 }
 
 .lib-empty-icon {
-  font-size: 48px;
   opacity: 0.3;
+  line-height: 0;
 }
 
 .lib-empty-text {

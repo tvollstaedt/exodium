@@ -20,6 +20,7 @@ import {
 import { PackHintBanner } from "../components/PackHintBanner";
 import { getGame, getGenres, getInstalledGames, getRecentlyPlayed, getConfig, getAvailableCollections, getSectionKeys, getGames, type CollectionInfo, type Game, type Playlist } from "../api/tauri";
 import { GameCard } from "../components/GameCard";
+import { IconEmptySearch, IconEmptyLibrary } from "../components/icons";
 import { GameRow } from "../components/GameRow";
 import { viewMode, applyViewMode, loadViewMode, setViewModeTransient, type ViewMode } from "../stores/view";
 import { GameDetailPanel } from "../components/GameDetailPanel";
@@ -785,7 +786,7 @@ export function Library() {
 
         <Show when={hasFetched() && !loading() && !error() && games().length === 0}>
           <div class="lib-empty">
-            <div class="lib-empty-icon">🔍</div>
+            <div class="lib-empty-icon"><IconEmptySearch /></div>
             <div class="lib-empty-text">
               {searchQuery() ? `No results for "${searchQuery()}"` : "No games match these filters"}
             </div>
@@ -871,7 +872,7 @@ export function Library() {
               when={librarySearch()}
               fallback={
                 <div class="lib-empty">
-                  <div class="lib-empty-icon">🎮</div>
+                  <div class="lib-empty-icon"><IconEmptyLibrary /></div>
                   <div class="lib-empty-text">No games yet</div>
                   <div class="lib-empty-sub">Switch to Browse to find and download games</div>
                   <button class="lib-empty-btn" onClick={() => switchTab("browse")}>Browse games</button>
@@ -882,7 +883,7 @@ export function Library() {
                   library - offer the whole catalogue instead of "download
                   something first". The query carries over to Browse. */}
               <div class="lib-empty">
-                <div class="lib-empty-icon">🔍</div>
+                <div class="lib-empty-icon"><IconEmptySearch /></div>
                 <div class="lib-empty-text">Nothing in your library matches "{searchQuery()}"</div>
                 <div class="lib-empty-sub">It may still be in the full collection</div>
                 <button class="lib-empty-btn" onClick={() => switchTab("browse")}>Search all games</button>

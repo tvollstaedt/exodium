@@ -151,3 +151,25 @@ export const FieldIcon = (props: { name: FieldIconName }) => (
     <path d={FIELD_ICONS[props.name]} />
   </svg>
 );
+
+/**
+ * The two empty states. They are icons rather than emoji for a reason beyond
+ * the colour-font one above: WebKitGTK's Skia rasterizer aborts the process
+ * inside its COLRv1 path on some hosts' emoji fonts (#28), and the empty
+ * search state is reached on the way through almost every typed query.
+ */
+export const IconEmptySearch = () => (
+  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+    <circle cx="11" cy="11" r="7" />
+    <path d="M20.5 20.5 16 16" />
+  </svg>
+);
+
+export const IconEmptyLibrary = () => (
+  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M6.5 7h11a4.5 4.5 0 0 1 4.4 3.6l1 5A3.2 3.2 0 0 1 19.8 19c-1 0-2-.5-2.6-1.4L15.8 16H8.2l-1.4 1.6C6.2 18.5 5.2 19 4.2 19a3.2 3.2 0 0 1-3.1-3.8l1-5A4.5 4.5 0 0 1 6.5 7z" />
+    <path d="M7 11v3M5.5 12.5h3M15.5 12h.01M18 14h.01" />
+  </svg>
+);
