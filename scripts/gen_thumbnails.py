@@ -376,7 +376,8 @@ def main() -> None:
         # Screenshots are in the chain because box art is not a given outside
         # eXoDOS: 230 of 1,140 eXoWin3x titles ship no box front of any kind,
         # and a title screen reads far better in the grid than an empty tile.
-        # eXoDOS barely reaches past the first layer.
+        # eXoDOS barely reaches past the first layer. The store poster is the
+        # last resort for a title that ships neither box nor screenshot.
         #
         # Extensions include .gif because some older eXoDOS entries (e.g.
         # "3-D Pitfall") ship animated-era GIFs as their only box-front asset;
@@ -387,6 +388,7 @@ def main() -> None:
             "Fanart - Box - Front",
             "Screenshot - Game Title",
             "Screenshot - Gameplay",
+            "Steam Poster",
         ]
         names = zf.namelist()
         box_front: list[str] = []
