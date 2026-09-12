@@ -227,10 +227,15 @@ export function Library() {
   };
 
   // Section keys come from a separate query and go stale with the search.
+  // Debounced on the same 300 ms as SearchBar's grid query, so a typed word
+  // costs one catalogue scan instead of one per character.
+  let sectionKeyTimer: ReturnType<typeof setTimeout> | undefined;
   createEffect(() => {
     searchQuery();
-    refreshSectionKeys();
+    clearTimeout(sectionKeyTimer);
+    sectionKeyTimer = setTimeout(refreshSectionKeys, 300);
   });
+  onCleanup(() => clearTimeout(sectionKeyTimer));
 
   // Jump bar labels: prefer backend-supplied (all keys, deduplicated), fall back to loaded sections
   const jumpBarLabels = createMemo(() => {
