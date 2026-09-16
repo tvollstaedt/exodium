@@ -390,6 +390,18 @@ DOSBox Staging ships as a Tauri `externalBin` in `src-tauri/binaries/`. Platform
 
 Variant distribution: ~63% classic `dosbox`, ~27% ECE4230, ~9% Staging - all handled by DOSBox Staging.
 
+**Shaders are TWO staged dirs, and the second one is silent when it is
+missing.** `shaders/` carries the fallback Staging aborts without ("Error
+setting fallback shaders"); `shader-presets/` carries the variants `crt-auto`
+switches between, and without it every adaptive CRT mode logs "Cannot locate
+shader preset" and drops to a plain shader. `get-dosbox.sh` stages both from
+the release archive (`resources/shaders`, `resources/shader-presets`; inside
+the macOS `.app` they sit under `Contents/Resources/`), `tauri.conf.json`
+bundles them, and `ensure_dosbox_shaders` copies each into DOSBox's own config
+dir gated on a sentinel FILE. 0.83.0 renamed `glshaders` to `shaders` and split
+the presets out; the config KEY `glshader` is still accepted as a deprecated
+alias, so the launcher's fragments did not change.
+
 **`resolve_engine` is the ONLY place that decides ECE vs Staging** - the
 launcher picks the binary from it, the detail panel labels the engine from it,
 and the printing and shader notes state their limitation from it. The answer

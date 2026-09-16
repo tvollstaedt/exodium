@@ -277,3 +277,9 @@
 - Entscheidung: `resolve_ignoring_case` sucht bei einem Fehlschlag den Eintrag des Elternverzeichnisses, der sich nur in der Schreibweise unterscheidet.
 - Grund: CI auf ubuntu-22.04 fiel ueber `lp_probe_follows_the_mount_target_into_a_subdirectory`; macOS und Windows bestanden ihn, weil ihre Dateisysteme die Schreibweise ignorieren. eXo schreibt `cd odyssey`, der Ordner heisst `ODYSSEY` - unter Linux verwarf die Pruefung deshalb funktionierende Konfigurationen und fiel auf den Ersatz-Autoexec zurueck.
 - Gotcha: Der Test dazu haelt auf allen Plattformen, weil er das Ergebnis auf `is_dir()` prueft statt auf die Schreibweise.
+
+## 2026-09-17 - DOSBox Staging 0.83.0: der Shader-Ordner heisst anders und ist jetzt zwei
+- Entscheidung: `get-dosbox.sh` holt 0.83.0 und legt `shaders` UND `shader-presets` getrennt ab (`resources/dosbox-shaders`, `resources/dosbox-shader-presets`); `ensure_dosbox_shaders` installiert beide in DOSBox' Konfigverzeichnis, jeweils an einer Sentinel-DATEI erkannt.
+- Verworfen: nur die Versionsnummer anzuheben - 0.83.0 hat `glshaders` in `shaders` umbenannt, die Staging-Suche lief ins Leere, und der Lauf endete mit "ABORT: RENDER: Error setting fallback shaders".
+- Grund: Gemessen mit dem frisch geholten Binary. Ohne `shader-presets` startet es zwar, meldet aber "Cannot locate shader preset 'crt/crt-hyllian:hercules'" und faellt auf einen einfachen Shader zurueck - der CRT-Modus waere still verschwunden.
+- Gotcha: Der Schluessel `glshader` gilt weiter als veraltetes Synonym fuer `shader`, ebenso `windowresolution` fuer `window_size` - die Startfragmente und alle 750 eXo-Konfigurationen (alle mit `sharp`) brauchten keine Aenderung. Softwarescaler (`scaler=normal2x`) meldet 0.83.0 dagegen als abgeloest.

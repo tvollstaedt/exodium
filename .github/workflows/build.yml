@@ -79,11 +79,16 @@ jobs:
       - name: Verify DOSBox staging is complete
         # Guard against shipping placeholder shaders: without the mandatory
         # fallback shader, DOSBox Staging aborts on every fresh install
-        # (glshader defaults to crt-auto). Fail the release build instead.
+        # (shader defaults to crt-auto), and without the presets crt-auto
+        # degrades to a plain shader. Fail the release build instead.
         shell: bash
         run: |
-          if [[ ! -f src-tauri/resources/dosbox-glshaders/interpolation/bilinear.glsl ]]; then
-            echo "::error::glshaders staging is missing or placeholder-only - a release from this state crashes DOSBox on fresh installs"
+          if [[ ! -f src-tauri/resources/dosbox-shaders/interpolation/bilinear.glsl ]]; then
+            echo "::error::shader staging is missing or placeholder-only - a release from this state crashes DOSBox on fresh installs"
+            exit 1
+          fi
+          if [[ ! -f src-tauri/resources/dosbox-shader-presets/crt/crt-hyllian/hercules.preset ]]; then
+            echo "::error::shader-presets staging is missing or placeholder-only - crt-auto would degrade to a plain shader"
             exit 1
           fi
 

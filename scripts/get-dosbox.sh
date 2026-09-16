@@ -15,7 +15,7 @@ done
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 BINARIES_DIR="$REPO_ROOT/src-tauri/binaries"
-VERSION="${VERSION:-0.82.2}"
+VERSION="${VERSION:-0.83.0}"
 
 mkdir -p "$BINARIES_DIR"
 
@@ -57,7 +57,8 @@ OUT_BIN="$BINARIES_DIR/dosbox-staging-$TRIPLE"
 # `tauri build` runs, otherwise the build script errors with
 # "resource path doesn't exist". Declared early so the outer skip-check
 # can require both binary AND staged shaders before bailing out.
-STAGED_SHADERS="$REPO_ROOT/src-tauri/resources/dosbox-glshaders"
+STAGED_SHADERS="$REPO_ROOT/src-tauri/resources/dosbox-shaders"
+STAGED_PRESETS="$REPO_ROOT/src-tauri/resources/dosbox-shader-presets"
 
 # Same trick for the dosbox-bin folder. On Windows we populate it below
 # with the entire DOSBox Staging folder (dosbox-staging.exe + 9 DLLs +
@@ -130,23 +131,54 @@ curl -fL --progress-bar -o "$TMP_DIR/$ARCHIVE" "$DOWNLOAD_URL"
 
 echo "Extracting..."
 
-# Ensure the staged dir exists as a non-empty directory even when the
-# upstream archive has no glshaders folder, so tauri build never fails
-# on a missing resource path.
-stage_shaders_from() {
-  local src="$1"
-  mkdir -p "$(dirname "$STAGED_SHADERS")"
-  rm -rf "$STAGED_SHADERS"
+# Ensure a staged dir exists as a non-empty directory even when the upstream
+# archive has no such folder, so tauri build never fails on a missing
+# resource path.
+stage_dir_from() {
+  local src="$1" dest="$2"
+  mkdir -p "$(dirname "$dest")"
+  rm -rf "$dest"
   if [[ -n "$src" && -d "$src" ]]; then
-    cp -r "$src" "$STAGED_SHADERS"
+    cp -r "$src" "$dest"
+  else
+    mkdir -p "$dest"
+    touch "$dest/.placeholder"
+  fi
+}
+
+# Shaders live in two sibling dirs: `shaders` holds the shader files (the
+# fallback among them, without which Staging aborts at startup), while
+# `shader-presets` holds the variants crt-auto switches between - missing
+# presets are not fatal but degrade every adaptive CRT mode.
+stage_shaders_from() {
+  local shaders="$1" presets="$2"
+  stage_dir_from "$shaders" "$STAGED_SHADERS"
+  stage_dir_from "$presets" "$STAGED_PRESETS"
+  if [[ -n "$shaders" && -d "$shaders" ]]; then
     echo "Staged shaders for bundling: $STAGED_SHADERS"
   else
-    mkdir -p "$STAGED_SHADERS"
-    touch "$STAGED_SHADERS/.placeholder"
     echo "WARNING: No upstream shaders found; wrote placeholder to $STAGED_SHADERS"
-    echo "WARNING: A release built from this state ships WITHOUT glshaders -"
-    echo "         DOSBox Staging aborts on fresh installs (glshader defaults to crt-auto)."
+    echo "WARNING: A release built from this state ships WITHOUT shaders -"
+    echo "         DOSBox Staging aborts on fresh installs (shader defaults to crt-auto)."
   fi
+  if [[ -z "$presets" || ! -d "$presets" ]]; then
+    echo "WARNING: No upstream shader presets found; crt-auto will fall back to a plain shader."
+  fi
+}
+
+# Install both dirs into DOSBox's own config dir so local dev runs work.
+install_dev_shaders() {
+  local dir="$1" shaders="$2" presets="$3"
+  mkdir -p "$dir"
+  if [[ -n "$shaders" && -d "$shaders" ]]; then
+    rm -rf "$dir/shaders"
+    cp -r "$shaders" "$dir/shaders"
+  fi
+  if [[ -n "$presets" && -d "$presets" ]]; then
+    rm -rf "$dir/shader-presets"
+    cp -r "$presets" "$dir/shader-presets"
+  fi
+  echo "Installed dev shaders to $dir"
 }
 
 if [[ "$ARCHIVE" == *.dmg ]]; then
@@ -159,23 +191,22 @@ if [[ "$ARCHIVE" == *.dmg ]]; then
   # Stage + install GLSL shaders. macOS runtime uses `output = texture` in
   # launch_game, so shaders aren't strictly needed, but staging keeps the
   # bundle consistent across platforms.
-  SHADER_SRC="$APP/Contents/Resources/glshaders"
-  # Copy source out of the mount before detaching.
-  SHADER_TMP="$TMP_DIR/glshaders"
+  SHADER_SRC="$APP/Contents/Resources/shaders"
+  PRESET_SRC="$APP/Contents/Resources/shader-presets"
+  # Copy sources out of the mount before detaching.
+  SHADER_TMP="$TMP_DIR/shaders"
+  PRESET_TMP="$TMP_DIR/shader-presets"
   if [[ -d "$SHADER_SRC" ]]; then
     cp -r "$SHADER_SRC" "$SHADER_TMP"
   fi
+  if [[ -d "$PRESET_SRC" ]]; then
+    cp -r "$PRESET_SRC" "$PRESET_TMP"
+  fi
   hdiutil detach -quiet "$MOUNT_POINT"
   rm -rf "$MOUNT_POINT"
+  stage_shaders_from "$SHADER_TMP" "$PRESET_TMP"
   if [[ -d "$SHADER_TMP" ]]; then
-    stage_shaders_from "$SHADER_TMP"
-    PREFS_DIR="$HOME/Library/Preferences/DOSBox"
-    mkdir -p "$PREFS_DIR"
-    rm -rf "$PREFS_DIR/glshaders"
-    cp -r "$SHADER_TMP" "$PREFS_DIR/glshaders"
-    echo "Installed dev shaders to $PREFS_DIR/glshaders"
-  else
-    stage_shaders_from ""
+    install_dev_shaders "$HOME/Library/Preferences/DOSBox" "$SHADER_TMP" "$PRESET_TMP"
   fi
 elif [[ "$ARCHIVE" == *.tar.xz ]]; then
   tar -xJf "$TMP_DIR/$ARCHIVE" -C "$TMP_DIR"
@@ -186,14 +217,11 @@ elif [[ "$ARCHIVE" == *.tar.xz ]]; then
   # Stage GLSL shaders for bundling AND install to the user config dir so
   # local dev works. Without these, DOSBox aborts with
   # "Fallback shader 'interpolation/bilinear' not found".
-  SHADER_SRC="$(find "$TMP_DIR" -type d -name "glshaders" | head -1)"
-  stage_shaders_from "$SHADER_SRC"
+  SHADER_SRC="$(find "$TMP_DIR" -type d -name "shaders" | head -1)"
+  PRESET_SRC="$(find "$TMP_DIR" -type d -name "shader-presets" | head -1)"
+  stage_shaders_from "$SHADER_SRC" "$PRESET_SRC"
   if [[ -n "$SHADER_SRC" ]]; then
-    CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/dosbox"
-    mkdir -p "$CONFIG_DIR"
-    rm -rf "$CONFIG_DIR/glshaders"
-    cp -r "$SHADER_SRC" "$CONFIG_DIR/glshaders"
-    echo "Installed dev shaders to $CONFIG_DIR/glshaders"
+    install_dev_shaders "${XDG_CONFIG_HOME:-$HOME/.config}/dosbox" "$SHADER_SRC" "$PRESET_SRC"
   fi
 elif [[ "$ARCHIVE" == *.zip ]]; then
   unzip -q "$TMP_DIR/$ARCHIVE" -d "$TMP_DIR/extracted"
@@ -202,16 +230,13 @@ elif [[ "$ARCHIVE" == *.zip ]]; then
   FOUND="$(find "$TMP_DIR/extracted" -type f \( -name "dosbox-staging.exe" -o -name "dosbox.exe" \) -not -name "*debugger*" | head -1)"
   cp "$FOUND" "$OUT_BIN"
   # Stage GLSL shaders for bundling AND install to the user config dir.
-  # %LOCALAPPDATA%\DOSBox\glshaders is where DOSBox looks; without these,
+  # %LOCALAPPDATA%\DOSBox\shaders is where DOSBox looks; without these,
   # it aborts with "Fallback shader 'interpolation/bilinear' not found".
-  SHADER_SRC="$(find "$TMP_DIR/extracted" -type d -name "glshaders" | head -1)"
-  stage_shaders_from "$SHADER_SRC"
+  SHADER_SRC="$(find "$TMP_DIR/extracted" -type d -name "shaders" | head -1)"
+  PRESET_SRC="$(find "$TMP_DIR/extracted" -type d -name "shader-presets" | head -1)"
+  stage_shaders_from "$SHADER_SRC" "$PRESET_SRC"
   if [[ -n "$SHADER_SRC" ]]; then
-    CONFIG_DIR="${LOCALAPPDATA:-$HOME/AppData/Local}/DOSBox"
-    mkdir -p "$CONFIG_DIR"
-    rm -rf "$CONFIG_DIR/glshaders"
-    cp -r "$SHADER_SRC" "$CONFIG_DIR/glshaders"
-    echo "Installed dev shaders to $CONFIG_DIR/glshaders"
+    install_dev_shaders "${LOCALAPPDATA:-$HOME/AppData/Local}/DOSBox" "$SHADER_SRC" "$PRESET_SRC"
   fi
   # Stage the full DOSBox folder so we can ship its DLLs + resources/ next
   # to the .exe in our bundle. Without SDL2.dll, vcruntime140.dll, the

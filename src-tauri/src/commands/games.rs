@@ -1472,39 +1472,50 @@ fn resolve_dosbox(app: &AppHandle) -> PathBuf {
     PathBuf::from(bin)
 }
 
-/// Copy the bundled glshaders into DOSBox's user config dir. Without them
-/// Staging aborts at startup ("Fallback shader 'interpolation/bilinear' not
-/// found"). Checks the fallback shader FILE, not the dir: an empty dir has
-/// been seen in the wild.
-fn ensure_dosbox_shaders(app: &AppHandle) {
-    use tauri::Manager;
-
-    let user_shader_dir: Option<PathBuf> = if cfg!(target_os = "linux") {
+/// DOSBox's own config dir, where it looks for `shaders` and `shader-presets`.
+fn dosbox_user_config_dir() -> Option<PathBuf> {
+    if cfg!(target_os = "linux") {
         std::env::var("XDG_CONFIG_HOME")
             .ok()
             .map(PathBuf::from)
             .or_else(|| std::env::var("HOME").ok().map(|h| PathBuf::from(h).join(".config")))
-            .map(|b| b.join("dosbox").join("glshaders"))
+            .map(|b| b.join("dosbox"))
     } else if cfg!(target_os = "windows") {
-        std::env::var("LOCALAPPDATA")
-            .ok()
-            .map(|p| PathBuf::from(p).join("DOSBox").join("glshaders"))
+        std::env::var("LOCALAPPDATA").ok().map(|p| PathBuf::from(p).join("DOSBox"))
     } else if cfg!(target_os = "macos") {
         std::env::var("HOME")
             .ok()
-            .map(|h| PathBuf::from(h).join("Library").join("Preferences").join("DOSBox").join("glshaders"))
+            .map(|h| PathBuf::from(h).join("Library").join("Preferences").join("DOSBox"))
     } else {
         None
-    };
+    }
+}
 
-    let Some(user_shader_dir) = user_shader_dir else {
+/// Copy the bundled shaders into DOSBox's user config dir. Without the shader
+/// set Staging aborts at startup ("Error setting fallback shaders"); without
+/// the presets every adaptive CRT mode degrades to a plain shader. Each is
+/// gated on a FILE, not the dir: an empty dir has been seen in the wild.
+fn ensure_dosbox_shaders(app: &AppHandle) {
+    use tauri::Manager;
+
+    let Some(config_dir) = dosbox_user_config_dir() else {
         log::warn!("Could not determine DOSBox user config dir; shaders not installed");
         return;
     };
 
-    if user_shader_dir.join("interpolation").join("bilinear.glsl").is_file() {
-        return;
-    }
+    // (user dir leaf, sentinel below it, bundle candidates newest layout first)
+    let sets: [(&str, &str, &[&str]); 2] = [
+        (
+            "shaders",
+            "interpolation/bilinear.glsl",
+            &["shaders", "dosbox-shaders", "resources/dosbox-shaders"],
+        ),
+        (
+            "shader-presets",
+            "crt/crt-hyllian/hercules.preset",
+            &["shader-presets", "dosbox-shader-presets", "resources/dosbox-shader-presets"],
+        ),
+    ];
 
     let res_dir = match app.path().resource_dir() {
         Ok(d) => d,
@@ -1513,30 +1524,29 @@ fn ensure_dosbox_shaders(app: &AppHandle) {
             return;
         }
     };
-    // Production layout first ("glshaders"), then pre-0.8.4 bundles
-    // ("dosbox-glshaders"), then the dev-mode staged source path.
-    const SHADER_RES_DIRS: &[&str] =
-        &["glshaders", "dosbox-glshaders", "resources/dosbox-glshaders"];
-    let Some(bundled) = SHADER_RES_DIRS
-        .iter()
-        .map(|sub| res_dir.join(sub))
-        .find(|p| p.join("interpolation").join("bilinear.glsl").is_file())
-    else {
-        log::warn!("No bundled DOSBox shaders found under {}", res_dir.display());
-        return;
-    };
 
-    if let Some(parent) = user_shader_dir.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
-            log::warn!("Failed to create DOSBox config parent dir: {}", e);
+    for (leaf, sentinel, candidates) in sets {
+        let dest = config_dir.join(leaf);
+        if dest.join(sentinel).is_file() {
+            continue;
+        }
+        let Some(bundled) = candidates
+            .iter()
+            .map(|sub| res_dir.join(sub))
+            .find(|p| p.join(sentinel).is_file())
+        else {
+            log::warn!("No bundled DOSBox {} found under {}", leaf, res_dir.display());
+            continue;
+        };
+        if let Err(e) = std::fs::create_dir_all(&config_dir) {
+            log::warn!("Failed to create DOSBox config dir: {}", e);
             return;
         }
-    }
-
-    if let Err(e) = copy_dir_recursive(&bundled, &user_shader_dir) {
-        log::warn!("Failed to install DOSBox shaders: {}", e);
-    } else {
-        log::info!("Installed DOSBox shaders to {}", user_shader_dir.display());
+        if let Err(e) = copy_dir_recursive(&bundled, &dest) {
+            log::warn!("Failed to install DOSBox {}: {}", leaf, e);
+        } else {
+            log::info!("Installed DOSBox {} to {}", leaf, dest.display());
+        }
     }
 }
 
