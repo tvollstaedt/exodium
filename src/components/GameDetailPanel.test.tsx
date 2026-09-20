@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { createSignal } from "solid-js";
 import { render } from "solid-js/web";
 import { invoke } from "@tauri-apps/api/core";
 import type { Game } from "../api/tauri";
@@ -406,6 +407,55 @@ describe("GameDetailPanel", () => {
     expect(text).toContain("no German text");
     // Fields fall back to the English row rather than rendering blank.
     expect(text).toContain("Bullfrog Productions, Ltd.");
+    dispose();
+    host.remove();
+  });
+
+  /** The grid hands the panel a FRESH object for the same row on every library
+   *  refresh, and the panel's effects key on ids for exactly that reason - an
+   *  effect hanging on `props.game` reloads the media and takes the strip down
+   *  with it. Four fixes have each moved one trigger onto an id (68a65cfc,
+   *  8b3fabb0, DECISIONS 2026-09-11); this is the guard none of them left
+   *  behind. */
+  it("keeps the same gallery elements when the library refreshes the row", async () => {
+    vi.useFakeTimers();
+    const META = {
+      manual_path: null, manual_kind: null,
+      images: ["/pack/Magic Carpet-01.png", "/pack/Magic Carpet-02.png"],
+      thumbnails: ["/cache/1.png", "/cache/2.png"],
+    };
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_game_metadata") { return META; }
+      if (cmd === "get_game_variants") { return []; }
+      if (cmd === "game_disk_usage") { return { game_bytes: 463_000, archive_bytes: 0, save_bytes: 0 }; }
+      return null;
+    });
+
+    const [game, setGame] = createSignal(makeGame({ installed: true, in_library: true }));
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const dispose = render(() => <GameDetailPanel game={game()} onClose={() => {}} />, host);
+    await vi.advanceTimersByTimeAsync(3200);
+
+    const before = Array.from(document.body.querySelectorAll("img.gallery-thumb"));
+    expect(before.length, "the strip renders one img per image").toBe(2);
+    const metaCalls = mockInvoke.mock.calls.filter((c) => c[0] === "get_game_metadata").length;
+
+    // What Library.tsx does on `lastGameLibraryChange`: same id, new object.
+    setGame(makeGame({ installed: true, in_library: true }));
+    await vi.advanceTimersByTimeAsync(3200);
+
+    const after = Array.from(document.body.querySelectorAll("img.gallery-thumb"));
+    expect(after.length).toBe(2);
+    // Identity, not count: a remounted strip decodes its images again, which
+    // is the flash this guards.
+    expect(after[0], "the gallery must not be rebuilt").toBe(before[0]);
+    expect(after[1]).toBe(before[1]);
+    expect(
+      mockInvoke.mock.calls.filter((c) => c[0] === "get_game_metadata").length,
+      "and its media must not be fetched again",
+    ).toBe(metaCalls);
+
     dispose();
     host.remove();
   });

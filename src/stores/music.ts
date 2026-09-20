@@ -389,7 +389,7 @@ const [playError, setPlayError] = createSignal<string | null>(null);
 const [barHidden, setBarHidden] = createSignal(false);
 /** The bar's cover was clicked: Library opens this game's panel. */
 const [openGameRequest, setOpenGameRequest] = createSignal<number | null>(null);
-export { currentTrack, wanted as wantedTrack, mode as musicMode, playing as musicPlaying, userPaused as musicUserPaused, pauseReasons, playError as musicPlayError, barHidden as playerHidden, openGameRequest, setOpenGameRequest };
+export { currentTrack, wanted as wantedTrack, wantedAuto as wantedIsAuto, mode as musicMode, playing as musicPlaying, userPaused as musicUserPaused, pauseReasons, playError as musicPlayError, barHidden as playerHidden, openGameRequest, setOpenGameRequest };
 
 let port: AudioPort | null = null;
 const reasons = new Set<PauseReason>();
@@ -492,14 +492,16 @@ function clearSkipTimer() {
 const autoAdvances = () => mode() !== "theme";
 
 /** Was the pending `wanted` put there by a panel autoplay (as opposed to a
- *  click)? Only such a wait may be withdrawn when its panel closes. */
-let wantedAuto = false;
+ *  click)? Only such a wait may be withdrawn when its panel closes, and the
+ *  bar stays shut for it: opening a game must not cost 56 px of window for a
+ *  probe that usually answers "no theme". */
+const [wantedAuto, setWantedAuto] = createSignal(false);
 
 /** Set the track the player is waiting on. It becomes the current one the
  *  moment its bytes are on disk; until then whatever plays keeps playing. */
 function want(track: Track, auto = false) {
   clearSkipTimer();
-  wantedAuto = auto;
+  setWantedAuto(auto);
   // Whatever is asked for now is newer than a parked panel theme.
   deferredTheme = null;
   if (steppingBackTo !== track.gameId) { steppingBackTo = null; }
@@ -554,7 +556,7 @@ function reconcile() {
   if (!state) { return; }
   if (state.phase === "ready" && state.path) {
     clearSkipTimer();
-    const auto = wantedAuto;
+    const auto = wantedAuto();
     setWanted(null);
     void load(w, state.path, auto);
   } else if (state.phase === "none" || state.phase === "error") {
@@ -682,7 +684,7 @@ export function playTheme(game: Pick<Game, "id" | "title" | "torrent_source" | "
  *  the bytes land in the cache. A click's wait is never withdrawn. */
 export function withdrawAutoTheme(gameId: number) {
   if (deferredTheme?.gameId === gameId) { deferredTheme = null; }
-  if (wantedAuto && wanted()?.gameId === gameId) {
+  if (wantedAuto() && wanted()?.gameId === gameId) {
     clearSkipTimer();
     setWanted(null);
   }

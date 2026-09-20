@@ -760,6 +760,23 @@ the screenshot strip stays on screen. Never give the flexible middle region
 `min-height: 0` again - that let the flex solver collapse the description to
 an invisible 0px and clip the gallery.
 
+**Every effect in the panel keys on an id, never on `props.game`** - the grid
+hands over a fresh object for the same row on every library refresh, and an
+effect that hangs on the object reloads the media and takes the screenshot
+strip down with it. Four fixes each moved one trigger onto an id without
+leaving a guard behind; `keeps the same gallery elements when the library
+refreshes the row` (`GameDetailPanel.test.tsx`) is that guard - it asserts
+NODE IDENTITY, because a remounted strip decodes its images again.
+
+**What moves the gallery is the PANEL's height, not the panel's content.**
+The strip sits below `.game-detail-scroll`, which is `flex: 1` with a
+`min-height: 120px` floor, so content growing inside that region (the "On
+disk" row landing late, a note, the articles block) only makes it scroll.
+Anything that changes the panel's own height drags the strip instead - which
+is how the player bar's 56 px (`body.has-player`) became a visible flicker
+when a theme probe opened and closed it (§14, DECISIONS 2026-09-20). Measure
+such a report against the panel box before suspecting a re-render.
+
 ### 13. Image performance: cache on disk, load ahead of the viewport
 
 The metadata pack is 36k images / 5.0 GB (avg 145 KB, max 18.6 MB) rendered in

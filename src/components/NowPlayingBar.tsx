@@ -1,7 +1,7 @@
 import { createEffect, createSignal, on, onCleanup, onMount, Show } from "solid-js";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import {
-  attachAudio, currentTrack, musicPlaying, musicVolume, setMusicVolume, pauseReasons, wantedTrack, musicMode, musicPlayError,
+  attachAudio, currentTrack, musicPlaying, musicVolume, setMusicVolume, pauseReasons, wantedTrack, wantedIsAuto, musicMode, musicPlayError,
   musicContinuous, setMusicContinuous,
   togglePlay, next, prev, hidePlayer, playerHidden, startShuffle, setOpenGameRequest, getMusicState, musicJobs, type AudioPort,
 } from "../stores/music";
@@ -126,9 +126,12 @@ export function NowPlayingBar() {
   });
 
 
-  /** What the bar shows: a loaded OR still-fetching track (a first shuffle
-   *  pick can take a minute), unless hidden with ×. */
-  const barTrack = () => currentTrack() ?? wantedTrack();
+  /** What the bar shows: a loaded track, or one the listener asked for that is
+   *  still fetching (a first shuffle pick can take a minute) - unless hidden
+   *  with ×. A panel's autoplay probe is not such an ask: it resolves to "no
+   *  theme" for about half the catalogue, and the bar costs the panel 56 px
+   *  both ways (§14). The panel's own Theme row reports that wait. */
+  const barTrack = () => currentTrack() ?? (wantedIsAuto() ? null : wantedTrack());
   const visibleTrack = () => (playerHidden() ? null : barTrack());
   /** Nothing is loaded yet: the transport has nothing to act on. */
   const loadingOnly = () => currentTrack() == null;
