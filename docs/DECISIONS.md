@@ -331,3 +331,9 @@
 - Verworfen: Upgrade auf 9.0.1 (gleicher Code, `main` ebenfalls); Torrent vor `update_only_files` pausieren (killt alle Peers bei jedem Spielstart-Download).
 - Grund: Gemessen per `sample` an der haengenden App: `download_game -> update_only_files` haelt den State-Lock und wartet auf einen DashMap-Shard, `on_peer_died` haelt den Shard (`get_mut`) und wartet auf den State-Lock (`lock_write`); alle Tokio-Worker parken in parking_lot, jedes async-Kommando haengt - im Lesesaal als "Preparing..." ohne Ende sichtbar.
 - Gotcha: Der Deadlock braucht einen sterbenden Peer waehrend eines Spielstart-Downloads - selten, aber dann steht die ganze App und nur ein Neustart hilft. Upstream-Issue/PR steht aus.
+
+## 2026-09-20 - Lesesaal-Cover als eigenes Poster-Pack (content-v8)
+- Entscheidung: `posters-eXoMedia-v1` ist ein eigenes Content Pack (`content/posters/eXoMedia`, 400 px Q90 wie die Spiel-Packs); die Einstellungen zeigen es in einer eigenen Gruppe "Reading Room", der Banner ueber dem Lesesaal-Grid haengt am selben Trigger wie in Browse.
+- Verworfen: die Cover in das eXoDOS-Poster-Pack mischen.
+- Grund: Packs werden als Ganzes versioniert - ein Merge haette bei jedem Bestandsnutzer die vorhandenen 397 MB geloescht und alles neu gezogen, fuer 178 MB neuer Kunst.
+- Gotcha: Das Media Pack ist keine Collection. Manifest, Install und Adoption fragen nie `COLLECTION_MAP`, also tragen sie die Quelle ohne Zutun; die beiden Frontend-Sweeps zaehlen aber Collections auf und haengen `MEDIA_SOURCE` selbst an - die `collections`-Config darf die Id nie bekommen, sonst liegt ein 237-GB-Torrent beim naechsten Start in jeder Installation.

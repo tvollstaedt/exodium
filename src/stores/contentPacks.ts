@@ -9,7 +9,7 @@ import {
   getAvailableCollections,
   type ContentPackStatus,
 } from "../api/tauri";
-import { loadThumbnailDir } from "./thumbnails";
+import { loadThumbnailDir, MEDIA_SOURCE } from "./thumbnails";
 import { showToast } from "./toasts";
 
 // ── Installed pack state (reactive) ──────────────────────────────────────────
@@ -28,17 +28,20 @@ export async function refreshInstalledPacks() {
     const collections = await getAvailableCollections();
     const allInstalled = new Set<string>();
     const byCollection: Record<string, ContentPackStatus[]> = {};
-    for (const col of collections) {
+    // The reading room's covers ship as a pack too, but its source is not a
+    // collection (§19), so it is not in `getAvailableCollections`.
+    const sources = [...collections.map((col) => col.id), MEDIA_SOURCE];
+    for (const id of sources) {
       try {
-        const packs = await listContentPacks(col.id);
-        byCollection[col.id] = packs;
+        const packs = await listContentPacks(id);
+        byCollection[id] = packs;
         for (const p of packs) {
           if (p.installed) {
-            allInstalled.add(`${col.id}:${p.id}`);
+            allInstalled.add(`${id}:${p.id}`);
           }
         }
       } catch {
-        // Collection may not have content packs - ignore
+        // Source may not have content packs - ignore
       }
     }
     setInstalledPacks(allInstalled);

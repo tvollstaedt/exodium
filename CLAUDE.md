@@ -1705,6 +1705,20 @@ gate and the dialog live in `MediaNotice.tsx` and BOTH entry points go
 through it - the Reading Room and the game panel's "Covered in" links; a
 user who never opens the tab must still see it once.
 
+**Its covers are a Tier 1 pack like a collection's, in a Settings group of
+their own.** `posters-eXoMedia-v1` (release `content-v8`) installs to
+`content/posters/eXoMedia` and is resolved by the same
+`thumbnailCandidates` walk the grids use, keyed on `MEDIA_SOURCE`. Nothing
+in the pack pipeline gates on `COLLECTION_MAP`, so listing, installing and
+adoption work for a source that is not a collection - but the two frontend
+sweeps that enumerate collections do: `refreshInstalledPacks` appends
+`MEDIA_SOURCE` to `getAvailableCollections`, and `ContentPackSettings`
+appends a "Reading Room" group last rather than reading the id from the
+`collections` config, which must never carry it (§15: everything in there
+gets a torrent). With the store filled, `PackHintBanner` above the reading
+grid fires on exactly Browse's trigger - the grid is on Tier 0 and the
+poster pack is available and not installed.
+
 ## Conventions
 
 - **Every Tauri command that touches the DB, filesystem, or network MUST be

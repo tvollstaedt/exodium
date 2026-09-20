@@ -72,7 +72,7 @@ export function PackHintBanner(props: Props) {
         <div class="pack-hint-text">
           <div class="pack-hint-title">Better covers available</div>
           <div class="pack-hint-desc">
-            {pack()!.display_name} for this collection is an optional{" "}
+            {pack()!.display_name} is an optional{" "}
             {formatBytes(pack()!.size_bytes)} download. You can also manage it later
             in Settings.
           </div>

@@ -338,7 +338,18 @@
     "eXoMedia": {
       "torrent_infohash": "cb73d61e6b4ea5eaa793c64c1d80e6113e95de84",
       "game_count": 0,
-      "content_packs": {}
+      "content_packs": {
+        "posters": {
+          "display_name": "Cover Art",
+          "description": "HD covers for the magazines, books and catalogs in the reading room",
+          "url": "https://github.com/tvollstaedt/exodium/releases/download/content-v8/posters-eXoMedia-v1.tar.gz",
+          "sha256": "7f24baee5d813e70dcf0a6cffe0a6fafdc74c95eb304488ff8de2e27e89dedf3",
+          "size_bytes": 178472110,
+          "version": 1,
+          "install_path": "content/posters/eXoMedia",
+          "supersedes": []
+        }
+      }
     }
   }
 }

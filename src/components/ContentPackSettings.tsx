@@ -15,6 +15,7 @@ import { formatBytes } from "../util";
 import { showToast } from "../stores/toasts";
 import { Button } from "./Button";
 import { isOffline } from "../stores/network";
+import { MEDIA_SOURCE } from "../stores/thumbnails";
 
 type CollectionPacks = {
   id: string;
@@ -57,6 +58,14 @@ export function ContentPackSettings() {
           packs: await listContentPacks(id).catch(() => [] as ContentPackStatus[]),
         }))
       );
+      // The reading room's covers are a pack like any other, but its source is
+      // not a collection (§19) - it is never in the `collections` config, so
+      // it is appended here rather than read from it.
+      entries.push({
+        id: MEDIA_SOURCE,
+        label: "Reading Room",
+        packs: await listContentPacks(MEDIA_SOURCE).catch(() => [] as ContentPackStatus[]),
+      });
       setCollections(entries.filter((e) => e.packs.length > 0));
     } catch {
       setCollections([]);

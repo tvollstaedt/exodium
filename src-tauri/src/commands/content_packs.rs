@@ -1369,4 +1369,34 @@ mod adopt_tests {
         let install = Path::new("/data/content/metadata/eXoWin9x");
         assert_eq!(unwrapped_source(staging.path(), install), staging.path());
     }
+
+    /// The reading room's covers ship as a pack under a source that is NOT a
+    /// collection (§19). Nothing in this pipeline may gate on COLLECTION_MAP,
+    /// or the pack is unreachable from list, install and adoption alike.
+    #[test]
+    fn adopts_a_pack_of_a_source_outside_the_collection_map() {
+        assert!(crate::commands::collections::collection_def("eXoMedia").is_none());
+        let info = crate::commands::content_packs::installable_pack("eXoMedia", "posters")
+            .expect("the Media Pack's poster pack is not installable");
+        assert_eq!(info.install_path, "content/posters/eXoMedia");
+
+        let tmp = tempfile::tempdir().unwrap();
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::init(&conn).unwrap();
+        crate::db::queries::set_config(&conn, "data_dir", tmp.path().to_str().unwrap()).unwrap();
+        let dir = tmp.path().join(&info.install_path);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("key.jpg"), b"x").unwrap();
+
+        let mut content_packs = HashMap::new();
+        content_packs.insert("posters".to_string(), pack(&info.install_path));
+        adopt_packs_on_disk(
+            &conn,
+            "eXoMedia",
+            &CollectionManifest { torrent_infohash: String::new(), game_count: 0, content_packs },
+        );
+
+        let state = read_installed_packs(&conn);
+        assert!(state.get("eXoMedia").is_some_and(|c| c.contains_key("posters")));
+    }
 }

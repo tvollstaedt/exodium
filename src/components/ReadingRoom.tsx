@@ -39,6 +39,7 @@ import { ViewToggle } from "./ViewToggle";
 import { CircularProgress } from "./ProgressBar";
 import { IconEmptyReading } from "./icons";
 import { MediaNoticeDialog, loadMediaNotice, needsMediaNotice } from "./MediaNotice";
+import { PackHintBanner } from "./PackHintBanner";
 
 /** Browse the Media Pack: magazines, books and catalogs (§19). The catalogue
  *  is bundled, so this list is complete offline - only opening an issue needs
@@ -518,6 +519,8 @@ export function ReadingRoom(props: ReadingRoomProps) {
           Offline - the catalogue is here to browse; opening an issue needs a connection.
         </div>
       </Show>
+
+      <PackHintBanner collection={MEDIA_SOURCE} />
 
       <Show when={loaded()} fallback={<div class="loading">Loading the reading room…</div>}>
         <Show
