@@ -337,3 +337,9 @@
 - Verworfen: die Cover in das eXoDOS-Poster-Pack mischen.
 - Grund: Packs werden als Ganzes versioniert - ein Merge haette bei jedem Bestandsnutzer die vorhandenen 397 MB geloescht und alles neu gezogen, fuer 178 MB neuer Kunst.
 - Gotcha: Das Media Pack ist keine Collection. Manifest, Install und Adoption fragen nie `COLLECTION_MAP`, also tragen sie die Quelle ohne Zutun; die beiden Frontend-Sweeps zaehlen aber Collections auf und haengen `MEDIA_SOURCE` selbst an - die `collections`-Config darf die Id nie bekommen, sonst liegt ein 237-GB-Torrent beim naechsten Start in jeder Installation.
+
+## 2026-09-20 - Jump-Bar als Layout-Spalte statt Overlay
+- Entscheidung: Die Jump-Bar ist eine Flex-Spalte neben dem Scroller (`.library-shell` = `.library` + `.jump-bar-slot`); alle drei Tabs portalen ihre Bar in den einen Slot. Labels kuerzt CSS per Ellipsis an der echten Breite (max 200 px), nicht mehr JS bei 13 Zeichen; Namen-Bars (`.wide`) sind linksbuendig, Buchstaben/Jahre zentriert.
+- Verworfen: Overlay behalten und den Grid-Gutter per ResizeObserver auf die gemessene Bar-Breite setzen (JS misst nach, was Layout kann, und die Bar ragte weiter ueber die Toolbar); Publikationen auf Anfangsbuchstaben reduzieren (dann ist die Bar A-Z in anderer Sortierung, die Namen sind der Nutzen).
+- Grund: 44 Publikationen ergaben eine ~125 px breite Bar in einem 80-px-Gutter - achte Kartenspalte und Listen-Toggle verdeckt; 21 Namen ueber 14 Zeichen wurden zu Zwillingen ("Computer Gami...", "Computer Grap...").
+- Gotcha: Solids `Portal` wickelt seine Kinder in ein `div`; `.jump-bar-slot > div { display: contents }` macht die Bar wieder zum Flex-Item, sonst greift `min-height: 0` nicht und die Bar waechst statt zu scrollen. Ein leerer Slot hat keine Breite - die Raender traegt die Bar.

@@ -30,7 +30,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Select } from "../components/Select";
 import { showToast } from "../stores/toasts";
 import { openGameRequest, setOpenGameRequest, musicUnsupported, refreshMusicIndex } from "../stores/music";
-import { matchesLibraryQuery, jumpBarDisplayLabel } from "../util";
+import { matchesLibraryQuery, jumpBarDisplayLabel, jumpBarIsWide } from "../util";
 import { ReadingRoom } from "../components/ReadingRoom";
 import { ViewToggle } from "../components/ViewToggle";
 
@@ -82,6 +82,10 @@ const listColumns: { label: string; cls: string; asc?: string; desc?: string }[]
 export function Library() {
   let sentinelRef: HTMLDivElement | undefined;
   let libraryRef: HTMLDivElement | undefined;
+  // The jump bar is a layout column beside the scroller, never an overlay:
+  // a bar of publication names is wider than any gutter the grid could
+  // reserve. Every tab's bar portals into this one slot.
+  const [jumpBarSlot, setJumpBarSlot] = createSignal<HTMLDivElement>();
   const [sectionLabels, setSectionLabels] = createSignal<string[]>([]);
   const [activeTab, setActiveTab] = createSignal<Tab>("browse");
   // Direction of the last tab switch - "right" means new content slides in
@@ -644,6 +648,7 @@ export function Library() {
 
 
   return (
+    <div class="library-shell">
     <div class="library" ref={libraryRef} onScroll={onLibraryScroll}>
       {/* ── Tab bar ── */}
       <div class="lib-tabs">
@@ -932,7 +937,7 @@ export function Library() {
       {/* ── Reading Room tab ── */}
       <Show when={activeTab() === "reading"}>
         <div class={tabPaneClass()} onAnimationEnd={onTabSlideEnd}>
-          <ReadingRoom query={searchQuery()} />
+          <ReadingRoom query={searchQuery()} jumpBarMount={jumpBarSlot()} />
         </div>
       </Show>
 
@@ -983,8 +988,8 @@ export function Library() {
       {/* The jump bar targets grid section separators; the list view has a
           sticky column header instead and no sections to jump to. */}
       <Show when={activeTab() === "browse" && viewMode() === "grid" && jumpBarLabels().length > 1}>
-        <Portal>
-          <div class="jump-bar">
+        <Portal mount={jumpBarSlot()}>
+          <div class="jump-bar" classList={{ wide: jumpBarIsWide(jumpBarLabels()) }}>
             <For each={jumpBarLabels()}>
               {(label) => (
                 <button class="jump-bar-item" title={label} onClick={() => jumpToSection(label)}>
@@ -997,8 +1002,8 @@ export function Library() {
       </Show>
 
       <Show when={activeTab() === "library" && libraryShelves().length > 1}>
-        <Portal>
-          <div class="jump-bar">
+        <Portal mount={jumpBarSlot()}>
+          <div class="jump-bar wide">
             <For each={libraryShelves()}>
               {(shelf) => (
                 <button class="jump-bar-item" title={shelf.label} onClick={() => jumpToShelf(shelf.key)}>
@@ -1023,6 +1028,8 @@ export function Library() {
       </button>
 
       <GameDetailPanel game={detailGame()} onClose={() => setDetailGame(null)} onDownloadStart={scrollToGame} />
+    </div>
+    <div class="jump-bar-slot" ref={setJumpBarSlot} />
     </div>
   );
 }

@@ -148,13 +148,18 @@ export function matchesLibraryQuery(
     || (game.variant_titles ?? "").toLowerCase().includes(q);
 }
 
-/** Compact label for the narrow jump bar; the full label stays on
- *  `data-section-label` for matching and on the tooltip. */
+/** Jump bar glyph for a section label; long names are cut by CSS at the
+ *  bar's real width, the full label stays on `data-section-label` and the
+ *  tooltip. */
 export function jumpBarDisplayLabel(label: string): string {
   const stars = label.match(/^[★☆]+$/);
   if (stars) { return String((label.match(/★/g) || []).length); }
   if (label === "Unrated") { return "?"; }
-  // 14 chars keeps prefix-sharing genres apart ("Puzzle" / "Puzzle-Solving").
-  if (label.length > 14) { return label.slice(0, 13) + "…"; }
   return label;
+}
+
+/** A bar of names (genres, publications) reads left-aligned; letters, years
+ *  and star counts centre. */
+export function jumpBarIsWide(labels: readonly string[]): boolean {
+  return labels.some((label) => jumpBarDisplayLabel(label).length > 4);
 }

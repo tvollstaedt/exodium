@@ -30,7 +30,7 @@ import { viewMode, applyViewMode, type ViewMode } from "../stores/view";
 import { showToast } from "../stores/toasts";
 import { isOffline } from "../stores/network";
 import { MEDIA_SOURCE } from "../stores/thumbnails";
-import { formatBytes, jumpBarDisplayLabel } from "../util";
+import { formatBytes, jumpBarDisplayLabel, jumpBarIsWide } from "../util";
 import { createKeyedCover } from "./cover";
 import { IssueReader } from "./IssueReader";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -288,6 +288,8 @@ function IssueRow(p: ItemProps) {
 interface ReadingRoomProps {
   /** The top bar's search box; filters titles and publication names. */
   query: string;
+  /** Library's jump bar column; the bar portals there like Browse's. */
+  jumpBarMount?: HTMLElement;
 }
 
 export function ReadingRoom(props: ReadingRoomProps) {
@@ -613,8 +615,8 @@ export function ReadingRoom(props: ReadingRoomProps) {
       </Show>
 
       <Show when={viewMode() === "grid" && sections().length > 1 && sections()[0].label}>
-        <Portal>
-          <div class="jump-bar">
+        <Portal mount={props.jumpBarMount}>
+          <div class="jump-bar" classList={{ wide: jumpBarIsWide(sections().map((s) => s.label)) }}>
             <Index each={sections()}>
               {(section) => (
                 <button class="jump-bar-item" title={section().label} onClick={() => jumpToSection(section().label)}>

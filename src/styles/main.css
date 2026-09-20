@@ -407,13 +407,22 @@ body {
 /* ============================================
    Library
    ============================================ */
+/* Scroller and jump bar side by side: the bar takes its own column, so a
+   bar of publication names narrows the grid instead of covering it. */
+.library-shell {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
 .library {
   flex: 1;
+  min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 0 80px 20px 20px;
+  padding: 0 20px 20px;
   /* Reserve scrollbar space in layout so the native Windows scrollbar (~16px,
-     always visible) doesn't overlap the fixed-position jump bar on the right.
+     always visible) doesn't shift the grid when it appears.
      macOS/Linux use overlay scrollbars so the reserved gutter is a no-op there. */
   scrollbar-gutter: stable;
 }
@@ -1367,18 +1376,28 @@ body {
 }
 
 /* ── Jump bar ── */
+/* The slot is a flex column so the bar centres vertically and, with
+   min-height 0, scrolls inside itself instead of growing the shell. An empty
+   slot has no width of its own - the bar carries the margins. Solid's Portal
+   wraps its children in a div; display: contents keeps the bar the flex item. */
+.jump-bar-slot {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 0;
+}
+.jump-bar-slot > div {
+  display: contents;
+}
+
 .jump-bar {
-  position: fixed;
-  right: 8px;
-  top: 50%;
-  transform: translateY(-50%);
   display: flex;
   flex-direction: column;
   align-items: stretch;
   gap: 1px;
-  z-index: 20;
-  /* Cap to viewport with margin top/bottom so the bar never touches edges. */
-  max-height: calc(100vh - 32px);
+  margin: 16px 8px 16px 0;
+  min-height: 0;
+  max-width: 200px;
   overflow-y: auto;
   overscroll-behavior: contain;
   /* Thin Firefox scrollbar; webkit version below. */
@@ -1419,12 +1438,14 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  /* Wider so genre names like "Flight Simulation" or "Interactive Story"
-     stay distinguishable. Bar collapses to its content width via
-     max-content sizing on the parent. */
-  max-width: 120px;
   text-align: center;
   transition: color 0.1s, background 0.1s;
+}
+
+/* Names (genres, publications) read left-aligned; the ellipsis cuts at the
+   bar's real width, the tooltip carries the full label. */
+.jump-bar.wide .jump-bar-item {
+  text-align: left;
 }
 
 .jump-bar-item:hover {
