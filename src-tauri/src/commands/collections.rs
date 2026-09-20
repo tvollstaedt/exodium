@@ -60,6 +60,12 @@ pub fn collection_def(id: &str) -> Option<&'static CollectionDef> {
 /// Where a collection borrows art and manuals from: language packs use
 /// their base collection's, a collection with its own game tree none.
 pub fn asset_fallback(collection: &str) -> Option<&'static str> {
+    // Only a language pack borrows art, and only from its own base. A source
+    // that is no collection at all (the Media Pack, §19) borrows nothing:
+    // `collection_base_id` answers "eXoDOS" for anything it does not know, so
+    // every reading-room cover asked the eXoDOS poster pack for a key it can
+    // never hold.
+    collection_def(collection)?;
     let base = collection_base_id(collection);
     (base != collection).then_some(base)
 }
@@ -241,6 +247,15 @@ pub(crate) fn collection_rel_zip(source: &str, game_name: &str, app_path: Option
 
 #[cfg(test)]
 mod tests {
+    use super::asset_fallback;
+
+    #[test]
+    fn a_source_that_is_no_collection_borrows_no_art() {
+        assert_eq!(asset_fallback("eXoDOS_GLP"), Some("eXoDOS"));
+        assert_eq!(asset_fallback("eXoDOS"), None);
+        assert_eq!(asset_fallback("eXoMedia"), None);
+    }
+
     #[test]
     fn rel_paths_nest_win9x_games_under_their_year_dir() {
         let app = Some(r"eXo\eXoWin9x\!win9x\1995\Connect4 (1995)\Connect4 (1995).bat");
