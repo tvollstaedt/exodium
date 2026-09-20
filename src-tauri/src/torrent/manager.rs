@@ -216,6 +216,14 @@ pub struct DownloadManager {
     /// `update_only_files`, or one racing a re-check, wedge its checking
     /// task until even `stats()` blocks.
     selection_apply: tokio::sync::Mutex<()>,
+    /// Serializes `invalidate_after_file_delete`: a caller arriving while
+    /// another re-adds the torrent would find no handle, skip its ledger
+    /// patch, and have its file re-selected by the other's re-add.
+    invalidate: tokio::sync::Mutex<()>,
+    /// Archives dropped after install, waiting for one shared invalidation:
+    /// each one costs a session delete plus re-add, so ten finishing
+    /// downloads must not tear the torrent down ten times.
+    pending_invalidation: std::sync::Mutex<HashSet<usize>>,
     data_dir: PathBuf,
     /// Hex SHA1 info-hash of this manager's torrent, for finding it among
     /// the session's persisted (auto-resumed) torrents.
@@ -292,6 +300,8 @@ impl DownloadManager {
             torrent_bytes,
             selected_files: RwLock::new(HashSet::new()),
             selection_apply: tokio::sync::Mutex::new(()),
+            invalidate: tokio::sync::Mutex::new(()),
+            pending_invalidation: std::sync::Mutex::new(HashSet::new()),
             data_dir: data_dir.to_path_buf(),
             info_hash_hex,
             persistence_dir: persistence_dir.to_path_buf(),
@@ -742,6 +752,45 @@ impl DownloadManager {
         }
     }
 
+    /// Queues a dropped file for `invalidate_after_file_delete`; the batch
+    /// runs a few seconds after the last addition.
+    pub fn schedule_invalidation(self: &Arc<Self>, file_index: usize) {
+        let first = {
+            let mut pending = self.pending_invalidation.lock().unwrap_or_else(|e| e.into_inner());
+            pending.insert(file_index);
+            pending.len() == 1
+        };
+        if !first {
+            return;
+        }
+        let mgr = Arc::clone(self);
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(3)).await;
+            let indices: Vec<usize> = {
+                let mut pending = mgr.pending_invalidation.lock().unwrap_or_else(|e| e.into_inner());
+                pending.drain().collect()
+            };
+            if let Err(e) = mgr.invalidate_after_file_delete(&indices, &indices).await {
+                log::warn!("Ledger not updated after dropping {} archive(s): {e}", indices.len());
+            }
+        });
+    }
+
+    /// Which of `indices` are complete, from ONE stats snapshot - `stats()`
+    /// copies the whole file-progress table (§11).
+    pub async fn files_complete(&self, indices: &[usize]) -> Vec<bool> {
+        let handle_guard = self.handle.read().await;
+        let Some(handle) = handle_guard.as_ref() else { return vec![false; indices.len()] };
+        let stats = handle.stats();
+        indices
+            .iter()
+            .map(|&i| {
+                let total = self.torrent_index.files.get(i).map(|f| f.size).unwrap_or(0);
+                total > 0 && stats.file_progress.get(i).copied().unwrap_or(0) >= total
+            })
+            .collect()
+    }
+
     /// Check if a specific file has finished downloading.
     pub async fn is_file_complete(&self, file_index: usize) -> bool {
         self.file_progress(file_index)
@@ -794,6 +843,13 @@ impl DownloadManager {
         drop_indices: &[usize],
         deleted_indices: &[usize],
     ) -> anyhow::Result<()> {
+        let _serial = self.invalidate.lock().await;
+        // Deleting a torrent that is still checking leaves the re-add with
+        // closed files ("FsFileIsNone", torrent in a broken None state).
+        let live = self.handle.read().await.as_ref().map(Arc::clone);
+        if let Some(h) = live {
+            let _ = tokio::time::timeout(Duration::from_secs(1800), h.wait_until_initialized()).await;
+        }
         // Lock order: handle before selected_files (see struct docs).
         let mut handle_guard = self.handle.write().await;
         let remaining: Vec<usize> = {
@@ -803,17 +859,20 @@ impl DownloadManager {
             }
             selected.iter().copied().collect()
         };
-        let Some(handle) = handle_guard.take() else {
-            // Torrent not in the session this run (and hydrate_from_session
-            // would have adopted a persisted one) - nothing to invalidate.
-            return Ok(());
-        };
         // Patched ledger restored after session.delete erases it: the next
-        // add skips the full re-check (15-30 min in the field).
+        // add skips the full re-check (15-30 min in the field). Without a
+        // handle the torrent is not in the session and the file is patched in
+        // place, so a later add does not claim pieces of a deleted file.
         let patched_bitv = self.patched_bitv_without(deleted_indices);
-        self.session
-            .delete(librqbit::api::TorrentIdOrHash::Hash(handle.info_hash()), false)
-            .await?;
+        let in_session = match handle_guard.take() {
+            Some(handle) => {
+                self.session
+                    .delete(librqbit::api::TorrentIdOrHash::Hash(handle.info_hash()), false)
+                    .await?;
+                true
+            }
+            None => false,
+        };
         if let Some((path, bytes)) = patched_bitv {
             // The flusher may still hold the old handle (delete-pending on
             // exFAT/SMB): write a temp name and rename with a short retry.
@@ -845,6 +904,9 @@ impl DownloadManager {
             }
         }
         drop(handle_guard);
+        if !in_session {
+            return Ok(());
+        }
         log::info!(
             "Dropped torrent from session after uninstall ({} files still selected)",
             remaining.len()

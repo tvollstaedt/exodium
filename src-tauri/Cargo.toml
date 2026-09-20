@@ -28,6 +28,8 @@ quick-xml = { version = "0.36", features = ["serialize"] }
 
 # ZIP extraction (eXoDOS Lite archives)
 zip = "2"
+# Pristine-file check on uninstall (already in the tree via flate2)
+crc32fast = "1"
 
 # Gzip decompression (bundled metadata)
 flate2 = "1"

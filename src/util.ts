@@ -1,7 +1,7 @@
 import { uninstallGame, resetGameData, type Game } from "./api/tauri";
 import { loadVariants } from "./stores/variants";
 import { refreshLoadedGames, notifyGameLibraryChanged } from "./stores/games";
-import { getDownloadState, cancelGameDownload, stopGameDownloadTracking } from "./stores/downloads";
+import { getDownloadState, cancelGameDownload, stopGameDownloadTracking, startGameDownload } from "./stores/downloads";
 import { showToast } from "./stores/toasts";
 
 /** Every installed row of a merged card's group. The grid removes "the
@@ -58,12 +58,13 @@ export async function performUninstall(
   stopGameDownloadTracking(gameId);
   setStatus("Uninstalling...");
   try {
-    await uninstallGame(gameId);
+    // The backend says what it kept ("saved data kept (38 MB)").
+    const msg = await uninstallGame(gameId);
     refreshLoadedGames();
     notifyGameLibraryChanged(gameId);
     await onSuccess?.();
     setStatus("");
-    showToast(title ? `Uninstalled ${title}` : "Uninstalled", "success");
+    showToast(msg || (title ? `Uninstalled ${title}` : "Uninstalled"), "success");
   } catch (e) {
     console.error("Uninstall failed:", e);
     setStatus("");
@@ -80,8 +81,14 @@ export async function performReset(
 ): Promise<void> {
   setStatus("Resetting…");
   try {
-    const msg = await resetGameData(gameId);
-    showToast(msg, "success");
+    const outcome = await resetGameData(gameId);
+    if (outcome.redownload) {
+      // Wiped, archive gone: the download tracker's poll unpacks the copy.
+      refreshLoadedGames();
+      notifyGameLibraryChanged(gameId);
+      startGameDownload(gameId, title);
+    }
+    showToast(outcome.message, "success");
   } catch (e) {
     console.error("Reset failed:", e);
     showToast(title ? `Couldn't reset ${title}` : "Reset failed", "error", { detail: String(e) });

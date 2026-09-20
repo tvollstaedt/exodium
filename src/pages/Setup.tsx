@@ -293,7 +293,7 @@ export function Setup(props: SetupProps) {
               <Toggle
                 checked={seeding()}
                 onChange={setSeeding}
-                label="Share my downloads with other players (seeding)"
+                label="Share my downloads with other users (seeding)"
                 hint="While Exodium runs, it uploads parts of the games you have to other users. That keeps the collection alive - but it also means you are distributing the files, which is a legal risk in some countries."
               />
             </div>

@@ -129,6 +129,7 @@ const FIELD_ICONS = {
   players: "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 3a4 4 0 1 1 0 8 4 4 0 0 1 0-8",
   rating: "M12 2.5l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5-5.8-3-5.8 3 1.1-6.5L2.6 9.3l6.5-.9z",
   year: "M3 5h18v16H3zM3 10h18M8 3v4M16 3v4",
+  disk: "M22 12H2M5.5 5h13l3.5 7v7H2v-7zM6 16h.01M10 16h.01",
 } as const;
 
 /** Union of the known field icons. A plain `string` would let a typo through

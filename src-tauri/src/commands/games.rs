@@ -119,17 +119,71 @@ pub async fn get_section_keys(
 #[tauri::command]
 pub async fn get_game_variants(
     state: State<'_, DbState>,
+    torrent_state: State<'_, TorrentState>,
     shortcode: String,
     collection: String,
 ) -> Result<Vec<Game>, String> {
-    let conn = state.lock()?;
+    let mut games = {
+        let conn = state.lock()?;
+        variants_with_overlay_prices(&conn, &shortcode, &collection)?
+    };
+    // Bytes the session already holds are not fetched again (§6): a complete
+    // archive, or the GameData a sibling variant brought. Only rows with a
+    // full-length file on disk ask the ledger - `stats()` copies the whole
+    // file-progress table, and most rows have a placeholder.
+    let managers: std::collections::HashMap<String, std::sync::Arc<crate::torrent::manager::DownloadManager>> = {
+        let guard = torrent_state.0.read().await;
+        guard.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+    };
+    // (row, file index) pairs worth asking about, grouped per manager.
+    let mut asks: std::collections::HashMap<String, Vec<(usize, usize)>> = std::collections::HashMap::new();
+    for (row, game) in games.iter().enumerate() {
+        if game.installed || game.download_size.is_none() {
+            continue;
+        }
+        let Some(source) = game.torrent_source.as_deref() else { continue };
+        let Some(mgr) = managers.get(source) else { continue };
+        for idx in [game.game_torrent_index, game.gamedata_torrent_index].into_iter().flatten() {
+            let idx = idx as usize;
+            let full = mgr.index().files.get(idx).map(|f| f.size).unwrap_or(0);
+            let present = mgr
+                .file_output_path(idx)
+                .and_then(|p| std::fs::metadata(p).ok())
+                .is_some_and(|m| full > 0 && m.len() == full);
+            if present {
+                asks.entry(source.to_string()).or_default().push((row, idx));
+            }
+        }
+    }
+    for (source, pairs) in asks {
+        let Some(mgr) = managers.get(&source) else { continue };
+        let indices: Vec<usize> = pairs.iter().map(|(_, i)| *i).collect();
+        let complete = mgr.files_complete(&indices).await;
+        for ((row, idx), done) in pairs.into_iter().zip(complete) {
+            if !done {
+                continue;
+            }
+            let full = mgr.index().files.get(idx).map(|f| f.size).unwrap_or(0) as i64;
+            if let Some(game) = games.get_mut(row) {
+                game.download_size = game.download_size.map(|s| (s - full).max(0));
+            }
+        }
+    }
+    Ok(games)
+}
+
+fn variants_with_overlay_prices(
+    conn: &rusqlite::Connection,
+    shortcode: &str,
+    collection: &str,
+) -> Result<Vec<Game>, String> {
     let mut games =
-        queries::fetch_game_variants(&conn, &shortcode, &collection).map_err(|e| e.to_string())?;
+        queries::fetch_game_variants(conn, shortcode, collection).map_err(|e| e.to_string())?;
     // An overlay variant is installed as English-plus-patch, so its price is
     // both archives. The stored size is the patch plus the shared GameData.
     let mut dependents_by_base: Vec<(i64, String)> = Vec::new();
     for game in &games {
-        let names: Vec<String> = crate::commands::lp_overlay::dependents_of(&conn, game, true)
+        let names: Vec<String> = crate::commands::lp_overlay::dependents_of(conn, game, true)
             .into_iter()
             .map(|g| g.title)
             .collect();
@@ -139,12 +193,12 @@ pub async fn get_game_variants(
     }
     // Where the English trees live, so an already-installed base is not
     // charged again.
-    let root = queries::get_config(&conn, "data_dir")
+    let root = queries::get_config(conn, "data_dir")
         .ok()
         .flatten()
         .map(|d| crate::commands::paths::game_root(&d));
     for game in &mut games {
-        if let Some(base) = crate::commands::lp_overlay::base_for(&conn, game) {
+        if let Some(base) = crate::commands::lp_overlay::base_for(conn, game) {
             let on_disk = root
                 .as_ref()
                 .and_then(|r| crate::commands::lp_overlay::base_game_dir(r, &base))

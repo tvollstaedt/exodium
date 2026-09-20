@@ -95,6 +95,23 @@ describe("GameDetailPanel", () => {
     vi.useRealTimers();
   });
 
+  /** The footprint row lives in the Information grid: a separate block under
+   *  it rendered its label and no field in the live webview. */
+  it("shows what an installed game costs on disk", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_game_metadata") { return EMPTY_META; }
+      if (cmd === "get_game_variants") { return []; }
+      if (cmd === "game_disk_usage") { return { game_bytes: 463_000, archive_bytes: 0, save_bytes: 0 }; }
+      return null;
+    });
+    const { dispose } = mount(makeGame({ installed: true, in_library: true }));
+    await new Promise((r) => setTimeout(r, 50));
+    const grid = document.body.querySelector(".game-detail-fields");
+    expect(grid?.textContent).toContain("On disk");
+    expect(grid?.textContent).toContain("463 KB (game)");
+    dispose();
+  });
+
   // The panel asks for a video 400ms after settling on a game and then lets
   // the cover hold the hero for another two seconds before playing it.
   // Reproduces "no video plays at all".

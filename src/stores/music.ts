@@ -285,6 +285,17 @@ export async function refreshMusicIndex(): Promise<void> {
   await indexing;
 }
 
+/** After the cache on disk was cleared: settled jobs point at files that are
+ *  gone, and the index is re-read. In-flight fetches keep running. */
+export async function forgetMusic(): Promise<void> {
+  setMusicJobs((prev) => Object.fromEntries(
+    Object.entries(prev).filter(([, s]) => s.phase === "fetching" || s.phase === MUSIC_QUEUED),
+  ));
+  setMusicCached(new Set<number>());
+  setMusicNone(new Set<number>());
+  await refreshMusicIndex();
+}
+
 /** Keep the sets in step with what the fetches learn, so a row can lose its
  *  play button (or gain one) without a reload. */
 function noteInIndex(gameId: number, phase: string) {

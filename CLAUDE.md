@@ -248,8 +248,51 @@ lenient on both the import route and when no bundled torrent could be parsed:
 without a measure, rejecting every archive would flip a full installation to
 "not installed" and invite a re-download.
 
-### 5. Save backup via atomic rename (not file-diff)
-On uninstall, the entire game directory is moved to `!save/<shortcode>/` (EN) or `<lang_dir>/!save/<shortcode>/` (LP variants - language-scoped since 0.8.4 so variants can't clobber each other's backup) via `std::fs::rename`. On reinstall, `extract_game_zip` restores it, probing the lang-scoped location first, then the legacy shared one. Simple, preserves every user modification, no `zip --dif` gymnastics.
+### 5. Uninstall keeps the user's files, decided against the archive
+
+On uninstall, `back_up_user_data` (`user_data.rs`) compares every file in the
+game directory with the archive's central directory (name, size, then CRC-32)
+and moves only what is new or changed to `!save/<shortcode>/` (EN) or
+`<lang_dir>/!save/<shortcode>/` (LP variants - language-scoped so variants
+can't clobber each other's backup); the pristine rest is deleted. An overlay
+variant (§10a) is compared against base plus patch, or the copied English tree
+would all read as user data. On reinstall, `extract_game_zip` copies the backup
+over the fresh extraction, probing the lang-scoped location first, then the
+legacy shared one, and removes the backup once it is restored. Without an
+archive to compare against (no ZIP and no manifest) the WHOLE directory is
+renamed into `!save`, and the result message says so.
+
+The Windows rules are load-bearing: `rename` of a directory fails there while
+any file inside is open and `remove_dir_all` fails on a fresh tree an indexer
+or scanner still holds - so both go through `remove_tree` / `rename_retry`
+(retries, read-only attribute cleared), the `!save` parent is created before
+the rename, and a delete that still fails is an ERROR: the row stays installed
+and the toast carries the OS error. Never swallow that error again - it made a
+multi-GB ScummVM game "uninstall" into a full copy beside the original.
+
+**The archive is kept after install by default, and the number on a card is
+the download, not the footprint** (`keep_archives` config; Settings → Storage
+carries the switch and a "Remove" for the archives of installed games). Kept
+means Reset and seeding work; dropped means `drop_archive_after_install` writes
+the archive's manifest to `content/pristine/<source>_<index>.idx` (so the next
+uninstall can still tell saves from game files), deletes the file and clears
+its ledger through `invalidate_after_file_delete`. Reset without an archive
+wipes the directory and answers `redownload: true`; the frontend starts the
+download, whose poll unpacks the copy. The detail panel's "On disk" row
+(`game_disk_usage`) shows game, archive and save backup separately; the
+variant prices in `get_game_variants` deduct files the session already holds.
+
+**Settings → Storage is the disk's single view** (`commands/storage.rs`,
+`StorageTab.tsx`): one walk over the data folder puts every file in one
+category by PATH, never by folder name alone - Exodium's `content/` and eXo's
+`Content/` are one directory on a case-insensitive filesystem, so `GameData`
+is extras while `posters`/`metadata`/`emulators` are packs and `videocache`
+& co. are caches. A zip in the game tree counts as an archive only if it
+opens (`real_archive_bytes`); a piece fragment is "Other". The walk takes
+seconds on a large library, so the tab measures once per session and every
+cleanup action re-measures. The settings dialog itself lives in
+`SettingsDialog.tsx` (sidebar sections General / Storage / Network / Content
+Packs / About) with one row shape, `SettingRow`, for everything.
 
 Because that restore is unconditional, **uninstall + reinstall cannot produce a
 clean slate** - `reset_game_data` (detail panel, "↺ Reset", two-click confirm)
@@ -271,7 +314,7 @@ VHD from the ZIP instead; the durable answer is shutting Windows down from the
 Start menu.
 
 ### 6. LP games auto-download shared EN GameData
-Videos and animations for LP games live in the main eXoDOS torrent's GameData folder. `download_game` in `install.rs` auto-fetches the matching EN GameData entry when installing an LP variant. `get_game_variants` dynamically subtracts the EN GameData size from the displayed download size if it's already on disk.
+Videos and animations for LP games live in the main eXoDOS torrent's GameData folder. `download_game` in `install.rs` auto-fetches the matching EN GameData entry when installing an LP variant. `get_game_variants` deducts an archive or GameData file that is full-length on disk AND complete in the ledger (a full-length file alone is librqbit's sparse pre-allocation), so the displayed size is what the click fetches.
 
 ### 7. Bundled metadata instead of downloading
 The 4.9 GB of LaunchBox XML + images from the torrent is replaced with ~4.2 MB of gzipped XMLs in `metadata/` and a shortcode-keyed thumbnail set in `thumbnails/`. These ship with the app binary. The regenerate script parses XML per `<Game>` block (NOT across block boundaries - a previous bug mapped SQ5 to Bloxit's image).

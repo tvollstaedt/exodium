@@ -11,8 +11,8 @@ import { FieldIcon, IconPlay, IconSoundOn, IconSoundOff, IconZoom, type FieldIco
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Button } from "./Button";
 import type { Game, GameMetadata, Article, Issue } from "../api/tauri";
-import { gameArticles, getIssue, launchGame, stopGame, gameEngineInfo, gamePrintingUnavailable, scummvmEngineInfo, scummvmVariants, setScummvmOptions, win9xMultiplayerInfo, dismissWin9xNetworkPrompt, enableWin9xNetwork, mediaUrl } from "../api/tauri";
-import type { GameEngineInfo, ScummVmEngineInfo, ScummVmVariants } from "../api/tauri";
+import { gameArticles, getIssue, gameDiskUsage, launchGame, stopGame, gameEngineInfo, gamePrintingUnavailable, scummvmEngineInfo, scummvmVariants, setScummvmOptions, win9xMultiplayerInfo, dismissWin9xNetworkPrompt, enableWin9xNetwork, mediaUrl } from "../api/tauri";
+import type { GameEngineInfo, GameDiskUsage, ScummVmEngineInfo, ScummVmVariants } from "../api/tauri";
 import { createWin9xStatus } from "./win9xStatus";
 import { formatBytes, parseLangEntries, langBadgeClass, performUninstall, performReset } from "../util";
 import { launchNote, emulatorName as describeEmulator, emulatorPackId, isScummVm, svmVariantLabel, type PanelNote } from "../launchNotes";
@@ -22,7 +22,7 @@ import { downloads, startGameDownload, getDownloadState, cancelGameDownload, wat
 import { loadGameMetadata } from "../stores/metadata";
 import { isOffline } from "../stores/network";
 import { loadVariants } from "../stores/variants";
-import { toggleFavorite, updateGameFavorited } from "../stores/games";
+import { toggleFavorite, updateGameFavorited, lastGameLibraryChange } from "../stores/games";
 import { videos, requestVideo, releaseVideo, setForegroundVideo, getVideoState, videoPlaybackUnsupported, PHASE_QUEUED, PHASE_PROBING, isVideoTimeout } from "../stores/videos";
 import { ensureDismissedNotesLoaded, isNoteDismissed, dismissedNotesLoaded, dismissNote } from "../stores/notes";
 import { packsByCollection, activeJobs, installedPacks, startContentPackInstall } from "../stores/contentPacks";
@@ -311,6 +311,37 @@ export function GameDetailPanel(props: Props) {
   const selectedDownloading = () => selectedDl()?.downloading ?? false;
   const selectedInstalled = () =>
     (selected()?.installed ?? false) || (selectedDl()?.installed ?? false);
+
+  // What this row costs on disk - game dir, kept archive, save backup. The
+  // number a card shows is the download, and the two differ by design (§5).
+  // Keyed on a string: `downloads` ticks every second while anything polls,
+  // and re-running on every tick blanked the row each time.
+  const [diskUsage, setDiskUsage] = createSignal<{ key: string; usage: GameDiskUsage } | null>(null);
+  const diskUsageKey = createMemo(
+    () => `${selected()?.id ?? ""}|${selectedInstalled() ? 1 : 0}|${lastGameLibraryChange()?.ts ?? 0}`,
+  );
+  createEffect(on(diskUsageKey, (key) => {
+    const id = selected()?.id;
+    if (id == null) { setDiskUsage(null); return; }
+    gameDiskUsage(id)
+      .then((usage) => { if (usage && diskUsageKey() === key) { setDiskUsage({ key, usage }); } })
+      .catch(() => {});
+  }));
+  const diskUsageText = (): string | null => {
+    const held = diskUsage();
+    // A stale answer stays up until the fresh one lands, unless it belongs
+    // to another game.
+    if (!held || held.key.split("|")[0] !== String(selected()?.id ?? "")) { return null; }
+    const u = held.usage;
+    const total = u.game_bytes + u.archive_bytes + u.save_bytes;
+    if (total === 0) { return null; }
+    const parts: [string, number][] = [
+      ["game", u.game_bytes], ["archive", u.archive_bytes], ["saved data", u.save_bytes],
+    ].filter((p): p is [string, number] => (p[1] as number) > 0) as [string, number][];
+    return parts.length > 1
+      ? `${formatBytes(total)} · ${parts.map(([label, b]) => `${label} ${formatBytes(b)}`).join(", ")}`
+      : `${formatBytes(total)} (${parts[0][0]})`;
+  };
 
   /** LP rows carry almost no catalogue text of their own (developer, genre and
    *  friends live on the EN row), so every field falls back to the primary. */
@@ -994,7 +1025,8 @@ export function GameDetailPanel(props: Props) {
    *  carry no series, region, player count or rating. */
   const hasInformation = () =>
     field("series") != null || field("region") != null
-    || field("max_players") != null || field("rating") != null;
+    || field("max_players") != null || field("rating") != null
+    || diskUsageText() != null;
   const allGenres = (): string | null => {
     const list = genreList();
     return list.length > 0 ? list.join(" · ") : null;
@@ -1390,6 +1422,7 @@ export function GameDetailPanel(props: Props) {
                       value={field("rating") != null ? ratingStars(field("rating") as number) : null}
                       valueClass="game-detail-stars"
                     />
+                    <Field icon="disk" label="On disk" value={diskUsageText()} />
                   </div>
                 </div>
               </Show>
@@ -1591,6 +1624,7 @@ export function GameDetailPanel(props: Props) {
             rightAnchored
             abovePanel
             downloading={selectedDownloading()}
+            resetRedownloads={diskUsage()?.usage.archive_bytes === 0 && diskUsage()?.usage.game_bytes !== 0}
             onReset={handleReset}
             onUninstall={handleUninstall}
             onClose={() => setMoreMenu(null)}

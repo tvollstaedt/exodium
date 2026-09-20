@@ -442,6 +442,26 @@ pub async fn get_download_progress(
     };
 
     let mut progress = manager.file_progress(game_idx).await;
+    // The torrent leaves the session for a moment when an archive is dropped
+    // after install (§5); an installed game is done regardless.
+    if progress.is_none() && already_installed {
+        let total = manager.index().files.get(game_idx).map(|f| f.size).unwrap_or(0);
+        progress = Some(DownloadProgress {
+            waiting_for: None,
+            file_index: game_idx,
+            file_name: manager.index().files.get(game_idx).map(|f| f.path.clone()).unwrap_or_default(),
+            downloaded_bytes: total,
+            total_bytes: total,
+            progress: 1.0,
+            finished: true,
+            installed: true,
+            error: None,
+            torrent_state: None,
+            torrent_progress: None,
+            extras_progress: None,
+            extras_done: Some(true),
+        });
+    }
 
     // Log progress details for debugging
     if let Some(ref p) = progress {
@@ -596,6 +616,8 @@ pub async fn get_download_progress(
                             conn.path().map(PathBuf::from)
                                 .ok_or_else(|| "Cannot determine database path".to_string())?
                         };
+                        let drop_mgr = manager.clone();
+                        let drop_source = source.clone();
 
                         tauri::async_runtime::spawn(async move {
                             // Under the game lock: an uninstall mid-extraction
@@ -648,6 +670,14 @@ pub async fn get_download_progress(
                                             log::error!("Failed to mark {} installed: {}", title, e);
                                         } else {
                                             log::info!("Installed: {}", title);
+                                        }
+                                        let keep = crate::commands::archives::keep_archives(&conn);
+                                        drop(conn);
+                                        if !keep {
+                                            crate::commands::archives::drop_archive_after_install(
+                                                &drop_mgr, &drop_source, game_idx, &zip_path, &title,
+                                            )
+                                            .await;
                                         }
                                     }
                                     Err(e) => log::error!("Failed to open DB for install update: {}", e),
@@ -1235,8 +1265,16 @@ pub(crate) fn extract_game_zip(zip_path: &std::path::Path, dest: &std::path::Pat
         for save_dir in save_candidates.iter() {
             if save_dir.exists() && game_dir.exists() {
                 log::info!("Restoring saves from {}", save_dir.display());
-                if let Err(e) = copy_dir_recursive(save_dir, &game_dir) {
-                    log::warn!("Save restore incomplete for {}: {}", game_dir.display(), e);
+                match copy_dir_recursive(save_dir, &game_dir) {
+                    // Restored data lives in the game dir now; the next
+                    // uninstall writes a fresh backup.
+                    Ok(()) => {
+                        if let Err(e) = super::user_data::remove_tree(save_dir) {
+                            log::warn!("Save backup {} not removed after restore: {e}", save_dir.display());
+                        }
+                        let _ = std::fs::remove_file(super::user_data::whole_dir_marker(save_dir));
+                    }
+                    Err(e) => log::warn!("Save restore incomplete for {}: {}", game_dir.display(), e),
                 }
                 break;
             }

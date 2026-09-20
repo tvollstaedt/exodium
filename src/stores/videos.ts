@@ -36,6 +36,14 @@ const TIMEOUT_RETRY_MS = 10_000;
 /** One automatic second try per game and session; after that the button. */
 const timeoutRetried = new Set<number>();
 
+/** After the cache on disk was cleared: settled states point at files that
+ *  are gone. In-flight fetches keep running and land in a fresh cache. */
+export function forgetVideos() {
+  setVideos((prev) => Object.fromEntries(
+    Object.entries(prev).filter(([, s]) => s.phase === "fetching" || s.phase === PHASE_QUEUED || s.phase === PHASE_PROBING),
+  ));
+}
+
 function put(gameId: number, status: VideoStatus) {
   // A "none" with a non-null error is provisional (offline, no session):
   // shown once, then forgotten, or the game is blacklisted for the session.

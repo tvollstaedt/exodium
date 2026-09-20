@@ -26,8 +26,11 @@ importers:
       '@tauri-apps/plugin-updater':
         specifier: ^2.10.1
         version: 2.10.1
+      lucide-solid:
+        specifier: ^1.47.0
+        version: 1.47.0(solid-js@1.9.12)
       pdfjs-dist:
-        specifier: ^5.6.205
+        specifier: 5.6.205
         version: 5.6.205
       solid-js:
         specifier: ^1.9.3
@@ -2528,6 +2531,11 @@ packages:
   lru-cache@7.18.3:
     resolution: {integrity: sha512-jumlc0BIUrS3qJGgIkWZsyfAM7NCWiBcCDhnd+3NNM5KbBmLTgHVfWBcg6W+rLUsIpzpERPsvwUP7CckAQSOoA==}
     engines: {node: '>=12'}
+
+  lucide-solid@1.47.0:
+    resolution: {integrity: sha512-upKY9VSMWsk91pjSCJ/2VtstGJha6qXflfJSN/ahtmWNfy+vtl0ZTMj3KNcnGZCgHVQO5SCG2OecFV7ZlvWVyQ==}
+    peerDependencies:
+      solid-js: ^1.4.7
 
   magic-string@0.30.21:
     resolution: {integrity: sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==}
@@ -6217,6 +6225,10 @@ snapshots:
       yallist: 3.1.1
 
   lru-cache@7.18.3: {}
+
+  lucide-solid@1.47.0(solid-js@1.9.12):
+    dependencies:
+      solid-js: 1.9.12
 
   magic-string@0.30.21:
     dependencies:

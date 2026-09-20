@@ -25,6 +25,8 @@ export interface GameActionsMenuProps {
   /** Take over the confirmed action (the panel renders its own progress
    *  bar); absent, the menu runs the shared helper. */
   onReset?: (gameId: number) => void;
+  /** No archive on disk: a reset wipes the game and downloads it again. */
+  resetRedownloads?: boolean;
   onUninstall?: (gameId: number) => void;
   /** The host's uninstall removes every installed row of the merged card,
    *  not just this one. Only the grid does that; the panel is scoped to the
@@ -129,7 +131,9 @@ export function GameActionsMenu(props: GameActionsMenuProps) {
             <Show when={canReset()}>
               <button
                 class="context-menu-item danger"
-                title="Discard saves and every in-game change, then unpack the game again"
+                title={props.resetRedownloads
+                  ? "Discard saves and every in-game change, then download the game again"
+                  : "Discard saves and every in-game change, then unpack the game again"}
                 onMouseDown={(e) => e.stopPropagation()}
                 onClick={() => {
                   if (!confirmReset()) { setConfirmReset(true); return; }
@@ -139,7 +143,9 @@ export function GameActionsMenu(props: GameActionsMenuProps) {
                   setPhase("done");
                   run(gameId);
                 }}
-              >{confirmReset() ? "Discard all game data?" : "↺ Reset game data"}</button>
+              >{confirmReset()
+                ? (props.resetRedownloads ? "Discard and download again?" : "Discard all game data?")
+                : "↺ Reset game data"}</button>
             </Show>
 
             <Show when={canUninstall()}>

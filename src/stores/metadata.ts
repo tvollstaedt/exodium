@@ -15,6 +15,12 @@ createEffect(() => {
   cache.clear();
 });
 
+/** Thumbnails live in a cache on disk; once that is cleared the paths here
+ *  are dead. */
+export function invalidateMetadata() {
+  cache.clear();
+}
+
 export async function loadGameMetadata(
   collection: string | null | undefined,
   title: string | null | undefined,

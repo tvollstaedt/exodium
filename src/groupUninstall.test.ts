@@ -3,7 +3,7 @@ import { parseLangEntries } from "./util";
 
 const api = vi.hoisted(() => ({
   uninstallGame: vi.fn(async (_id: number) => {}),
-  resetGameData: vi.fn(async (_id: number) => ""),
+  resetGameData: vi.fn(async (_id: number) => ({ message: "", redownload: false })),
 }));
 vi.mock("./api/tauri", () => api);
 

@@ -4,17 +4,17 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Dialog } from "@ark-ui/solid/dialog";
 import { Tooltip } from "@ark-ui/solid/tooltip";
-import { Toggle } from "./components/Toggle";
 import { Library } from "./pages/Library";
 import { Setup } from "./pages/Setup";
 import { SearchBar } from "./components/SearchBar";
 import { WelcomeModal } from "./components/WelcomeModal";
 import { SeedingConsentDialog } from "./components/SeedingConsentDialog";
 import { ActivityBadge } from "./components/ActivityBadge";
-import { needsSeedingConsent, seedingOn, applySeeding, loadSeeding } from "./stores/seeding";
+import { needsSeedingConsent, applySeeding, loadSeeding } from "./stores/seeding";
 import { resumeDownloads, initDependencyDownloads } from "./stores/downloads";
 import { ConfirmDialog } from "./components/ConfirmDialog";
-import { ContentPackSettings } from "./components/ContentPackSettings";
+import { SettingsDialog, type SettingsSection } from "./components/SettingsDialog";
+import { resetStorageCache } from "./components/StorageTab";
 import { WindowFrame } from "./components/WindowFrame";
 import { ToastContainer } from "./components/ToastContainer";
 import {
@@ -23,36 +23,25 @@ import {
   factoryReset,
   getConfig,
   setConfig,
-  setRateLimits,
   scanInstalledGames,
   dataDirIsEmpty,
-  openLogFolder,
   pendingLayoutMigration,
   migrateLayout,
   skipLayoutMigration,
   type LayoutMigration,
-  win9xNetworkStatus,
-  enableWin9xNetwork,
-  disableWin9xNetwork,
-  type Win9xNetworkStatus,
-  readingStorageUsage,
-  type ReadingUsage,
 } from "./api/tauri";
 import { updateState, checkForAppUpdate, startUpdate, restartToUpdate } from "./stores/updater";
 import { fetchGames } from "./stores/games";
-import { applyNetworkMode, isOffline, loadNetworkMode } from "./stores/network";
+import { isOffline, loadNetworkMode } from "./stores/network";
 import { loadThumbnailDir } from "./stores/thumbnails";
 import { refreshInstalledPacks, initContentPackEvents } from "./stores/contentPacks";
 import { showToast } from "./stores/toasts";
 import { startTransferPolling } from "./stores/transfer";
 import { NowPlayingBar } from "./components/NowPlayingBar";
 import {
-  initMusic, musicAutoplay, setMusicAutoplay, ensureMusicAutoplayLoaded,
-  musicContinuous, setMusicContinuous, ensureMusicContinuousLoaded,
-  currentTrack, wantedTrack, playerHidden, hidePlayer, showPlayer, startShuffle, musicUnsupported,
+  initMusic, currentTrack, wantedTrack, playerHidden, hidePlayer, showPlayer, startShuffle, musicUnsupported,
 } from "./stores/music";
 import { IconMusicNote } from "./components/icons";
-import { formatBytes } from "./util";
 import "./styles/main.css";
 import { Button } from "./components/Button";
 
@@ -61,7 +50,7 @@ type AppPhase = "loading" | "setup" | "ready";
 function App() {
   const [phase, setPhase] = createSignal<AppPhase>("loading");
   const [showSettings, setShowSettings] = createSignal(false);
-  const [settingsTab, setSettingsTab] = createSignal<"general" | "packs">("general");
+  const [settingsSection, setSettingsSection] = createSignal<SettingsSection>("general");
   const [showWelcomeModal, setShowWelcomeModal] = createSignal(false);
   const [showSeedingConsent, setShowSeedingConsent] = createSignal(false);
   const [dataDir, setDataDir] = createSignal("");
@@ -102,7 +91,6 @@ function App() {
     }
   };
   const [resetError, setResetError] = createSignal("");
-  const [logOpenError, setLogOpenError] = createSignal("");
   const [resetting, setResetting] = createSignal(false);
 
   // Derived: the actual game storage folder shown to the user.
@@ -242,6 +230,7 @@ function App() {
   const applyDataDir = async (selected: string) => {
     await setConfig("data_dir", selected);
     setDataDir(selected);
+    resetStorageCache();
     await initDownloadManager();
     loadThumbnailDir();
     refreshInstalledPacks();
@@ -254,144 +243,16 @@ function App() {
     fetchGames();
   };
 
-  const [scanning, setScanning] = createSignal(false);
-  const [scanResult, setScanResult] = createSignal("");
-
-  const handleRescan = async () => {
-    setScanning(true);
-    setScanResult("");
-    try {
-      const count = await scanInstalledGames(true);
-      setScanResult(`${count} game${count !== 1 ? "s" : ""} marked as installed`);
-      fetchGames();
-    } catch (e) {
-      setScanResult(`Error: ${e}`);
-    } finally {
-      setScanning(false);
-    }
-  };
-
   const [showResetDialog, setShowResetDialog] = createSignal(false);
   const [deleteGameData, setDeleteGameData] = createSignal(false);
 
-  // Global launch overrides; initial values mirror launch_game's defaults
-  // (unset global_glshader = crt-auto) so the UI is right before the load.
-  const [crtAuto, setCrtAuto] = createSignal(true);
-  const [defaultFullscreen, setDefaultFullscreen] = createSignal(false);
-
-  // Windows 9x multiplayer needs packet-capture rights the OS withholds by
-  // default. Null until the first probe answers, so the row can stay quiet
-  // rather than flash a wrong state.
-  const [netStatus, setNetStatus] = createSignal<Win9xNetworkStatus | null>(null);
-  // Reading-room downloads are permanent, so the space they take is the
-  // user's to watch - and removal lives in the reading room itself.
-  const [readingUsage, setReadingUsage] = createSignal<ReadingUsage | null>(null);
-  const loadReadingUsage = async () => {
-    try { setReadingUsage(await readingStorageUsage()); } catch { /* no data dir yet */ }
-  };
-  const [enablingNet, setEnablingNet] = createSignal(false);
-  const loadWin9xNetwork = async () => {
-    try { setNetStatus(await win9xNetworkStatus()); } catch { /* older backend */ }
-  };
-  const toggleWin9xNetwork = async (enable: boolean) => {
-    setEnablingNet(true);
-    try {
-      setNetStatus(enable ? await enableWin9xNetwork() : await disableWin9xNetwork());
-      showToast(
-        enable ? "Windows 9x multiplayer enabled" : "Windows 9x multiplayer disabled",
-        "success",
-      );
-    } catch (e) {
-      const msg = String(e);
-      // "cancelled" is the user dismissing the OS dialog - not a failure.
-      if (!msg.includes("cancelled")) {
-        showToast(enable ? "Could not enable multiplayer" : "Could not disable multiplayer",
-          "error", { detail: msg });
-      }
-    } finally {
-      setEnablingNet(false);
-    }
-  };
-
-  // Kept as strings: an empty field means unlimited, which no number can say.
-  const [limitDown, setLimitDown] = createSignal("");
-  const [limitUp, setLimitUp] = createSignal("");
-  const [limitError, setLimitError] = createSignal("");
-  const loadGameDefaults = async () => {
-    try {
-      const [shader, fs, down, up] = await Promise.all([
-        getConfig("global_glshader"),
-        getConfig("default_fullscreen"),
-        getConfig("rate_limit_down_kbps"),
-        getConfig("rate_limit_up_kbps"),
-      ]);
-      // Sharing lives in its own store - the badge needs it before Settings
-      // has ever been opened.
-      loadSeeding();
-      setLimitDown(down ?? "");
-      setLimitUp(up ?? "");
-      setCrtAuto(shader == null || shader === "crt-auto");
-      setDefaultFullscreen(fs === "fullscreen");
-    } catch (e) {
-      console.warn("[settings] failed to load game defaults:", e);
-    }
-  };
-
-  // Opening goes through this helper because Ark's onOpenChange only fires
-  // for component-initiated changes (Escape, backdrop, close button) - not
-  // when we flip the controlled `open` prop, so init logic there never ran.
-  const openSettings = () => {
-    loadGameDefaults();
-    ensureMusicAutoplayLoaded();
-    ensureMusicContinuousLoaded();
-    loadNetworkMode();
-    loadWin9xNetwork();
-    void loadReadingUsage();
-    // Reports the folders even after a "not now", so the row below can offer
-    // the merge later.
+  const openSettings = (section: SettingsSection = "general") => {
+    // Reports the folders even after a "not now", so Settings can offer the merge.
     pendingLayoutMigration()
       .then((m) => setLayoutSkipped(m != null))
       .catch(() => {});
-    setLogOpenError("");
-    setModeError("");
-    setSettingsTab("general");
+    setSettingsSection(section);
     setShowSettings(true);
-  };
-
-  const [switchingMode, setSwitchingMode] = createSignal(false);
-  const [modeError, setModeError] = createSignal("");
-
-  /** Flipping this rebuilds the torrent state: going offline drops every
-   *  manager (which shuts the librqbit session down), going online creates a
-   *  fresh session and re-adopts any interrupted downloads. */
-  const handleToggleOnline = async (online: boolean) => {
-    setModeError("");
-    setSwitchingMode(true);
-    try {
-      const stopped = await applyNetworkMode(online ? "live" : "offline");
-      // Two different fates, so they get two different sentences: torrent
-      // downloads keep their file selection and pick up again, pack installs
-      // are plain HTTP transfers that have to be restarted by hand.
-      const notes: string[] = [];
-      if (stopped.downloads > 0) {
-        notes.push(`${stopped.downloads} game download${stopped.downloads === 1 ? "" : "s"} paused - resumes when you go back online`);
-      }
-      if (stopped.packs > 0) {
-        notes.push(`${stopped.packs} content pack download${stopped.packs === 1 ? "" : "s"} cancelled`);
-      }
-      showToast(
-        online ? "Online mode - downloads enabled" : "Offline mode - torrent client stopped",
-        "info",
-        notes.length > 0 ? { detail: `${notes.join("; ")}.` } : {},
-      );
-      // Offline installs are never asked about seeding, so going online is
-      // where an old install finally owes the answer.
-      if (online) { setShowSeedingConsent(await needsSeedingConsent()); }
-    } catch (e) {
-      setModeError(`Could not switch mode: ${e}`);
-    } finally {
-      setSwitchingMode(false);
-    }
   };
 
   /** The answer from the one-time consent dialog. Errors propagate so the
@@ -401,73 +262,10 @@ function App() {
     await applySeeding(enabled);
     setShowSeedingConsent(false);
     showToast(
-      enabled ? "Sharing with other players is on" : "Sharing with other players is off",
+      enabled ? "Sharing with other users is on" : "Sharing with other users is off",
       "info",
       { detail: "Change it any time in Settings → Network." },
     );
-  };
-
-  /** Saves on blur rather than per keystroke: applying a limit mid-typing
-   *  would throttle to "5" on the way to "500". */
-  const handleSaveLimits = async () => {
-    setLimitError("");
-    // Clamped to u32: the command's parameter type is u32, and anything larger
-    // fails deserialization with an error about integers rather than about
-    // speed limits.
-    const MAX_KBPS = 4_000_000;
-    const parse = (raw: string): number | null => {
-      const v = parseInt(raw, 10);
-      if (!Number.isFinite(v) || v <= 0) { return null; }
-      return Math.min(v, MAX_KBPS);
-    };
-    const up = parse(limitUp());
-    const down = parse(limitDown());
-    // Normalise the fields to what was actually stored, so "0" or "abc"
-    // visibly becomes unlimited instead of lingering as a rejected value.
-    setLimitUp(up === null ? "" : String(up));
-    setLimitDown(down === null ? "" : String(down));
-    try {
-      await setRateLimits(up, down);
-    } catch (e) {
-      setLimitError(`Could not apply the limits: ${e}`);
-    }
-  };
-
-  const handleToggleSeeding = async (next: boolean) => {
-    try {
-      await applySeeding(next);
-    } catch (e) {
-      console.error("[settings] failed to save seeding preference:", e);
-    }
-  };
-
-  const handleToggleCrtAuto = async (next: boolean) => {
-    setCrtAuto(next);
-    try {
-      await setConfig("global_glshader", next ? "crt-auto" : "default");
-    } catch (e) {
-      console.error("[settings] failed to save global_glshader:", e);
-      setCrtAuto(!next); // revert on failure
-    }
-  };
-
-  const handleToggleFullscreen = async (next: boolean) => {
-    setDefaultFullscreen(next);
-    try {
-      await setConfig("default_fullscreen", next ? "fullscreen" : "window");
-    } catch (e) {
-      console.error("[settings] failed to save default_fullscreen:", e);
-      setDefaultFullscreen(!next);
-    }
-  };
-
-  const handleOpenLogFolder = async () => {
-    setLogOpenError("");
-    try {
-      await openLogFolder();
-    } catch (e) {
-      setLogOpenError(`Could not open log folder: ${e}`);
-    }
   };
 
   const confirmReset = async () => {
@@ -484,6 +282,7 @@ function App() {
       console.log("[reset] factoryReset succeeded, switching to setup");
       setPhase("setup");
       setDataDir("");
+      resetStorageCache();
     } catch (e) {
       console.error("[reset] factoryReset failed:", e);
       setResetError(`Reset failed: ${e}`);
@@ -551,7 +350,7 @@ function App() {
             {/* Offline is a mode with visible consequences (no downloads, no
                 videos, no sharing), so it says so permanently rather than only
                 inside Settings. */}
-            <ActivityBadge onOpenSettings={openSettings} />
+            <ActivityBadge onOpenSettings={() => openSettings("network")} />
             <Show when={!musicUnsupported()}>
               <Tooltip.Root openDelay={400}>
                 <Tooltip.Trigger asChild={(props) =>
@@ -572,7 +371,7 @@ function App() {
             </Tooltip.Root>
             <Tooltip.Root openDelay={400}>
               <Tooltip.Trigger asChild={(props) =>
-                <button {...props()} class="icon-btn" data-testid="open-settings" onClick={openSettings}>
+                <button {...props()} class="icon-btn" data-testid="open-settings" onClick={() => openSettings()}>
                   &#9881;
                 </button>
               } />
@@ -581,277 +380,20 @@ function App() {
           </div>
         </div>
 
-        <Show when={showSettings()}>
-        <Dialog.Root open={showSettings()} onOpenChange={(e) => setShowSettings(e.open)}>
-          <Portal>
-            <Dialog.Backdrop class="ark-dialog-backdrop" />
-            <Dialog.Positioner class="ark-dialog-positioner">
-              <Dialog.Content class="ark-dialog-content ark-dialog-settings" data-testid="settings-dialog">
-                <Dialog.Title class="ark-dialog-title">Settings</Dialog.Title>
-                <div class="settings-tabs">
-                  <button
-                    class={`settings-tab ${settingsTab() === "general" ? "active" : ""}`}
-                    onClick={() => setSettingsTab("general")}
-                  >General</button>
-                  <button
-                    class={`settings-tab ${settingsTab() === "packs" ? "active" : ""}`}
-                    data-testid="settings-tab-packs"
-                    onClick={() => setSettingsTab("packs")}
-                  >Content Packs</button>
-                </div>
-
-                <div class="settings-tab-body">
-                  <Show when={settingsTab() === "general"}>
-                    <div class="settings-body">
-                      <section class="settings-section">
-                        <h3 class="settings-section-title">Library</h3>
-                        {/* "Change" is a POINTER, not a move - and nothing on
-                            the row said so, which invites the reading that it
-                            relocates a 282 GB library. */}
-                        <div class="setting-row">
-                          <span class="setting-label">Game folder</span>
-                          <span class="setting-value">{gameFolderPath() || "Not set"}</span>
-                          <Button variant="small" onClick={handleChangeDataDir}>Change…</Button>
-                        </div>
-                        <div class="setting-row setting-row-note">
-                          <span class="setting-hint">
-                            Points Exodium at an existing folder - your downloaded games are not moved.
-                          </span>
-                        </div>
-                        <div class="setting-row">
-                          <span class="setting-label">Installed games</span>
-                          <span class="setting-hint">Re-scan disk to detect already-downloaded games</span>
-                          <Button variant="small" onClick={handleRescan} disabled={scanning()}>
-                            {scanning() ? "Scanning…" : "Scan"}
-                          </Button>
-                        </div>
-                        <Show when={scanResult()}>
-                          <div class="setting-hint" style="margin-top:4px">{scanResult()}</div>
-                        </Show>
-                        <Show when={readingUsage()}>
-                          {(usage) => (
-                            <div class="setting-row">
-                              <span class="setting-label">Reading room</span>
-                              <span class="setting-hint">
-                                {usage().issues === 0
-                                  ? "Nothing downloaded yet"
-                                  : `${usage().issues.toLocaleString()} `
-                                    + `${usage().issues === 1 ? "issue" : "issues"} · `
-                                    + `${formatBytes(usage().bytes)} on disk — `
-                                    + "right-click a document in the reading room to remove it"}
-                              </span>
-                            </div>
-                          )}
-                        </Show>
-                        {/* The way back after declining the merge at startup -
-                            without it, "not now" would mean "never". */}
-                        <Show when={layoutSkipped()}>
-                          <div class="setting-row">
-                            <span class="setting-label">Folder layout</span>
-                            <span class="setting-hint">
-                              Windows games sit outside the folder Exodium reads
-                            </span>
-                            <Button
-                              variant="small"
-                              loading={migrating()}
-                              loadingLabel="Moving…"
-                              onClick={() => void runLayoutMigration()}
-                            >
-                              Merge
-                            </Button>
-                          </div>
-                        </Show>
-                      </section>
-
-                      <section class="settings-section">
-                        <h3 class="settings-section-title">Game Defaults</h3>
-                        <p class="settings-section-hint">Applied as a last-wins DOSBox config on every launch. Overrides per-game settings without modifying eXoDOS's bundled configs.</p>
-                        <Toggle
-                          checked={crtAuto()}
-                          onChange={handleToggleCrtAuto}
-                          label="Auto CRT shaders"
-                          hint="DOSBox Staging picks a CRT shader matched to each game's video mode and your display resolution. Games that run under DOSBox ECE (Windows only) have no shader support and are unaffected."
-                        />
-                        <Toggle
-                          checked={defaultFullscreen()}
-                          onChange={handleToggleFullscreen}
-                          label="Launch in fullscreen"
-                          hint="Start every game fullscreen instead of windowed. Alt+Enter still toggles at runtime."
-                        />
-                      </section>
-
-                      <section class="settings-section">
-                        <h3 class="settings-section-title">Music</h3>
-                        <p class="settings-section-hint">Many games ship a theme track with their extras. It streams out of the archive like the preview video, and a running game or a preview with sound pauses it.</p>
-                        <Toggle
-                          checked={musicAutoplay()}
-                          onChange={(v) => { void setMusicAutoplay(v); }}
-                          label="Play theme music"
-                          hint="Starts a game's theme when you open its details. The collection-wide shuffle only ever starts from the player bar."
-                        />
-                        <Toggle
-                          checked={musicContinuous()}
-                          onChange={(v) => { void setMusicContinuous(v); }}
-                          label="Continue with the next theme"
-                          hint="When a theme ends, play the next one (list or shuffle). The skip button still works either way."
-                        />
-                      </section>
-
-                      <section class="settings-section">
-                        <h3 class="settings-section-title">Network</h3>
-                        <p class="settings-section-hint">Games are downloaded from the eXoDOS BitTorrent swarm.</p>
-                        {/* A switch, not a checkbox: this one starts and stops
-                            a network service, which is a mode rather than an
-                            option among several. */}
-                        <Toggle
-                          checked={!isOffline()}
-                          disabled={switchingMode()}
-                          onChange={handleToggleOnline}
-                          label={isOffline() ? "Offline mode" : "Online mode"}
-                          hint={isOffline()
-                            ? "The torrent client stays off - Exodium only launches games already on disk."
-                            : "Games, previews and content packs are downloaded from the eXoDOS torrents."}
-                        />
-                        <Show when={modeError()}>
-                          <div class="setting-hint" style="margin-top:4px">{modeError()}</div>
-                        </Show>
-                        {/* Kept visible but inert while offline: hiding it
-                            would look like the setting disappeared, and its
-                            state still matters for when you go back online. */}
-                        <Toggle
-                          checked={seedingOn() && !isOffline()}
-                          disabled={isOffline()}
-                          onChange={handleToggleSeeding}
-                          label="Share with other players (seeding)"
-                          hint={isOffline()
-                            ? "Nothing is shared while offline. Your choice is kept for when you switch back."
-                            : "Uploads parts of the games you have to other users while Exodium runs. Keeps the collection alive - but distributing game files carries legal risk in some countries. Off caps upload at 1 KB/s."}
-                        />
-
-                        {/* Windows 9x multiplayer. Separate from the torrent
-                            settings above: this is about the emulated PC's
-                            network card, and the grant is a system-wide one,
-                            so the row says what it costs before asking. */}
-                        <Show when={netStatus()}>
-                          {(st) => (
-                            <div class="setting-card">
-                              <div class="setting-card-info">
-                                <span class="setting-toggle-label">Windows 9x multiplayer</span>
-                                <span class="setting-toggle-hint">{st().detail}</span>
-                              </div>
-                              <Show when={st().can_enable || st().enabled}>
-                                <Button
-                                  variant="small"
-                                  loading={enablingNet()}
-                                  loadingLabel="Waiting…"
-                                  onClick={() => toggleWin9xNetwork(!st().enabled)}
-                                >
-                                  {st().enabled ? "Remove…" : "Enable…"}
-                                </Button>
-                              </Show>
-                              <Show when={st().manual_hint}>
-                                <code class="setting-code">{st().manual_hint}</code>
-                              </Show>
-                            </div>
-                          )}
-                        </Show>
-
-                        {/* Caps apply to the whole session, both directions.
-                            Empty means unlimited, which is what a torrent
-                            client does by default. */}
-                        <div class="setting-row setting-row--limits">
-                          <span class="setting-label">Speed limits</span>
-                          <div class="limit-inputs">
-                            <label class="limit-field">
-                              <span>Down</span>
-                              <input
-                                type="number"
-                                min="1"
-                                placeholder="∞"
-                                disabled={isOffline()}
-                                value={limitDown()}
-                                onInput={(e) => setLimitDown(e.currentTarget.value)}
-                                onChange={handleSaveLimits}
-                              />
-                              <span>KB/s</span>
-                            </label>
-                            <label class="limit-field">
-                              <span>Up</span>
-                              <input
-                                type="number"
-                                min="1"
-                                placeholder="∞"
-                                disabled={isOffline() || !seedingOn()}
-                                value={limitUp()}
-                                onInput={(e) => setLimitUp(e.currentTarget.value)}
-                                onChange={handleSaveLimits}
-                              />
-                              <span>KB/s</span>
-                            </label>
-                          </div>
-                        </div>
-                        <Show when={limitError()}>
-                          <div class="error" style="margin-top:6px">{limitError()}</div>
-                        </Show>
-                      </section>
-
-                      <section class="settings-section">
-                        <h3 class="settings-section-title">Diagnostics</h3>
-                        <p class="settings-section-hint">If a download stalls or the app misbehaves, share <code>exodium.log</code> from the folder.</p>
-                        <div class="setting-row">
-                          <span class="setting-label">Log folder</span>
-                          <span class="setting-hint">Open in your file explorer</span>
-                          <Button variant="small" onClick={handleOpenLogFolder}>Open</Button>
-                        </div>
-                        <Show when={logOpenError()}>
-                          <div class="error" style="margin-top:6px">{logOpenError()}</div>
-                        </Show>
-                      </section>
-
-                      <section class="settings-section">
-                        <h3 class="settings-section-title">Support Exodium</h3>
-                        <p class="settings-section-hint">Exodium is free and open source. If it's useful to you, you can support its development.</p>
-                        <div class="setting-row">
-                          <span class="setting-label">Ko-fi</span>
-                          <span class="setting-hint">One-time donation, no account needed</span>
-                          <Button variant="small" onClick={() => openUrl("https://ko-fi.com/tvollstaedt")}>Open</Button>
-                        </div>
-                        <div class="setting-row">
-                          <span class="setting-label">GitHub Sponsors</span>
-                          <span class="setting-hint">One-time or monthly via GitHub</span>
-                          <Button variant="small" onClick={() => openUrl("https://github.com/sponsors/tvollstaedt")}>Open</Button>
-                        </div>
-                      </section>
-
-                      <section class="settings-section danger">
-                        <h3 class="settings-section-title">Danger Zone</h3>
-                        <div class="setting-row">
-                          <span class="setting-label">Factory Reset</span>
-                          <span class="setting-hint">Clears all data and returns to setup</span>
-                          <button class="btn-danger" onClick={() => setShowResetDialog(true)}>Reset…</button>
-                        </div>
-                        <Show when={resetError()}>
-                          <div class="error" style="margin-top:8px">{resetError()}</div>
-                        </Show>
-                      </section>
-                    </div>
-                  </Show>
-
-                  <Show when={settingsTab() === "packs"}>
-                    <div class="settings-body">
-                      <ContentPackSettings />
-                    </div>
-                  </Show>
-                </div>
-
-                <div class="ark-dialog-actions">
-                  <Dialog.CloseTrigger class="btn-secondary">Close</Dialog.CloseTrigger>
-                </div>
-              </Dialog.Content>
-            </Dialog.Positioner>
-          </Portal>
-        </Dialog.Root>
-        </Show>
+        <SettingsDialog
+          open={showSettings()}
+          onOpenChange={setShowSettings}
+          section={settingsSection()}
+          onSectionChange={setSettingsSection}
+          gameFolderPath={gameFolderPath()}
+          onChangeDataDir={() => void handleChangeDataDir()}
+          layoutSkipped={layoutSkipped()}
+          migrating={migrating()}
+          onMergeLayout={() => void runLayoutMigration()}
+          onFactoryReset={() => setShowResetDialog(true)}
+          resetError={resetError()}
+          onWentOnline={() => { needsSeedingConsent().then(setShowSeedingConsent).catch(() => {}); }}
+        />
 
         <Show when={showResetDialog()}>
         <Dialog.Root open={showResetDialog()} onOpenChange={(e) => { setShowResetDialog(e.open); if (!e.open) { setDeleteGameData(false); } }}>

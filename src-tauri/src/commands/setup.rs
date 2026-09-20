@@ -598,8 +598,8 @@ pub async fn factory_reset(
     }
 
     // Optionally delete the game folder + content packs + stale downloads.
-    if let Some(dir) = data_dir {
-        if !dir.is_empty() {
+    if let Some(dir) = data_dir.filter(|d| !d.is_empty()) {
+        tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
             let base = std::path::Path::new(&dir);
             let root = game_root(&dir);
             // Root == data dir on a legacy install: delete eXo's two trees,
@@ -614,29 +614,27 @@ pub async fn factory_reset(
                     continue;
                 }
                 log::info!("Deleting game data: {}", target.display());
-                if let Err(e) = std::fs::remove_dir_all(&target) {
+                if let Err(e) = super::user_data::remove_tree(&target) {
                     log::error!("Failed to delete game data folder: {}", e);
-                    return Err(format!("Failed to delete game data: {}", e));
+                    return Err(format!("Failed to delete game data in {}: {}", target.display(), e));
                 }
             }
-            // Also remove downloaded content packs and staging artifacts.
-            let content_path = base.join("content");
-            if content_path.exists() {
-                log::info!("Deleting content packs: {}", content_path.display());
-                let _ = std::fs::remove_dir_all(&content_path);
+            // Content packs and caches: the media server or the webview may
+            // still hold a file open, and the games are already gone - log,
+            // never fail the reset over it.
+            for name in ["content", ".content-downloads", "librqbit-fastresume"] {
+                let path = base.join(name);
+                if path.exists() {
+                    log::info!("Deleting {}", path.display());
+                    if let Err(e) = super::user_data::remove_tree(&path) {
+                        log::warn!("Left behind {}: {e}", path.display());
+                    }
+                }
             }
-            let downloads_path = base.join(".content-downloads");
-            if downloads_path.exists() {
-                let _ = std::fs::remove_dir_all(&downloads_path);
-            }
-            // Legacy residue: pre-0.8.4 setup sessions persisted fastresume
-            // in the DATA dir (session split-brain bug). Clean it up here so
-            // a later setup against the same dir can't load a stale ledger.
-            let legacy_fastresume = base.join("librqbit-fastresume");
-            if legacy_fastresume.exists() {
-                let _ = std::fs::remove_dir_all(&legacy_fastresume);
-            }
-        }
+            Ok(())
+        })
+        .await
+        .map_err(|e| e.to_string())??;
     }
 
     // The ledger describes bytes on disk: stale after a delete, still

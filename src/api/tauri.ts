@@ -496,8 +496,83 @@ export async function uninstallGame(id: number): Promise<string> {
 }
 
 /** Discard saves and every in-game change, then unpack the ZIP again. */
-export async function resetGameData(id: number): Promise<string> {
+export interface ResetOutcome {
+  message: string;
+  /** The archive was dropped after install: the game directory is wiped and
+   *  the caller starts the download that unpacks a fresh copy. */
+  redownload: boolean;
+}
+
+export async function resetGameData(id: number): Promise<ResetOutcome> {
   return invoke("reset_game_data", { id });
+}
+
+export interface ArchiveUsage { count: number; bytes: number }
+
+/** Archives still on disk beside unpacked games (allocated size). */
+export async function archiveUsage(): Promise<ArchiveUsage> {
+  return invoke("archive_usage");
+}
+
+export async function removeInstalledArchives(): Promise<ArchiveUsage> {
+  return invoke("remove_installed_archives");
+}
+
+export interface GameDiskUsage {
+  game_bytes: number;
+  archive_bytes: number;
+  save_bytes: number;
+}
+
+export async function gameDiskUsage(id: number): Promise<GameDiskUsage> {
+  return invoke("game_disk_usage", { id });
+}
+
+export type StorageCategoryId =
+  | "games" | "archives" | "extras" | "saves" | "support" | "packs"
+  | "pack_archives" | "reading" | "caches" | "configs" | "other";
+
+export interface StorageCategory { id: StorageCategoryId; bytes: number; items: number }
+
+export interface StorageOverview {
+  folder: string;
+  free_bytes: number;
+  total_bytes: number;
+  used_bytes: number;
+  /** The rest of the volume, root reserve included. */
+  other_bytes: number;
+  categories: StorageCategory[];
+}
+
+/** Walks the whole data folder - seconds on a large library, so ask once
+ *  per visit and cache. */
+export async function storageOverview(): Promise<StorageOverview> {
+  return invoke("storage_overview");
+}
+
+export interface GameStorage {
+  id: number;
+  title: string;
+  collection: string;
+  language: string;
+  game_bytes: number;
+  archive_bytes: number;
+  save_bytes: number;
+  last_played: string | null;
+}
+
+export async function installedGamesStorage(): Promise<GameStorage[]> {
+  return invoke("installed_games_storage");
+}
+
+export interface Freed { items: number; bytes: number }
+
+export async function clearMediaCaches(): Promise<Freed> {
+  return invoke("clear_media_caches");
+}
+
+export async function deleteSaveBackups(): Promise<Freed> {
+  return invoke("delete_save_backups");
 }
 
 export async function downloadGame(id: number): Promise<string> {
@@ -842,14 +917,6 @@ export async function removeIssue(key: string): Promise<void> {
 }
 
 /** What the reading room occupies: downloaded issues and their total size. */
-export interface ReadingUsage {
-  issues: number;
-  bytes: number;
-}
-
-export async function readingStorageUsage(): Promise<ReadingUsage> {
-  return invoke("reading_storage_usage");
-}
 
 export async function getIssueStatus(key: string): Promise<ReadingStatus | null> {
   return invoke("get_issue_status", { key });

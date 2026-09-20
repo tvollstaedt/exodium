@@ -12,7 +12,8 @@ use crate::torrent::TorrentIndex;
 
 use super::collections::{collection_rel_game_dir, collection_rel_zip, COLLECTION_MAP};
 use super::games::{configured_data_dir, game_op_lock, running_game_key, running_games};
-use super::install::{copy_dir_recursive, extract_game_zip};
+use super::install::extract_game_zip;
+use super::user_data::{back_up_user_data, remove_tree, SaveBackup};
 use super::paths::{bundled_torrent_path, game_root};
 use super::{DbState, TorrentState};
 
@@ -1084,66 +1085,76 @@ pub async fn uninstall_game(
     let game_dir: Option<PathBuf> = Some(torrent_root.join(&rel_game_dir)).filter(|d| d.exists());
     let rel_zip = collection_rel_zip(source, &game_name, game.application_path.as_deref());
 
-    let db_path = {
+    let (db_path, base) = {
         let conn = db_state.lock()?;
-        conn.path().map(PathBuf::from)
-            .ok_or_else(|| "Cannot determine database path".to_string())?
+        let db_path = conn.path().map(PathBuf::from)
+            .ok_or_else(|| "Cannot determine database path".to_string())?;
+        (db_path, crate::commands::lp_overlay::base_for(&conn, &game))
     };
 
-    let deleted_rels: Vec<String> = tauri::async_runtime::spawn_blocking(move || {
-        if let Some(ref dir) = game_dir {
-            if dir.exists() {
-                // Whole-dir backup (§5), lang-scoped so variants cannot
-                // clobber each other's; `extract_game_zip` restores it.
+    let task_game = game.clone();
+    let task_data_dir = PathBuf::from(&data_dir);
+    let (deleted_rels, backup) = tauri::async_runtime::spawn_blocking(
+        move || -> Result<(Vec<String>, Option<SaveBackup>), String> {
+            let mut backup = None;
+            if let Some(ref dir) = game_dir {
+                // Pristine = this variant's archive (or its manifest); an
+                // overlay sits on the English archive too (§10a), or the
+                // copied base tree would all read as user data.
+                let own = super::archives::pristine_for(&task_data_dir, &torrent_root, &task_game);
+                let pristine = match base.as_ref() {
+                    Some(b) => match (super::archives::pristine_for(&task_data_dir, &torrent_root, b), own) {
+                        (Some(b), Some(o)) => Some(b.merge(o)),
+                        _ => None,
+                    },
+                    None => own,
+                };
                 let save_dir = torrent_root.join(&rel_save_dir);
-                if save_dir.exists() {
-                    let _ = std::fs::remove_dir_all(&save_dir);
+                let kept = back_up_user_data(dir, &save_dir, pristine.as_ref())
+                    .map_err(|e| format!("Could not remove the game folder of '{}': {e}", task_game.title))?;
+                log::info!(
+                    "Uninstall {}: kept {} file(s), {} bytes at {}{}",
+                    task_game.title, kept.files, kept.bytes, save_dir.display(),
+                    if kept.whole_dir { " (whole directory, no archive to compare against)" } else { "" }
+                );
+                backup = Some(kept);
+            }
+
+            // Only THIS variant's zip; deleted paths feed the ledger reset below.
+            // Its manifest stays behind: a translation uninstalled later is
+            // compared against this base (§10a), archive or not.
+            let zip_rels = vec![rel_zip];
+            let mut deleted_rels: Vec<String> = Vec::new();
+            for rel in &zip_rels {
+                let zip = torrent_root.join(rel);
+                if !zip.exists() {
+                    continue;
                 }
-                // Rename is the fastest way to "back up" - atomic move
-                if let Err(e) = std::fs::rename(dir, &save_dir) {
-                    // Rename failed (cross-device?), fall back to copy + delete
-                    log::warn!("Rename to save dir failed ({}), falling back to copy", e);
-                    if let Err(e) = copy_dir_recursive(dir, &save_dir) {
-                        log::error!(
-                            "Failed to back up game directory '{}': {} - keeping originals in place",
-                            dir.display(), e
-                        );
-                        // Don't delete the source if backup failed
-                    } else {
-                        let _ = std::fs::remove_dir_all(dir);
+                if let (Some(index), Some(file_index)) = (
+                    super::user_data::PristineIndex::from_zip(&zip),
+                    task_game.game_torrent_index.and_then(|i| usize::try_from(i).ok()),
+                ) {
+                    let source = task_game.torrent_source.as_deref().unwrap_or("eXoDOS");
+                    if let Err(e) = index.write_manifest(&super::archives::manifest_path(&task_data_dir, source, file_index)) {
+                        log::warn!("No manifest for {}: {e}", task_game.title);
                     }
                 }
-                log::info!("Backed up saves to {}", save_dir.display());
+                if std::fs::remove_file(&zip).is_ok() {
+                    deleted_rels.push(rel.clone());
+                }
             }
-        }
 
-        // Only THIS variant's zip; deleted paths feed the ledger reset below.
-        let zip_rels = vec![rel_zip];
-        let mut deleted_rels: Vec<String> = Vec::new();
-        for rel in &zip_rels {
-            let zip = torrent_root.join(rel);
-            if zip.exists() && std::fs::remove_file(&zip).is_ok() {
-                deleted_rels.push(rel.clone());
-            }
-        }
+            let conn = db::open(&db_path).map_err(|e| format!("Failed to open DB for uninstall update: {e}"))?;
+            queries::set_game_installed(&conn, id, false)
+                .map_err(|e| format!("Failed to update uninstall status: {e}"))?;
+            conn.execute("UPDATE games SET in_library = 0 WHERE id = ?1", rusqlite::params![id])
+                .map_err(|e| e.to_string())?;
 
-        if let Ok(conn) = db::open(&db_path) {
-            if let Err(e) = queries::set_game_installed(&conn, id, false) {
-                log::error!("Failed to update uninstall status: {}", e);
-            }
-            // Also clear in_library
-            let _ = conn.execute(
-                "UPDATE games SET in_library = 0 WHERE id = ?1",
-                rusqlite::params![id],
-            );
-        } else {
-            log::error!("Failed to open DB for uninstall update");
-        }
-
-        deleted_rels
-    })
+            Ok((deleted_rels, backup))
+        },
+    )
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| e.to_string())??;
 
     // Reset the ledger of every torrent that tracked a deleted zip (a GLP
     // uninstall also removes the EN zip) - see `invalidate_after_file_delete`.
@@ -1253,12 +1264,21 @@ pub async fn uninstall_game(
         names
     };
 
+    let kept = match backup {
+        Some(b) if b.files > 0 && b.whole_dir => {
+            format!(" · whole folder kept as save backup ({})", super::content_packs::format_bytes(b.bytes))
+        }
+        Some(b) if b.files > 0 => format!(" · saved data kept ({})", super::content_packs::format_bytes(b.bytes)),
+        Some(_) => " · no saved data to keep".to_string(),
+        None => String::new(),
+    };
     if stranded.is_empty() {
-        Ok(format!("Uninstalled: {}", game.title))
+        Ok(format!("Uninstalled {}{}", game.title, kept))
     } else {
         Ok(format!(
-            "Uninstalled: {} - {} was still waiting for it and was cancelled",
+            "Uninstalled {}{} - {} was still waiting for it and was cancelled",
             game.title,
+            kept,
             stranded.join(", ")
         ))
     }
@@ -1268,8 +1288,20 @@ pub async fn uninstall_game(
 /// backup, then unpack again. Uninstall keeps user data (§5), so this is the
 /// only clean slate - and the only way to a pristine Win9x VHD. The zip is
 /// validated BEFORE anything is deleted.
+#[derive(serde::Serialize, Debug)]
+pub struct ResetOutcome {
+    pub message: String,
+    /// The archive is gone (dropped after install, §5): the game directory
+    /// was wiped and the frontend starts the download that unpacks it again.
+    pub redownload: bool,
+}
+
 #[tauri::command]
-pub async fn reset_game_data(db_state: State<'_, DbState>, id: i64) -> Result<String, String> {
+pub async fn reset_game_data(
+    db_state: State<'_, DbState>,
+    torrent_state: State<'_, TorrentState>,
+    id: i64,
+) -> Result<ResetOutcome, String> {
     let (game, data_dir) = {
         let conn = db_state.lock()?;
         let game = queries::fetch_game_by_id(&conn, id)
@@ -1317,10 +1349,30 @@ pub async fn reset_game_data(db_state: State<'_, DbState>, id: i64) -> Result<St
     let save_dir = torrent_root.join(&rel_save_dir);
     let title = game.title.clone();
 
+    // Opening the archive reads its central directory, which is exactly what
+    // distinguishes a real ZIP from librqbit's 0-byte placeholder or a piece
+    // fragment. Without one the reset becomes wipe + download.
+    let archive_ok = std::fs::File::open(&zip)
+        .ok()
+        .and_then(|f| zip::ZipArchive::new(f).ok())
+        .is_some();
+    // Nothing is wiped unless the download that replaces it can start.
+    let can_redownload = game.game_torrent_index.is_some()
+        && !crate::commands::setup::is_offline(&db_state.0)
+        && torrent_state.0.read().await.contains_key(source);
+    if !archive_ok && !can_redownload {
+        return Err(format!(
+            "The ZIP for '{title}' is not on disk and it cannot be downloaded right now, \
+             so there is nothing to restore from."
+        ));
+    }
+
     // An overlay variant is a patch: re-extracting its archive alone leaves a
     // two-file directory marked installed. The English tree goes back down
     // first, exactly as the install path does.
-    let base_src = {
+    let base_src = if !archive_ok {
+        None
+    } else {
         let conn = db_state.lock()?;
         match crate::commands::lp_overlay::base_for(&conn, &game) {
             Some(base) => {
@@ -1344,74 +1396,82 @@ pub async fn reset_game_data(db_state: State<'_, DbState>, id: i64) -> Result<St
         None => None,
     };
 
-    tauri::async_runtime::spawn_blocking(move || {
-        // Validate first: opening the archive reads its central directory,
-        // which is exactly what distinguishes a real ZIP from librqbit's
-        // 0-byte placeholder or a piece-sized fragment.
-        let file = std::fs::File::open(&zip).map_err(|_| {
-            format!(
-                "The ZIP for '{}' is not on disk, so there is nothing to restore from. \
-                 Re-download the game instead.",
-                title
-            )
-        })?;
-        zip::ZipArchive::new(file).map_err(|_| {
-            format!(
-                "The ZIP for '{}' is incomplete or corrupted (torrent placeholder), \
-                 so there is nothing to restore from. Re-download the game instead.",
-                title
-            )
-        })?;
-
+    // Err carries whether the game directory is already gone, so the row
+    // cannot stay `installed` over an empty folder.
+    let outcome = tauri::async_runtime::spawn_blocking(move || -> Result<bool, (String, bool)> {
         // Re-check under the lock and budget the copy BEFORE anything is
         // deleted: an uninstall of the base between the lookup and the lock,
         // or a full disk, would otherwise leave no game and no backup.
         if let Some((src, _)) = base_src.as_ref() {
             if !src.is_dir() {
-                return Err(format!(
+                return Err((format!(
                     "The English base for '{title}' disappeared - reinstall it, then reset again."
-                ));
+                ), false));
             }
             let need = crate::commands::lp_overlay::dir_size(src)
                 .saturating_add(512 * 1024 * 1024);
             if let Ok(free) = fs4::available_space(&torrent_root) {
                 if free < need {
                     let gib = |b: u64| b as f64 / (1024.0 * 1024.0 * 1024.0);
-                    return Err(format!(
-                        "Not enough disk space to reset '{title}': needs about {:.1} GB free,                          but only {:.1} GB is available.",
+                    return Err((format!(
+                        "Not enough disk space to reset '{title}': needs about {:.1} GB free, \
+                         but only {:.1} GB is available.",
                         gib(need),
                         gib(free)
-                    ));
+                    ), false));
                 }
             }
         }
 
         if game_dir.exists() {
-            std::fs::remove_dir_all(&game_dir)
-                .map_err(|e| format!("Failed to remove {}: {e}", game_dir.display()))?;
+            remove_tree(&game_dir)
+                .map_err(|e| (format!("Failed to remove {}: {e}", game_dir.display()), false))?;
         }
         // Must go too, or extract_game_zip restores the very data this is
         // meant to discard.
         if save_dir.exists() {
-            let _ = std::fs::remove_dir_all(&save_dir);
+            remove_tree(&save_dir)
+                .map_err(|e| (format!("Failed to remove the save backup {}: {e}", save_dir.display()), true))?;
+        }
+        let _ = std::fs::remove_file(super::user_data::whole_dir_marker(&save_dir));
+        if !archive_ok {
+            return Ok(true);
         }
 
         if let Some((src, _)) = base_src {
             crate::commands::lp_overlay::clone_tree(&src, &game_dir).map_err(|e| {
-                format!("Could not restore the English base at {}: {e}", game_dir.display())
+                (format!("Could not restore the English base at {}: {e}", game_dir.display()), true)
             })?;
         }
         let dest = game_dir.parent().map(PathBuf::from).unwrap_or_else(|| torrent_root.clone());
-        extract_game_zip(&zip, &dest).map_err(String::from)
+        extract_game_zip(&zip, &dest).map_err(|e| (String::from(e), true))?;
+        Ok(false)
     })
     .await
-    .map_err(|e| format!("reset task failed: {e}"))??;
+    .map_err(|e| format!("reset task failed: {e}"))?;
 
+    let redownload = match outcome {
+        Ok(redownload) => redownload,
+        Err((message, dir_gone)) => {
+            if dir_gone {
+                let conn = db_state.lock()?;
+                let _ = queries::set_game_installed(&conn, id, false);
+            }
+            return Err(message);
+        }
+    };
     {
         let conn = db_state.lock()?;
-        let _ = queries::set_game_installed(&conn, id, true);
+        let _ = queries::set_game_installed(&conn, id, !redownload);
     }
 
-    log::info!("Reset game data: {}", game.title);
-    Ok(format!("Reset {} to its original state", game.title))
+    log::info!("Reset game data: {} (redownload={redownload})", game.title);
+    Ok(ResetOutcome {
+        message: if redownload {
+            format!("Reset {} - downloading a fresh copy", game.title)
+        } else {
+            format!("Reset {} to its original state", game.title)
+        },
+        redownload,
+    })
 }

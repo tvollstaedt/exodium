@@ -1,5 +1,55 @@
 # Changelog
 
+## 0.15.0 - unreleased
+
+### Added
+
+- The Reading Room. A third tab beside Browse and My Library holds the
+  magazines, books and software catalogs from the eXoDOS Media Pack, plus the
+  German magazines from the GLP add-on. Issues stream out of the torrent on
+  demand and stay on disk until you remove them; a game's details link to the
+  reviews and articles written about it. Disk magazines that are programs
+  rather than scans launch through DOSBox like a game.
+- PDFs open in Exodium on every platform, including Linux, where the system
+  viewer used to be the only option. Manuals use the same viewer.
+- An HD cover pack for the Reading Room under Settings → Content Packs.
+- Settings → Storage. What the game folder holds, by what it is for: unpacked
+  games, kept archives, extras, content packs, save backups, caches. Each
+  category shows its size and, where it makes sense, a button to free the
+  space; below that every installed game sorted by size with an uninstall
+  button.
+- "Keep game archives after install" (Settings → Storage). On, the downloaded
+  ZIP stays beside the unpacked game so Reset needs no download and the game
+  can be seeded - at roughly twice the disk space. Off, the archive is deleted
+  once unpacked; Reset then downloads the game again.
+- The game details show what a game takes on disk, split into game, archive
+  and saved data.
+
+### Changed
+
+- Uninstalling keeps only your own files. The save backup used to be the whole
+  game folder; it is now the files you changed or added, compared against the
+  archive the game was unpacked from. A reinstall restores them and removes the
+  backup. The message after an uninstall says what was kept.
+- Settings has a sidebar (General, Storage, Network, Content Packs, About) and
+  one row shape for every setting.
+- DOSBox Staging 0.83.0.
+
+### Fixed
+
+- Uninstalling on Windows could leave the game folder in place while the game
+  read as uninstalled - and a full copy of it in the save backup on top. The
+  folder move failed silently, the fallback copied everything, and the delete
+  error was swallowed. A delete that fails now fails visibly and the game stays
+  installed.
+- A dying peer during a game download could deadlock the torrent client and
+  with it every command in the app; the Reading Room showed it as "Preparing…"
+  forever.
+- The jump bar is part of the layout instead of an overlay, so wide labels
+  narrow the grid instead of covering its last column.
+- Game ids that are not collections no longer fall back to the eXoDOS poster
+  set.
+
 ## 0.14.0 - 2026-09-04
 
 ### Added

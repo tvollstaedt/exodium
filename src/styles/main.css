@@ -435,17 +435,23 @@ body {
    the full 12px as hit area while the visible bar stays slim. */
 .library::-webkit-scrollbar,
 .pdf-reader-pages::-webkit-scrollbar,
-.document-viewer-text::-webkit-scrollbar {
+.document-viewer-text::-webkit-scrollbar,
+.settings-tab-body::-webkit-scrollbar,
+.storage-games::-webkit-scrollbar {
   width: 12px;
 }
 .library::-webkit-scrollbar-track,
 .pdf-reader-pages::-webkit-scrollbar-track,
-.document-viewer-text::-webkit-scrollbar-track {
+.document-viewer-text::-webkit-scrollbar-track,
+.settings-tab-body::-webkit-scrollbar-track,
+.storage-games::-webkit-scrollbar-track {
   background: transparent;
 }
 .library::-webkit-scrollbar-thumb,
 .pdf-reader-pages::-webkit-scrollbar-thumb,
-.document-viewer-text::-webkit-scrollbar-thumb {
+.document-viewer-text::-webkit-scrollbar-thumb,
+.settings-tab-body::-webkit-scrollbar-thumb,
+.storage-games::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.3);
   border-radius: 6px;
   border: 2px solid transparent;
@@ -453,7 +459,9 @@ body {
 }
 .library::-webkit-scrollbar-thumb:hover,
 .pdf-reader-pages::-webkit-scrollbar-thumb:hover,
-.document-viewer-text::-webkit-scrollbar-thumb:hover {
+.document-viewer-text::-webkit-scrollbar-thumb:hover,
+.settings-tab-body::-webkit-scrollbar-thumb:hover,
+.storage-games::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.5);
   background-clip: padding-box;
 }
@@ -2339,43 +2347,6 @@ body {
 /* ============================================
    Settings dialog
    ============================================ */
-.ark-dialog-settings {
-  max-width: 560px;
-  max-height: 80vh;
-  display: flex;
-  flex-direction: column;
-}
-
-.settings-tabs {
-  display: flex;
-  gap: 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  margin: -4px -24px 0;
-  padding: 0 24px;
-}
-
-.settings-tab {
-  padding: 8px 16px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-muted);
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  cursor: pointer;
-  font-family: inherit;
-  transition: color 0.1s ease, border-color 0.1s ease;
-}
-
-.settings-tab:hover {
-  color: var(--text-primary);
-}
-
-.settings-tab.active {
-  color: var(--text-primary);
-  border-bottom-color: var(--accent);
-}
-
 .settings-tab-body {
   flex: 1;
   overflow-y: auto;
@@ -2520,11 +2491,6 @@ body {
 
 /* A note that belongs to the row above rather than a setting of its own:
    no label column, no control, and pulled up tight against it. */
-.setting-row-note {
-  margin-top: -6px;
-  padding-top: 0;
-}
-
 .setting-hint {
   font-size: 12px;
   color: var(--text-muted);
@@ -4981,10 +4947,6 @@ body {
 }
 
 /* Speed limit inputs in Settings → Network. */
-.setting-row--limits {
-  flex-wrap: wrap;
-}
-
 /* A setting whose explanation is longer than its control (the Windows 9x
    multiplayer grant): label, reasons and action stack instead of competing
    for one line. */
@@ -5024,9 +4986,6 @@ body {
 .limit-inputs {
   display: flex;
   gap: 12px;
-  /* This row has no hint text, and the hint is what pushes controls right in
-     every other settings row. */
-  margin-left: auto;
 }
 
 .limit-field {
@@ -5104,25 +5063,6 @@ body {
 /* Settings row that is a statement plus one action (Windows 9x multiplayer).
    Framed like the switches above it so the Network section reads as one
    group rather than a list with a loose line at the end. */
-.setting-card {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  padding: 8px 10px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.04);
-  border-radius: var(--border-radius);
-}
-
-.setting-card-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex: 1;
-  min-width: 180px;
-}
-
 /* Spinner row inside a blocking progress dialog (folder migration). */
 .dialog-progress {
   display: flex;
@@ -5792,4 +5732,372 @@ body.has-player {
 .game-detail-article-page {
   color: var(--text-muted);
   font-size: 11px;
+}
+
+/* ============================================
+   Settings: sidebar navigation, one row shape
+   ============================================ */
+.ark-dialog-settings {
+  max-width: 860px;
+  height: min(720px, 84vh);
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-layout {
+  display: flex;
+  gap: 20px;
+  flex: 1;
+  min-height: 0;
+  margin: 4px -24px 0;
+  padding: 0 24px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 150px;
+  flex-shrink: 0;
+  padding-top: 14px;
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  padding-right: 12px;
+}
+
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  text-align: left;
+  padding: 7px 10px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  border-radius: var(--border-radius);
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+
+.settings-nav-item:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.settings-nav-item.active {
+  color: var(--text-primary);
+  background: rgba(124, 108, 242, 0.18);
+}
+
+.settings-layout .settings-tab-body {
+  padding-top: 14px;
+  padding-right: 4px;
+}
+
+.settings-layout .settings-section {
+  gap: 0;
+}
+
+.settings-layout .settings-section-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 4px;
+  color: var(--text-secondary);
+}
+
+.settings-nav-icon,
+.settings-title-icon {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.settings-nav-item.active .settings-nav-icon {
+  color: var(--accent);
+  opacity: 1;
+}
+
+.settings-layout .settings-section-hint {
+  margin-bottom: 4px;
+}
+
+/* Label | body | action. The label column is fixed so values and hints
+   start on one line across every row of every section. */
+.settings-row {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr) auto;
+  gap: 4px 16px;
+  /* Label and the body's first line share a baseline; the action column
+     centres on the row instead. */
+  align-items: baseline;
+  padding: 9px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.settings-section .settings-row:last-child {
+  border-bottom: none;
+}
+
+.settings-row.is-stacked {
+  grid-template-columns: 160px minmax(0, 1fr);
+}
+
+.settings-row.is-stacked .settings-row-action {
+  grid-column: 2;
+  justify-self: start;
+}
+
+.settings-row-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.settings-row-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.settings-row-value {
+  font-size: 12.5px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-row-hint {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.settings-row-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-self: end;
+  align-self: center;
+}
+
+.settings-switch {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.settings-switch[data-disabled] {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.settings-layout .error {
+  margin: 8px 0 0;
+}
+
+/* ── Storage ─────────────────────────────────────────────────────────────── */
+.storage {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.storage-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 8px 0;
+}
+
+.storage-drive {
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: var(--border-radius);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.storage-drive-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.storage-drive-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.storage-bar {
+  display: flex;
+  height: 14px;
+  border-radius: 7px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.storage-bar-seg {
+  display: block;
+  height: 100%;
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+.storage-bar-seg.is-foreign {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.storage-drive-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.storage-drive-line b {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* The legend dot is a pseudo-element, so the row's baseline is the text's. */
+.storage-cat-label::before {
+  content: "";
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: var(--dot);
+  vertical-align: 0;
+}
+
+.storage-cat-size {
+  font-variant-numeric: tabular-nums;
+}
+
+.storage-cat-items {
+  color: var(--text-secondary);
+}
+
+.storage-games-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.storage-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.storage-sort select {
+  font-family: inherit;
+  font-size: 11.5px;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--border-radius);
+  padding: 3px 6px;
+}
+
+/* Its own scroller: the categories above stay in view while the list of a
+   hundred games scrolls, and the bar says how long it is. */
+.storage-games {
+  display: flex;
+  flex-direction: column;
+  max-height: 420px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.storage-game {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 16px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.storage-game:last-child {
+  border-bottom: none;
+}
+
+.storage-game-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.storage-game-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.storage-game-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.storage-game-tag {
+  padding: 0 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-secondary);
+  font-size: 10px;
+  letter-spacing: 0.3px;
+}
+
+.storage-game-size {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  font-variant-numeric: tabular-nums;
+  font-size: 12.5px;
+  color: var(--text-primary);
+}
+
+.storage-game-breakdown {
+  font-size: 10.5px;
+  color: var(--text-secondary);
+  white-space: nowrap;
 }

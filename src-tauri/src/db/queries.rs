@@ -552,6 +552,14 @@ pub fn get_section_keys(conn: &Connection, f: &GameFilter) -> DbResult<Vec<Strin
 
 /// Installed games, one row per group, EN preferred AMONG INSTALLED
 /// variants (a DE-only install shows its DE row).
+/// Every installed row, one per variant - not the merged shelf.
+pub fn fetch_installed_rows(conn: &Connection) -> DbResult<Vec<Game>> {
+    let sql = format!("SELECT {GAME_COLUMNS} FROM games g WHERE g.installed = 1 ORDER BY title, language");
+    let mut stmt = conn.prepare(&sql)?;
+    let games = stmt.query_map([], row_to_game)?.collect::<Result<Vec<_>, _>>()?;
+    Ok(games)
+}
+
 pub fn fetch_installed_games(conn: &Connection) -> DbResult<Vec<Game>> {
     let sql = format!(
         "SELECT {} FROM games g WHERE g.installed = 1 AND (g.shortcode IS NULL OR g.id = (
