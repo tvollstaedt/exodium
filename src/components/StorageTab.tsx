@@ -130,12 +130,14 @@ export function StorageTab(props: { active: boolean; onGoToPacks: () => void }) 
         invalidateMetadata();
         void forgetMusic();
       }
-      await load();
     } catch (e) {
       showToast("Couldn't free the space", "error", { detail: String(e) });
     } finally {
+      // The button is done when the action is; the re-measure that follows
+      // takes seconds and shows on Refresh instead.
       setBusy(null);
     }
+    void load();
   };
 
   const toggleKeep = async (next: boolean) => {
@@ -156,11 +158,13 @@ export function StorageTab(props: { active: boolean; onGoToPacks: () => void }) 
     markUninstalling(g.id, true);
     try {
       await performUninstall(g.id, () => {}, undefined, g.title);
-      try { setGames(await installedGamesStorage()); } catch { /* keep the old list */ }
     } finally {
       markUninstalling(g.id, false);
-      if (uninstalling().size === 0) { void load(); }
     }
+    // The row goes as soon as the list answers; the walk waits for the last
+    // uninstall in flight.
+    try { setGames(await installedGamesStorage()); } catch { /* keep the old list */ }
+    if (uninstalling().size === 0) { void load(); }
   };
 
   const actionLabel = (key: string, idle: string, armed: string) =>
