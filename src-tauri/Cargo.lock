@@ -2845,8 +2845,7 @@ dependencies = [
 [[package]]
 name = "librqbit"
 version = "9.0.0-rc.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9451def41c18d1b8e7b68c097bcb0c9a0579cdc9b779803368a65b86cae03d2"
+source = "git+https://github.com/tvollstaedt/rqbit.git?rev=b5454b9314d30a00b5b2fc8f49c2badb33401ef5#b5454b9314d30a00b5b2fc8f49c2badb33401ef5"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -2910,8 +2909,7 @@ dependencies = [
 [[package]]
 name = "librqbit-bencode"
 version = "9.0.0-rc.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97490fb9b35fb575f498cc1e804b23be6bbf3603d5a2358733e5b867d1ee52e8"
+source = "git+https://github.com/tvollstaedt/rqbit.git?rev=b5454b9314d30a00b5b2fc8f49c2badb33401ef5#b5454b9314d30a00b5b2fc8f49c2badb33401ef5"
 dependencies = [
  "anyhow",
  "arrayvec",
@@ -2927,8 +2925,7 @@ dependencies = [
 [[package]]
 name = "librqbit-buffers"
 version = "9.0.0-rc.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e845dbd14174712471c3430c958d5c25e391561c2dd31f39f895bb60f63c46f0"
+source = "git+https://github.com/tvollstaedt/rqbit.git?rev=b5454b9314d30a00b5b2fc8f49c2badb33401ef5#b5454b9314d30a00b5b2fc8f49c2badb33401ef5"
 dependencies = [
  "bytes",
  "librqbit-clone-to-owned",
@@ -2939,8 +2936,7 @@ dependencies = [
 [[package]]
 name = "librqbit-clone-to-owned"
 version = "9.0.0-rc.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76ef698eb8d7745f425f2b9a93e6a9d946bcb8bf84a559303e0fc3f01e8ad07c"
+source = "git+https://github.com/tvollstaedt/rqbit.git?rev=b5454b9314d30a00b5b2fc8f49c2badb33401ef5#b5454b9314d30a00b5b2fc8f49c2badb33401ef5"
 dependencies = [
  "bytes",
 ]
@@ -2948,8 +2944,7 @@ dependencies = [
 [[package]]
 name = "librqbit-core"
 version = "9.0.0-rc.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a38e805aad201d96024849649174015d48a575348b35bbd927d99b47464e665e"
+source = "git+https://github.com/tvollstaedt/rqbit.git?rev=b5454b9314d30a00b5b2fc8f49c2badb33401ef5#b5454b9314d30a00b5b2fc8f49c2badb33401ef5"
 dependencies = [
  "anyhow",
  "bytes",
@@ -2978,8 +2973,7 @@ dependencies = [
 [[package]]
 name = "librqbit-dht"
 version = "9.0.0-rc.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d59a9374b33a52a065171641ae518db97969d3db849a57824c72c53d2109918b"
+source = "git+https://github.com/tvollstaedt/rqbit.git?rev=b5454b9314d30a00b5b2fc8f49c2badb33401ef5#b5454b9314d30a00b5b2fc8f49c2badb33401ef5"
 dependencies = [
  "anyhow",
  "backon",
@@ -3026,8 +3020,7 @@ dependencies = [
 [[package]]
 name = "librqbit-lsd"
 version = "9.0.0-rc.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e65ddc3b64392a71378944712c9830aac8ef98f860b180419dd42b4596e7faa"
+source = "git+https://github.com/tvollstaedt/rqbit.git?rev=b5454b9314d30a00b5b2fc8f49c2badb33401ef5#b5454b9314d30a00b5b2fc8f49c2badb33401ef5"
 dependencies = [
  "anyhow",
  "atoi",
@@ -3046,8 +3039,7 @@ dependencies = [
 [[package]]
 name = "librqbit-peer-protocol"
 version = "9.0.0-rc.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76ade1bbea8cf3e7eb51978b32a549787d17bbf872f3f0ed47d7c85e7377705a"
+source = "git+https://github.com/tvollstaedt/rqbit.git?rev=b5454b9314d30a00b5b2fc8f49c2badb33401ef5#b5454b9314d30a00b5b2fc8f49c2badb33401ef5"
 dependencies = [
  "anyhow",
  "bitvec",
@@ -3067,8 +3059,7 @@ dependencies = [
 [[package]]
 name = "librqbit-sha1-wrapper"
 version = "9.0.0-rc.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eeb119e5c05f1aa4011cf2e4dc19f83403064d2210804e2f35f06abac4e5b710"
+source = "git+https://github.com/tvollstaedt/rqbit.git?rev=b5454b9314d30a00b5b2fc8f49c2badb33401ef5#b5454b9314d30a00b5b2fc8f49c2badb33401ef5"
 dependencies = [
  "assert_cfg",
  "crypto-hash",
@@ -3077,8 +3068,7 @@ dependencies = [
 [[package]]
 name = "librqbit-tracker-comms"
 version = "9.0.0-rc.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ae0c520cc5f028fb50d746eaa6ba2aa082228db96c2baf1a312f9cacfceeb58"
+source = "git+https://github.com/tvollstaedt/rqbit.git?rev=b5454b9314d30a00b5b2fc8f49c2badb33401ef5#b5454b9314d30a00b5b2fc8f49c2badb33401ef5"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -3106,8 +3096,7 @@ dependencies = [
 [[package]]
 name = "librqbit-upnp"
 version = "9.0.0-rc.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "058af0d5e2a99c567b73369455e3852c48addcf751836f08cfc25ca89dd16cc3"
+source = "git+https://github.com/tvollstaedt/rqbit.git?rev=b5454b9314d30a00b5b2fc8f49c2badb33401ef5#b5454b9314d30a00b5b2fc8f49c2badb33401ef5"
 dependencies = [
  "anyhow",
  "bstr",

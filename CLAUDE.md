@@ -655,6 +655,18 @@ a 15,000-entry file-progress vector plus a path String per selected file, and a
 peer serving two collections would be counted twice. Per-manager `status()` is
 only asked whether its torrent is live.
 
+**librqbit is patched (`[patch.crates-io]` in `Cargo.toml`), and the patch
+is one lock order.** 9.0.0-rc.0 (and 9.0.1, and `main`) has
+`update_only_files` hold the torrent's state write lock while it walks the
+peer DashMap, whereas every peer task holds its DashMap shard and then takes
+the state lock - `on_peer_died`, the chunk requester. A peer dying during a
+game download therefore deadlocks both, and since those are parking_lot locks
+taken on tokio workers, every worker parks and EVERY async command hangs: the
+Lesesaal showed it as "Preparing…" with nothing in the log (measured with
+`sample` on the wedged process, `docs/DECISIONS.md` 2026-09-20). The patch
+releases the state lock before the walk. Keep it until upstream carries the
+same reorder; an upgrade that drops the patch section brings the hang back.
+
 **Offline means no network at all, not "no torrent".** Everything that reaches
 out has to check `is_offline` / `isOffline()`: game downloads, preview videos,
 content packs (including HTTP-sourced ones), the first-run pack offer, and both
