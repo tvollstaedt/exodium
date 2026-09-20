@@ -1,6 +1,9 @@
 import { createSignal } from "solid-js";
 import { getPreviewDir, getPosterDir, getAvailableCollections } from "../api/tauri";
 
+/** The Media Pack's cover set, keyed like a collection's (§19). */
+export const MEDIA_SOURCE = "eXoMedia";
+
 // ── Directory caches ─────────────────────────────────────────────────────────
 
 const [previewDirs, setPreviewDirs] = createSignal<Record<string, string>>({});
@@ -70,10 +73,13 @@ export async function loadThumbnailDir() {
     const previews: Record<string, string> = {};
     const posters: Record<string, string> = {};
 
+    // The Lesesaal's covers ship the same way a collection's do, but its
+    // source is not a collection (§19), so it is not in `available`.
+    const sources = [...available.map((col) => col.id), MEDIA_SOURCE];
     const results = await Promise.allSettled(
-      available.flatMap((col) => [
-        getPreviewDir(col.id).then((dir) => ({ type: "preview" as const, id: col.id, dir })),
-        getPosterDir(col.id).then((dir) => ({ type: "poster" as const, id: col.id, dir })),
+      sources.flatMap((id) => [
+        getPreviewDir(id).then((dir) => ({ type: "preview" as const, id, dir })),
+        getPosterDir(id).then((dir) => ({ type: "poster" as const, id, dir })),
       ]),
     );
 

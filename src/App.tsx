@@ -35,6 +35,8 @@ import {
   enableWin9xNetwork,
   disableWin9xNetwork,
   type Win9xNetworkStatus,
+  readingStorageUsage,
+  type ReadingUsage,
 } from "./api/tauri";
 import { updateState, checkForAppUpdate, startUpdate, restartToUpdate } from "./stores/updater";
 import { fetchGames } from "./stores/games";
@@ -50,6 +52,7 @@ import {
   currentTrack, wantedTrack, playerHidden, hidePlayer, showPlayer, startShuffle, musicUnsupported,
 } from "./stores/music";
 import { IconMusicNote } from "./components/icons";
+import { formatBytes } from "./util";
 import "./styles/main.css";
 import { Button } from "./components/Button";
 
@@ -280,6 +283,12 @@ function App() {
   // default. Null until the first probe answers, so the row can stay quiet
   // rather than flash a wrong state.
   const [netStatus, setNetStatus] = createSignal<Win9xNetworkStatus | null>(null);
+  // Reading-room downloads are permanent, so the space they take is the
+  // user's to watch - and removal lives in the reading room itself.
+  const [readingUsage, setReadingUsage] = createSignal<ReadingUsage | null>(null);
+  const loadReadingUsage = async () => {
+    try { setReadingUsage(await readingStorageUsage()); } catch { /* no data dir yet */ }
+  };
   const [enablingNet, setEnablingNet] = createSignal(false);
   const loadWin9xNetwork = async () => {
     try { setNetStatus(await win9xNetworkStatus()); } catch { /* older backend */ }
@@ -337,6 +346,7 @@ function App() {
     ensureMusicContinuousLoaded();
     loadNetworkMode();
     loadWin9xNetwork();
+    void loadReadingUsage();
     // Reports the folders even after a "not now", so the row below can offer
     // the merge later.
     pendingLayoutMigration()
@@ -617,6 +627,21 @@ function App() {
                         </div>
                         <Show when={scanResult()}>
                           <div class="setting-hint" style="margin-top:4px">{scanResult()}</div>
+                        </Show>
+                        <Show when={readingUsage()}>
+                          {(usage) => (
+                            <div class="setting-row">
+                              <span class="setting-label">Reading room</span>
+                              <span class="setting-hint">
+                                {usage().issues === 0
+                                  ? "Nothing downloaded yet"
+                                  : `${usage().issues.toLocaleString()} `
+                                    + `${usage().issues === 1 ? "issue" : "issues"} · `
+                                    + `${formatBytes(usage().bytes)} on disk — `
+                                    + "right-click a document in the reading room to remove it"}
+                              </span>
+                            </div>
+                          )}
                         </Show>
                         {/* The way back after declining the merge at startup -
                             without it, "not now" would mean "never". */}

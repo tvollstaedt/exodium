@@ -334,6 +334,11 @@
           }
         }
       }
+    },
+    "eXoMedia": {
+      "torrent_infohash": "cb73d61e6b4ea5eaa793c64c1d80e6113e95de84",
+      "game_count": 0,
+      "content_packs": {}
     }
   }
 }

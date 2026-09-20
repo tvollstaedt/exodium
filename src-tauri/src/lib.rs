@@ -1,6 +1,7 @@
 mod commands;
 pub mod db;
 pub mod import;
+pub mod media_sources;
 pub mod models;
 mod support_files;
 pub mod torrent;
@@ -728,6 +729,8 @@ pub fn run() {
             app.manage(commands::media::VideoState::new());
             app.manage(commands::media::MusicState::new());
             app.manage(commands::media::MediaServerState::new());
+            app.manage(media_sources::MediaTorrentState::new());
+            app.manage(commands::reading::ReadingState::new());
 
             // macOS: native traffic lights; elsewhere the custom frame.
             #[cfg(target_os = "macos")]
@@ -775,6 +778,20 @@ pub fn run() {
             commands::media::music_playback_supported,
             commands::media::music_shuffle_candidates,
             commands::media::music_cache_index,
+            commands::reading::list_publications,
+            commands::reading::list_issues,
+            commands::reading::get_issue,
+            commands::reading::game_articles,
+            commands::reading::set_issue_favorited,
+            commands::reading::set_issue_page,
+            commands::reading::open_issue,
+            commands::reading::get_issue_status,
+            commands::reading::reading_cache_index,
+            commands::reading::reading_storage_usage,
+            commands::reading::remove_issue,
+            commands::reading::cancel_issue_fetch,
+            commands::reading::install_issue,
+            commands::reading::launch_issue,
             factory_reset,
             download_game,
             cancel_download,

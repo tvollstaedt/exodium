@@ -26,6 +26,9 @@ const ZIP64_EOCD_SIGNATURE: u32 = 0x0606_4b50;
 const ZIP64_EXTRA_ID: u16 = 0x0001;
 /// A corrupt directory size must not turn into a multi-GB allocation.
 const MAX_DIRECTORY_BYTES: u64 = 64 * 1024 * 1024;
+/// Ceiling for the inflate output buffer, which is grown whenever a chunk
+/// produces nothing.
+const MAX_INFLATE_BUFFER: usize = 64 * 1024 * 1024;
 
 const METHOD_STORE: u16 = 0;
 const METHOD_DEFLATE: u16 = 8;
@@ -37,6 +40,14 @@ pub struct ZipEntry {
     pub uncompressed_size: u64,
     pub method: u16,
     pub local_header_offset: u64,
+}
+
+impl ZipEntry {
+    /// A stored entry is a byte-exact window onto its payload - the only kind
+    /// a nested archive can be read through (§14).
+    pub fn is_stored(&self) -> bool {
+        self.method == METHOD_STORE
+    }
 }
 
 fn u16_at(buf: &[u8], off: usize) -> u16 {
@@ -144,7 +155,9 @@ where
     let mut cd = vec![0u8; cd_size as usize];
     reader.read_exact(&mut cd).await.context("reading central directory")?;
 
-    let mut entries = Vec::with_capacity(entry_count as usize);
+    // A directory that claims more entries than its own bytes can describe is
+    // corrupt; the count only sizes the Vec, so clamp it rather than reserve.
+    let mut entries = Vec::with_capacity(entry_count.min(cd_size / 46) as usize);
     let mut pos = 0usize;
     while pos + 46 <= cd.len() {
         if u32_at(&cd, pos) != CENTRAL_FILE_SIGNATURE {
@@ -182,6 +195,228 @@ where
         pos = name_start + name_len + extra_len + comment_len;
     }
     Ok(entries)
+}
+
+/// Stream one entry into a writer, inflating as it goes. Returns the bytes
+/// written.
+///
+/// Unlike `read_entry_with` this holds only a chunk in memory and has no size
+/// cap, which is what a Media Pack book needs: 222 MB median, 1.8 GB at the
+/// top (§19). The caller owns the disk-space check.
+pub async fn read_entry_to_writer<R, W, F>(
+    reader: &mut R,
+    entry: &ZipEntry,
+    writer: &mut W,
+    mut on_progress: F,
+) -> anyhow::Result<u64>
+where
+    R: AsyncRead + AsyncSeek + Unpin,
+    W: tokio::io::AsyncWrite + Unpin,
+    F: FnMut(u64, u64) -> bool,
+{
+    use tokio::io::AsyncWriteExt;
+
+    const CHUNK: usize = 1024 * 1024;
+    let data_offset = entry_data_offset(reader, entry).await?;
+    reader.seek(std::io::SeekFrom::Start(data_offset)).await?;
+
+    let total = entry.compressed_size;
+    let mut inflate = match entry.method {
+        METHOD_STORE => None,
+        METHOD_DEFLATE => Some(flate2::Decompress::new(false)),
+        other => bail!("unsupported zip compression method {}", other),
+    };
+    let mut buf = vec![0u8; CHUNK];
+    // The inflate output buffer is grown, never shrunk: a deflate chunk can
+    // expand far beyond its input, and a fixed guess would loop forever.
+    let mut out = Vec::with_capacity(CHUNK * 2);
+    let (mut read, mut written) = (0u64, 0u64);
+    while read < total {
+        if !on_progress(read, total) {
+            bail!("cancelled");
+        }
+        let want = CHUNK.min((total - read) as usize);
+        reader
+            .read_exact(&mut buf[..want])
+            .await
+            .context("reading entry data")?;
+        read += want as u64;
+        match inflate.as_mut() {
+            None => {
+                writer.write_all(&buf[..want]).await?;
+                written += want as u64;
+            }
+            Some(dec) => {
+                let mut consumed = 0usize;
+                while consumed < want {
+                    let before_in = dec.total_in();
+                    let before_out = dec.total_out();
+                    out.clear();
+                    let status = dec
+                        .decompress_vec(
+                            &buf[consumed..want],
+                            &mut out,
+                            flate2::FlushDecompress::None,
+                        )
+                        .context("inflating entry")?;
+                    let produced = dec.total_out() - before_out;
+                    if produced > 0 {
+                        writer.write_all(&out).await?;
+                        written += produced;
+                    }
+                    let taken = (dec.total_in() - before_in) as usize;
+                    consumed += taken;
+                    if status == flate2::Status::StreamEnd {
+                        // Past the end the decompressor consumes and produces
+                        // nothing, so any padding after the stream would spin
+                        // this loop forever.
+                        read = total;
+                        break;
+                    }
+                    if taken == 0 && produced == 0 {
+                        // Output was the limit, not input. Doubling, because
+                        // `reserve` on a cleared Vec whose capacity already
+                        // covers the request does nothing at all - capped, or a
+                        // corrupt stream that never progresses doubles forever.
+                        if out.capacity() >= MAX_INFLATE_BUFFER {
+                            bail!("inflating entry made no progress");
+                        }
+                        out.reserve(out.capacity().max(CHUNK) * 2);
+                    }
+                }
+            }
+        }
+    }
+    on_progress(total, total);
+    writer.flush().await?;
+    // The caller renames the result into place, so a stream that ended early
+    // would be cached as a complete document for good.
+    if written != entry.uncompressed_size {
+        bail!(
+            "{} is truncated: {} of {} bytes",
+            entry.name,
+            written,
+            entry.uncompressed_size
+        );
+    }
+    Ok(written)
+}
+
+/// An entry's path below `dest_root`: `/`-separated, `.` dropped, and no way
+/// out of the tree.
+fn relative_entry_path(name: &str) -> anyhow::Result<std::path::PathBuf> {
+    let mut path = std::path::PathBuf::new();
+    for part in name.split(['/', '\\']) {
+        match part {
+            "" | "." => continue,
+            ".." => bail!("refusing to extract {} - it escapes the directory", name),
+            part if part.contains(':') => bail!("refusing to extract {} - absolute path", name),
+            part => path.push(part),
+        }
+    }
+    if path.as_os_str().is_empty() {
+        bail!("entry {} has no file name", name);
+    }
+    Ok(path)
+}
+
+/// Extract a subtree to disk in ONE forward pass: every entry under one of
+/// `prefixes` plus those named by `files`, sorted by local header offset, each
+/// landing at `<dest_root>/<entry name>` through a temporary and a rename
+/// (§19). An empty selection is an error - a silent no-op would read as a
+/// finished install. Returns the bytes written.
+pub async fn read_subtree_to_dir<R, F>(
+    reader: &mut R,
+    entries: &[ZipEntry],
+    prefixes: &[&str],
+    files: &[&str],
+    dest_root: &std::path::Path,
+    mut on_progress: F,
+) -> anyhow::Result<u64>
+where
+    R: AsyncRead + AsyncSeek + Unpin,
+    F: FnMut(u64, u64) -> bool,
+{
+    let prefixes: Vec<String> = prefixes
+        .iter()
+        .map(|p| format!("{}/", p.trim_end_matches('/')))
+        .collect();
+    let mut selected: Vec<&ZipEntry> = entries
+        .iter()
+        .filter(|e| !e.name.ends_with('/'))
+        .filter(|e| {
+            prefixes.iter().any(|p| e.name.starts_with(p.as_str()))
+                || files.iter().any(|f| e.name == *f)
+        })
+        .collect();
+    if selected.is_empty() {
+        bail!("no archive entry matches {:?} or {:?}", prefixes, files);
+    }
+    selected.sort_by_key(|e| e.local_header_offset);
+
+    let total: u64 = selected.iter().map(|e| e.compressed_size).sum();
+    let (mut read, mut written) = (0u64, 0u64);
+    // What this pass put on disk. A half-extracted issue is invisible to the
+    // library - `installed` stays 0 and nothing offers to remove it - so a
+    // failed pass takes its own files back out (§19).
+    let mut created: Vec<std::path::PathBuf> = Vec::new();
+    for entry in selected {
+        let target = dest_root.join(relative_entry_path(&entry.name)?);
+        if let Some(parent) = target.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        let existed = target.exists();
+        // Appended, not `with_extension`: `run.bat` and `run.bak` share a stem
+        // and would otherwise write to the same temporary.
+        let mut temp = target.clone().into_os_string();
+        temp.push(".exodium-part");
+        let temp = std::path::PathBuf::from(temp);
+
+        let result = async {
+            let mut file = tokio::fs::File::create(&temp).await?;
+            read_entry_to_writer(reader, entry, &mut file, |got, _| {
+                on_progress(read + got, total)
+            })
+            .await
+        }
+        .await;
+        match result {
+            Ok(bytes) => written += bytes,
+            Err(e) => {
+                let _ = tokio::fs::remove_file(&temp).await;
+                roll_back(&created, dest_root).await;
+                return Err(e);
+            }
+        }
+        if let Err(e) = tokio::fs::rename(&temp, &target).await {
+            let _ = tokio::fs::remove_file(&temp).await;
+            roll_back(&created, dest_root).await;
+            return Err(e.into());
+        }
+        if !existed {
+            created.push(target);
+        }
+        read += entry.compressed_size;
+    }
+    Ok(written)
+}
+
+/// Undo an interrupted extraction: the files this pass created, then the
+/// directories left empty behind them. A file that was already there belongs
+/// to a sibling issue and is never touched (§19).
+async fn roll_back(created: &[std::path::PathBuf], dest_root: &std::path::Path) {
+    for path in created {
+        let _ = tokio::fs::remove_file(path).await;
+    }
+    for path in created {
+        let mut dir = path.parent();
+        while let Some(current) = dir.filter(|d| *d != dest_root && d.starts_with(dest_root)) {
+            if tokio::fs::remove_dir(current).await.is_err() {
+                break;
+            }
+            dir = current.parent();
+        }
+    }
 }
 
 /// Read and decompress one entry, reporting progress and honouring a stop
@@ -475,6 +710,226 @@ mod tests {
             .unwrap();
         let video = find_video(&entries).expect("video entry");
         read_entry(&mut cursor, video).await.unwrap()
+    }
+
+    /// The Lesesaal path: entries too large for `read_entry_with`'s 512 MiB
+    /// cap go to disk a chunk at a time, deflated or stored alike (§19).
+    #[tokio::test]
+    async fn streams_an_entry_into_a_writer() {
+        for compressed in [true, false] {
+            let body: Vec<u8> = (0..3_000_000u32)
+                .map(|i| (i.wrapping_mul(2654435761) >> 13) as u8)
+                .collect();
+            let zip = make_zip(&body, compressed);
+            let mut cursor = std::io::Cursor::new(zip.clone());
+            let entries = read_central_directory(&mut cursor, zip.len() as u64).await.unwrap();
+            let video = find_video(&entries).expect("video entry");
+
+            let mut out: Vec<u8> = Vec::new();
+            let written = read_entry_to_writer(&mut cursor, video, &mut out, |_, _| true)
+                .await
+                .unwrap();
+            assert_eq!(written as usize, body.len());
+            assert_eq!(out, body);
+        }
+    }
+
+    /// A magazines archive in miniature: one series dir, a neighbour that
+    /// must stay behind, and the series launcher at the root.
+    fn make_tree_zip() -> Vec<u8> {
+        let mut buf = std::io::Cursor::new(Vec::new());
+        {
+            let mut zip = zip::ZipWriter::new(&mut buf);
+            let stored: zip::write::FileOptions<'_, ()> =
+                zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+            for name in [
+                "eXo/Magazines/Other/keep-out.txt",
+                "eXo/Magazines/BBD/run.bat",
+                "eXo/Magazines/BBD/run.bak",
+                "eXo/Magazines/BBD/004/DISK1.IMG",
+                "eXo/Magazines/Big Blue Disk.bat",
+            ] {
+                zip.start_file(name, stored).unwrap();
+                zip.write_all(name.as_bytes()).unwrap();
+            }
+            zip.finish().unwrap();
+        }
+        buf.into_inner()
+    }
+
+    async fn tree_entries(zip: &[u8]) -> Vec<ZipEntry> {
+        let mut cursor = std::io::Cursor::new(zip.to_vec());
+        read_central_directory(&mut cursor, zip.len() as u64).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn subtree_lands_under_the_destination_root() {
+        let zip = make_tree_zip();
+        let entries = tree_entries(&zip).await;
+        let dir = tempfile::tempdir().unwrap();
+        let mut cursor = std::io::Cursor::new(zip);
+
+        let written = read_subtree_to_dir(
+            &mut cursor,
+            &entries,
+            &["eXo/Magazines/BBD"],
+            &["eXo/Magazines/Big Blue Disk.bat"],
+            dir.path(),
+            |_, _| true,
+        )
+        .await
+        .unwrap();
+
+        let root = dir.path();
+        assert_eq!(
+            std::fs::read_to_string(root.join("eXo/Magazines/BBD/run.bat")).unwrap(),
+            "eXo/Magazines/BBD/run.bat"
+        );
+        assert!(root.join("eXo/Magazines/BBD/run.bak").exists());
+        assert!(root.join("eXo/Magazines/BBD/004/DISK1.IMG").exists());
+        assert!(root.join("eXo/Magazines/Big Blue Disk.bat").exists());
+        // The neighbouring series is not part of this issue.
+        assert!(!root.join("eXo/Magazines/Other").exists());
+        // Nothing half-written survives a completed pass.
+        assert!(!root.join("eXo/Magazines/BBD/run.bat.exodium-part").exists());
+        let expected: u64 = [
+            "eXo/Magazines/BBD/run.bat",
+            "eXo/Magazines/BBD/run.bak",
+            "eXo/Magazines/BBD/004/DISK1.IMG",
+            "eXo/Magazines/Big Blue Disk.bat",
+        ]
+        .iter()
+        .map(|n| n.len() as u64)
+        .sum();
+        assert_eq!(written, expected);
+    }
+
+    /// The archive is eXo's, not ours: an entry naming its way out of the
+    /// tree must not land beside the game root.
+    #[test]
+    fn an_entry_name_can_never_escape_the_destination() {
+        assert_eq!(
+            relative_entry_path("eXo/Magazines/BBD/../run.bat").unwrap_err().to_string(),
+            "refusing to extract eXo/Magazines/BBD/../run.bat - it escapes the directory"
+        );
+        assert!(relative_entry_path("C:\\Windows\\system32\\a.dll").is_err());
+        assert!(relative_entry_path("/").is_err());
+        // Leading slashes and `.` segments are dropped, not refused.
+        assert_eq!(
+            relative_entry_path("/eXo/./Magazines/run.bat").unwrap(),
+            std::path::Path::new("eXo/Magazines/run.bat")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_selection_that_matches_nothing_is_an_error() {
+        let zip = make_tree_zip();
+        let entries = tree_entries(&zip).await;
+        let dir = tempfile::tempdir().unwrap();
+        let mut cursor = std::io::Cursor::new(zip);
+        let err = read_subtree_to_dir(
+            &mut cursor,
+            &entries,
+            &["eXo/Magazines/GameBytes"],
+            &[],
+            dir.path(),
+            |_, _| true,
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("no archive entry matches"));
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_subtree_fetch_leaves_no_file() {
+        let zip = make_tree_zip();
+        let entries = tree_entries(&zip).await;
+        let dir = tempfile::tempdir().unwrap();
+        let mut cursor = std::io::Cursor::new(zip);
+        let err = read_subtree_to_dir(
+            &mut cursor,
+            &entries,
+            &["eXo/Magazines/BBD"],
+            &[],
+            dir.path(),
+            |_, _| false,
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("cancelled"));
+        let leftovers: Vec<_> = walkdir::WalkDir::new(dir.path())
+            .into_iter()
+            .flatten()
+            .filter(|e| e.file_type().is_file())
+            .collect();
+        assert!(leftovers.is_empty(), "left behind: {leftovers:?}");
+    }
+
+    /// A pass that dies on the second entry must not leave the first one
+    /// standing: nothing marks the issue installed, so nothing would offer to
+    /// remove it either.
+    #[tokio::test]
+    async fn a_failed_subtree_pass_takes_back_what_it_wrote() {
+        let zip = make_tree_zip();
+        let entries = tree_entries(&zip).await;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("eXo/Magazines/BBD")).unwrap();
+        // A sibling issue's file, already on disk before this pass.
+        std::fs::write(dir.path().join("eXo/Magazines/BBD/sibling.img"), b"keep").unwrap();
+        let mut cursor = std::io::Cursor::new(zip);
+
+        let err = read_subtree_to_dir(
+            &mut cursor,
+            &entries,
+            &["eXo/Magazines/BBD"],
+            &[],
+            dir.path(),
+            // True for the first entry's chunks, false once the second starts.
+            |got, _| got == 0,
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("cancelled"), "{err}");
+
+        assert!(dir.path().join("eXo/Magazines/BBD/sibling.img").exists());
+        let written: Vec<_> = walkdir::WalkDir::new(dir.path())
+            .into_iter()
+            .flatten()
+            .filter(|e| e.file_type().is_file())
+            .map(|e| e.path().to_path_buf())
+            .collect();
+        assert_eq!(written.len(), 1, "left behind: {written:?}");
+    }
+
+    /// A short stream renamed into the cache would be served as a complete
+    /// document for good, so the directory's size has the last word.
+    #[tokio::test]
+    async fn an_entry_shorter_than_its_directory_size_is_refused() {
+        let zip = make_zip(b"video", false);
+        let mut cursor = std::io::Cursor::new(zip.clone());
+        let entries = read_central_directory(&mut cursor, zip.len() as u64).await.unwrap();
+        let mut video = find_video(&entries).unwrap().clone();
+        video.uncompressed_size += 1_000;
+
+        let mut out: Vec<u8> = Vec::new();
+        let err = read_entry_to_writer(&mut cursor, &video, &mut out, |_, _| true)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("truncated"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn streaming_an_entry_honours_cancellation() {
+        let body: Vec<u8> = (0..3_000_000u32).map(|i| (i >> 3) as u8).collect();
+        let zip = make_zip(&body, true);
+        let mut cursor = std::io::Cursor::new(zip.clone());
+        let entries = read_central_directory(&mut cursor, zip.len() as u64).await.unwrap();
+        let video = find_video(&entries).unwrap();
+        let mut out: Vec<u8> = Vec::new();
+        let err = read_entry_to_writer(&mut cursor, video, &mut out, |_, _| false)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("cancelled"));
     }
 
     #[tokio::test]
@@ -883,6 +1338,77 @@ mod tests {
     /// The media pack stores whole album zips inside its 36 GB archive; a
     /// window onto the stored entry makes the inner directory readable with
     /// the same parser, and a track comes out without touching the rest.
+    /// An outer archive holding `inner` STORED under `eXo/inner.zip`.
+    fn wrap_stored(inner: &[u8]) -> Vec<u8> {
+        let mut buf = std::io::Cursor::new(Vec::new());
+        {
+            let mut zip = zip::ZipWriter::new(&mut buf);
+            let stored: zip::write::FileOptions<'_, ()> =
+                zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+            zip.start_file("readme.txt", stored).unwrap();
+            zip.write_all(b"installer wrapper").unwrap();
+            zip.start_file("eXo/inner.zip", stored).unwrap();
+            zip.write_all(inner).unwrap();
+            zip.finish().unwrap();
+        }
+        buf.into_inner()
+    }
+
+    async fn window_onto_inner(
+        outer: Vec<u8>,
+    ) -> (OffsetReader<std::io::Cursor<Vec<u8>>>, u64) {
+        let mut cursor = std::io::Cursor::new(outer.clone());
+        let entries = read_central_directory(&mut cursor, outer.len() as u64).await.unwrap();
+        let inner = entries.iter().find(|e| e.name == "eXo/inner.zip").unwrap();
+        assert!(inner.is_stored());
+        let base = entry_data_offset(&mut cursor, inner).await.unwrap();
+        (OffsetReader::new(cursor, base, inner.uncompressed_size), inner.uncompressed_size)
+    }
+
+    /// The GLP magazine add-on is a 60 GB inner archive, hence zip64: its
+    /// locator names an ABSOLUTE record offset, which the window translates.
+    #[tokio::test]
+    async fn a_zip64_inner_archive_is_readable_through_a_window() {
+        let body: Vec<u8> = (0..30_000u32).map(|i| (i % 251) as u8).collect();
+        let inner = to_zip64_tail(&make_zip(&body, true), true);
+        let (mut window, len) = window_onto_inner(wrap_stored(&inner)).await;
+        let entries = read_central_directory(&mut window, len).await.unwrap();
+        assert_eq!(entries.len(), 3);
+        let video = find_video(&entries).unwrap();
+        assert_eq!(read_entry(&mut window, video).await.unwrap(), body);
+    }
+
+    /// Books stream to disk through the same window; several chunks cross the
+    /// window's end-of-range clamp.
+    #[tokio::test]
+    async fn a_windowed_entry_streams_to_a_writer() {
+        let body: Vec<u8> = (0..3_000_000u32)
+            .map(|i| (i.wrapping_mul(2654435761) >> 13) as u8)
+            .collect();
+        let (mut window, len) = window_onto_inner(wrap_stored(&make_zip(&body, true))).await;
+        let entries = read_central_directory(&mut window, len).await.unwrap();
+        let video = find_video(&entries).unwrap();
+        let mut out: Vec<u8> = Vec::new();
+        let written = read_entry_to_writer(&mut window, video, &mut out, |_, _| true).await.unwrap();
+        assert_eq!(written as usize, body.len());
+        assert_eq!(out, body);
+    }
+
+    /// The reading room wraps EVERY stream, nested or not; a full-file window
+    /// must therefore be exactly the file.
+    #[tokio::test]
+    async fn a_full_file_window_is_the_identity() {
+        let body: Vec<u8> = (0..50_000u32).map(|i| (i % 199) as u8).collect();
+        let zip = make_zip(&body, false);
+        let mut raw = std::io::Cursor::new(zip.clone());
+        let direct = read_central_directory(&mut raw, zip.len() as u64).await.unwrap();
+        let mut window = OffsetReader::new(std::io::Cursor::new(zip.clone()), 0, zip.len() as u64);
+        let windowed = read_central_directory(&mut window, zip.len() as u64).await.unwrap();
+        assert_eq!(direct, windowed);
+        let video = find_video(&windowed).unwrap();
+        assert_eq!(read_entry(&mut window, video).await.unwrap(), body);
+    }
+
     #[tokio::test]
     async fn nested_stored_zip_is_readable_through_a_window() {
         let body: Vec<u8> = (0..40_000u32).map(|i| (i % 233) as u8).collect();

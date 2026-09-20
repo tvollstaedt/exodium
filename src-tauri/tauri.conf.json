@@ -64,6 +64,7 @@
       "resources/previews/eXoWin3x": "previews/eXoWin3x",
       "resources/previews/eXoWin9x": "previews/eXoWin9x",
       "resources/previews/eXoScummVM": "previews/eXoScummVM",
+      "resources/previews/eXoMedia": "previews/eXoMedia",
       "resources/dosbox-shaders": "shaders",
       "resources/dosbox-shader-presets": "shader-presets",
       "resources/dosbox-bin": "dosbox-bin"

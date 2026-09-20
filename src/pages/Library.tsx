@@ -30,9 +30,11 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Select } from "../components/Select";
 import { showToast } from "../stores/toasts";
 import { openGameRequest, setOpenGameRequest, musicUnsupported, refreshMusicIndex } from "../stores/music";
-import { matchesLibraryQuery } from "../util";
+import { matchesLibraryQuery, jumpBarDisplayLabel } from "../util";
+import { ReadingRoom } from "../components/ReadingRoom";
+import { ViewToggle } from "../components/ViewToggle";
 
-type Tab = "library" | "browse";
+type Tab = "library" | "browse" | "reading";
 
 /** Merge fresh rows into a shelf list, keeping the object of every game
  *  whose state did not change so `<For>` does not remount its card. */
@@ -93,7 +95,7 @@ export function Library() {
   const onTabSlideEnd = (e: AnimationEvent) => {
     if (e.target === e.currentTarget) { setTabSlideDone(true); }
   };
-  const TAB_ORDER: Record<Tab, number> = { browse: 0, library: 1 };
+  const TAB_ORDER: Record<Tab, number> = { browse: 0, library: 1, reading: 2 };
   const switchTab = (tab: Tab) => {
     if (tab === activeTab()) { return; }
     setTabSlideDir(TAB_ORDER[tab] > TAB_ORDER[activeTab()] ? "right" : "left");
@@ -244,20 +246,6 @@ export function Library() {
     if (backend.length > 0) { return backend; }
     return [...new Set(sections().map(s => s.label).filter(Boolean))];
   });
-
-  // Compact display label for the narrow jump bar. Full label is kept for
-  // data-section-label matching (jumpToSection) and the title tooltip.
-  const jumpBarDisplayLabel = (label: string): string => {
-    // Star ratings: "★★★★☆" → "4", "Unrated" → "?"
-    const stars = label.match(/^[★☆]+$/);
-    if (stars) {
-      return String((label.match(/★/g) || []).length);
-    }
-    if (label === "Unrated") { return "?"; }
-    // 14 chars keeps prefix-sharing genres apart ("Puzzle" / "Puzzle-Solving").
-    if (label.length > 14) { return label.slice(0, 13) + "…"; }
-    return label;
-  };
 
   const jumpToSection = async (label: string) => {
     const scroll = () => {
@@ -626,23 +614,6 @@ export function Library() {
     return "";
   };
 
-  // One instance per toolbar, so the switch sits in the same right-edge spot
-  // on both tabs.
-  const ViewToggle = () => (
-    <div class="view-toggle" role="group" aria-label="View mode">
-      <button
-        class={`view-toggle-btn ${viewMode() === "grid" ? "active" : ""}`}
-        title="Grid view"
-        onClick={() => switchView("grid")}
-      >▦</button>
-      <button
-        class={`view-toggle-btn ${viewMode() === "list" ? "active" : ""}`}
-        title="List view"
-        onClick={() => switchView("list")}
-      >☰</button>
-    </div>
-  );
-
   // Shelf body in the current view mode. No sortable header here: a shelf's
   // order is its own semantic (recency, install state, playlist order).
   const ShelfGames = (p: { games: Game[] }) => (
@@ -696,6 +667,13 @@ export function Library() {
             <span class={`lib-tab-count ${activeTab() === "library" ? "active" : ""}`}>{installedGames().length} installed</span>
           </Show>
         </button>
+        <button
+          class={`lib-tab ${activeTab() === "reading" ? "active" : ""}`}
+          data-testid="tab-reading"
+          onClick={() => switchTab("reading")}
+        >
+          Reading Room
+        </button>
       </div>
 
       {/* ── Browse tab ── */}
@@ -747,7 +725,7 @@ export function Library() {
           <Show when={totalGames() > 0}>
             <span class="results-count">{totalGames().toLocaleString()} games</span>
           </Show>
-          <ViewToggle />
+          <ViewToggle mode={viewMode()} onChange={switchView} />
         </div>
 
         <Show when={activePlaylist()}>
@@ -863,7 +841,7 @@ export function Library() {
         {/* Not sticky: the shelf titles stick at the tab bar's edge (top:
             40px) and a sticky toolbar would sit on top of them. */}
         <div class="library-toolbar library-toolbar-plain">
-          <ViewToggle />
+          <ViewToggle mode={viewMode()} onChange={switchView} />
         </div>
         <Show
           when={libraryHasMatches()}
@@ -948,6 +926,13 @@ export function Library() {
             onClick={() => setPlaylistDialog({ mode: "create" })}
           >＋ New playlist</button>
         </Show>
+        </div>
+      </Show>
+
+      {/* ── Reading Room tab ── */}
+      <Show when={activeTab() === "reading"}>
+        <div class={tabPaneClass()} onAnimationEnd={onTabSlideEnd}>
+          <ReadingRoom query={searchQuery()} />
         </div>
       </Show>
 

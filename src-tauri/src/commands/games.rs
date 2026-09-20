@@ -859,7 +859,7 @@ fn trim_trailing_sep(path: &str) -> String {
 /// Rewrite a conf's `.\`-relative host paths to absolute ones. For LP games
 /// (`lp_info`) the EN conf runs verbatim against the overlay mount; only an
 /// incompatible LP layout gets a generated autoexec (§10a).
-fn patch_dosbox_conf(
+pub(crate) fn patch_dosbox_conf(
     conf_path: &std::path::Path,
     working_dir: &std::path::Path,
     lp_info: Option<(&str, &str, &str, &std::path::Path)>, // (shortcode, lang_dir, game_folder, lp_game_dir)
@@ -1418,7 +1418,7 @@ fn autoexec_has_launch_cmd(conf: &str) -> bool {
 /// The DOSBox Staging binary: `resource_dir/dosbox-bin/` (Windows, next to
 /// its DLLs), then beside the main executable (macOS, Linux), then the
 /// resource dir, then dev `binaries/`, then PATH.
-fn resolve_dosbox(app: &AppHandle) -> PathBuf {
+pub(crate) fn resolve_dosbox(app: &AppHandle) -> PathBuf {
     use tauri::Manager;
     let bin = if cfg!(windows) { "dosbox-staging.exe" } else { "dosbox-staging" };
 
@@ -1496,7 +1496,7 @@ fn dosbox_user_config_dir() -> Option<PathBuf> {
 /// set Staging aborts at startup ("Error setting fallback shaders"); without
 /// the presets every adaptive CRT mode degrades to a plain shader. Each is
 /// gated on a FILE, not the dir: an empty dir has been seen in the wild.
-fn ensure_dosbox_shaders(app: &AppHandle) {
+pub(crate) fn ensure_dosbox_shaders(app: &AppHandle) {
     use tauri::Manager;
 
     let Some(config_dir) = dosbox_user_config_dir() else {
@@ -1854,7 +1854,7 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
         }
     }
 
-    spawn_emulator_and_track(&app, cmd, &dosbox_bin, &game, id)
+    spawn_emulator_and_track(&app, cmd, &dosbox_bin, &running_game_key(&game), &game.title, id)
 }
 
 /// AppImage/linuxdeploy variables that point only into `$APPDIR`. Dropped for
@@ -1955,7 +1955,10 @@ pub(crate) fn spawn_emulator_and_track(
     app: &AppHandle,
     mut cmd: Command,
     emulator_bin: &Path,
-    game: &Game,
+    // What `running_games` tracks and what the "Launched:" line names - a
+    // game's shortcode and language, or a Lesesaal issue's key (§19).
+    run_key: &str,
+    label: &str,
     id: i64,
 ) -> Result<String, String> {
     // id names the per-game emulator log file; macOS nulls stdio instead.
@@ -2045,7 +2048,7 @@ pub(crate) fn spawn_emulator_and_track(
     // Reap the child and track the running game, so uninstall can refuse
     // while the emulator holds files open (a live rename loses saves on
     // Windows).
-    let run_key = running_game_key(game);
+    let run_key = run_key.to_string();
     running_games().lock().map(|mut s| s.insert(run_key.clone())).ok();
     running_pids().lock().map(|mut m| m.insert(id, child.id())).ok();
     let app = app.clone();
@@ -2060,7 +2063,7 @@ pub(crate) fn spawn_emulator_and_track(
         let _ = app.emit("game-exited", GameExited { id });
     });
 
-    Ok(format!("Launched: {}", game.title))
+    Ok(format!("Launched: {}", label))
 }
 
 #[cfg(test)]

@@ -6,6 +6,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 
 use crate::db::queries;
+use crate::media_sources::MediaTorrentState;
 use crate::torrent::manager::fastresume_dir;
 
 use super::collections::COLLECTION_MAP;
@@ -135,10 +136,13 @@ pub async fn migrate_layout(
     app: AppHandle,
     db_state: State<'_, DbState>,
     torrent_state: State<'_, TorrentState>,
+    media_state: State<'_, MediaTorrentState>,
 ) -> Result<MergeTally, String> {
     // Managers first: a live session re-creates every selected file the
-    // moment the merge empties the old tree.
+    // moment the merge empties the old tree - the reading room's included,
+    // since they all hold that one session (§19).
     torrent_state.0.write().await.clear();
+    media_state.clear().await;
 
     let data_dir = {
         let conn = db_state.lock()?;

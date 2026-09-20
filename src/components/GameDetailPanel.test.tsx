@@ -394,6 +394,64 @@ describe("GameDetailPanel", () => {
   });
 });
 
+describe("GameDetailPanel articles", () => {
+  beforeEach(() => {
+    mockInvoke.mockReset();
+  });
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  const ARTICLES = [
+    { kind: "Review", page: 42, issue_key: "mag:en", issue_title: "PC Gamer 1995-02", publication: "PC Gamer", year: 1995, language: "EN" },
+    { kind: "Preview", page: 12, issue_key: "mag:en2", issue_title: "PC Gamer 1994-12", publication: "PC Gamer", year: 1994, language: "EN" },
+    { kind: "Review", page: 30, issue_key: "mag:de", issue_title: "Power Play 1995-03", publication: "Power Play (DE)", year: 1995, language: "DE" },
+  ];
+
+  // A German player picks the German variant, so the German reviews are the
+  // ones to see first; the order within a language is eXo's and stays.
+  it("leads with German articles when the DE variant is selected", async () => {
+    const variants: Game[] = [
+      makeGame({ id: 1, language: "EN", installed: false }),
+      makeGame({ id: 2, language: "DE", installed: true, torrent_source: "eXoDOS_GLP" }),
+    ];
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_game_variants") { return variants; }
+      if (cmd === "get_game_metadata") { return EMPTY_META; }
+      if (cmd === "game_articles") { return ARTICLES; }
+      return null;
+    });
+
+    const { host, dispose } = mount(makeGame({ available_languages: "EN:0,DE:2" }));
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(host.ownerDocument.querySelector(".variant-chip.is-selected")?.textContent).toContain("DE");
+    const rows = [...host.ownerDocument.querySelectorAll(".game-detail-article")];
+    expect(rows.map((r) => r.getAttribute("data-language"))).toEqual(["DE", "EN", "EN"]);
+    expect(rows[0].querySelector(".badge")?.textContent).toBe("DE");
+    expect(rows[1].querySelector(".badge")).toBeNull();
+    expect(rows.map((r) => r.querySelector(".game-detail-article-issue")?.textContent))
+      .toEqual(["Power Play 1995-03DE", "PC Gamer 1995-02", "PC Gamer 1994-12"]);
+    dispose(); host.remove();
+  });
+
+  it("keeps eXo's order for a single-language game", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_game_variants") { return []; }
+      if (cmd === "get_game_metadata") { return EMPTY_META; }
+      if (cmd === "game_articles") { return ARTICLES; }
+      return null;
+    });
+
+    const { host, dispose } = mount(makeGame());
+    await new Promise((r) => setTimeout(r, 0));
+
+    const rows = [...host.ownerDocument.querySelectorAll(".game-detail-article")];
+    expect(rows.map((r) => r.getAttribute("data-language"))).toEqual(["EN", "EN", "DE"]);
+    dispose(); host.remove();
+  });
+});
+
 describe("GameDetailPanel theme row", () => {
   beforeEach(() => {
     mockInvoke.mockReset();

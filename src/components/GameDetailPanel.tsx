@@ -1,15 +1,17 @@
-import { createSignal, createEffect, on, untrack, Show, For, onCleanup, onMount } from "solid-js";
+import { createSignal, createMemo, createEffect, on, untrack, Show, For, onCleanup, onMount } from "solid-js";
 import { Portal } from "solid-js/web";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { AutoProgress } from "./ProgressBar";
 import { Lightbox } from "./Lightbox";
 import { ManualViewer } from "./ManualViewer";
+import { IssueReader } from "./IssueReader";
+import { MediaNoticeDialog, loadMediaNotice, needsMediaNotice } from "./MediaNotice";
 import { GameActionsMenu } from "./GameActionsMenu";
 import { FieldIcon, IconPlay, IconSoundOn, IconSoundOff, IconZoom, type FieldIconName } from "./icons";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Button } from "./Button";
-import type { Game, GameMetadata } from "../api/tauri";
-import { launchGame, stopGame, gameEngineInfo, gamePrintingUnavailable, scummvmEngineInfo, scummvmVariants, setScummvmOptions, win9xMultiplayerInfo, dismissWin9xNetworkPrompt, enableWin9xNetwork, mediaUrl } from "../api/tauri";
+import type { Game, GameMetadata, Article, Issue } from "../api/tauri";
+import { gameArticles, getIssue, launchGame, stopGame, gameEngineInfo, gamePrintingUnavailable, scummvmEngineInfo, scummvmVariants, setScummvmOptions, win9xMultiplayerInfo, dismissWin9xNetworkPrompt, enableWin9xNetwork, mediaUrl } from "../api/tauri";
 import type { GameEngineInfo, ScummVmEngineInfo, ScummVmVariants } from "../api/tauri";
 import { createWin9xStatus } from "./win9xStatus";
 import { formatBytes, parseLangEntries, langBadgeClass, performUninstall, performReset } from "../util";
@@ -453,6 +455,48 @@ export function GameDetailPanel(props: Props) {
       }).catch(() => {});
     }
   });
+
+  // eXo's magazine index: which issues covered THIS game, and on what page
+  // (§19). Keyed on the selected variant's id - an LP row shares the English
+  // shortcode, so both answer the same.
+  const [articles, setArticles] = createSignal<Article[]>([]);
+  const [readingIssue, setReadingIssue] = createSignal<Issue | null>(null);
+  /** The issue waiting behind the media notice, if it has not been seen. */
+  const [noticeFor, setNoticeFor] = createSignal<Issue | null>(null);
+  const [readingPage, setReadingPage] = createSignal<number | null>(null);
+
+  createEffect(() => {
+    const id = selected()?.id;
+    setArticles([]);
+    if (id == null) { return; }
+    void gameArticles(id).then(setArticles).catch(() => setArticles([]));
+  });
+
+  // The selected variant's language leads; the rest keep eXo's order.
+  const orderedArticles = createMemo(() => {
+    const lang = selected()?.language;
+    const rows = articles();
+    return [...rows.filter((a) => a.language === lang), ...rows.filter((a) => a.language !== lang)];
+  });
+
+  /** The same gate the reading room applies: the first issue opened anywhere
+   *  says once that reading joins a second torrent (§19). */
+  const openArticle = async (article: Article) => {
+    await loadMediaNotice();
+    const issue = await getIssue(article.issue_key);
+    if (!issue) { return; }
+    setReadingPage(article.page);
+    if (needsMediaNotice()) {
+      setNoticeFor(issue);
+      return;
+    }
+    setReadingIssue(issue);
+  };
+
+  const onArticle = (article: Article) => {
+    void openArticle(article)
+      .catch((e) => console.error("[reading] could not open the article:", e));
+  };
 
   // Metadata belongs to the SELECTED variant; keyed on id+source+manual so
   // a variant refresh (same rows, new objects) does not refetch.
@@ -1390,6 +1434,36 @@ export function GameDetailPanel(props: Props) {
                   </div>
                 </div>
               </Show>
+
+              {/* Covered in: eXo ships the page numbers, so this jumps
+                  straight into the issue at the right page. */}
+              <Show when={articles().length > 0}>
+                <div class="game-detail-articles">
+                  <div class="game-detail-section-label">
+                    Covered in
+                    <span class="section-count">{articles().length}</span>
+                  </div>
+                  <div class="game-detail-article-list">
+                    <For each={orderedArticles()}>
+                      {(article) => (
+                        <button
+                          class="game-detail-article"
+                          data-language={article.language}
+                          onClick={() => onArticle(article)}
+                          title={`${article.issue_title}, page ${article.page}`}
+                        >
+                          <span class="game-detail-article-kind">{article.kind}</span>
+                          <span class="game-detail-article-issue">
+                            {article.issue_title}
+                            <Show when={article.language === "DE"}><span class="badge badge-lang">DE</span></Show>
+                          </span>
+                          <span class="game-detail-article-page">p. {article.page}</span>
+                        </button>
+                      )}
+                    </For>
+                  </div>
+                </div>
+              </Show>
             </div>
 
             {/* Media: screenshots/art - only renders if the metadata content
@@ -1454,6 +1528,21 @@ export function GameDetailPanel(props: Props) {
           kind={metadata()?.manual_kind ?? null}
           open={manualOpen()}
           onClose={() => setManualOpen(false)}
+        />
+        <IssueReader
+          issue={readingIssue()}
+          startPage={readingPage()}
+          onClose={() => { setReadingIssue(null); setReadingPage(null); }}
+        />
+        <MediaNoticeDialog
+          open={noticeFor() != null}
+          confirmLabel="Open the issue"
+          onConfirm={() => {
+            const issue = noticeFor();
+            setNoticeFor(null);
+            if (issue) { setReadingIssue(issue); }
+          }}
+          onClose={() => { setNoticeFor(null); setReadingPage(null); }}
         />
         {/* Asked on Play, not in Settings: this is the moment the online mode
             would otherwise silently be missing. Either answer can be

@@ -173,3 +173,11 @@ export const IconEmptyLibrary = () => (
     <path d="M7 11v3M5.5 12.5h3M15.5 12h.01M18 14h.01" />
   </svg>
 );
+
+export const IconEmptyReading = () => (
+  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M12 7v14" />
+    <path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z" />
+  </svg>
+);

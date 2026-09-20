@@ -118,7 +118,7 @@ Result: roughly a third of the catalog plays with silent or wrong music — agai
 - [ ] Spot-test parity matrix: 1× MT-32, 1× GM/soundfont, 1× `machine=tandy`, 1× `pcjr`, 1× CGA composite, 1× GUS, 1× `voodoo=true` (e.g. Tomb Raider).
 - [ ] README/first-run compat note: ~19 games tuned for ECE/DOSBox-X specials (3dfx tuning, GunStick) may misbehave.
 
-**Defer to v1.x with a public roadmap:** playlists (bundled data + empty DB tables already exist), per-game Extras/setup-utility launcher, gameplay videos, ScummVM runtime, custom mapper files (SDL1→SDL2 incompatible). Document as out of scope: magazines/books/soundtracks add-on.
+**Defer to v1.x with a public roadmap:** playlists (bundled data + empty DB tables already exist), per-game Extras/setup-utility launcher, gameplay videos, ScummVM runtime, custom mapper files (SDL1→SDL2 incompatible). Document as out of scope: the Media Pack's soundtracks and videos (its magazines, books and catalogs ship as the Lesesaal, §19).
 
 ## Phase 3 — UX polish, no redesign (~1 week)
 

@@ -347,6 +347,21 @@ impl DownloadManager {
         &self.torrent_index
     }
 
+    /// The shared session and the paths it was built with, so a source added
+    /// after startup (the Media Pack, §19) joins THIS session instead of
+    /// creating a second one beside it.
+    pub fn session(&self) -> Arc<Session> {
+        Arc::clone(&self.session)
+    }
+
+    pub fn data_dir(&self) -> &Path {
+        &self.data_dir
+    }
+
+    pub fn persistence_dir(&self) -> &Path {
+        &self.persistence_dir
+    }
+
     /// Session-wide rates: one read, not a sum over torrents (`stats()` copies
     /// a 15,000-entry file-progress vector per call).
     pub fn session_transfer(&self) -> SessionTransfer {

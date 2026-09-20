@@ -1,4 +1,5 @@
 pub mod media;
+pub mod reading;
 pub(crate) mod collections;
 pub(crate) mod paths;
 pub(crate) mod assets;

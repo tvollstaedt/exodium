@@ -9,6 +9,7 @@ use tokio::sync::RwLock;
 use crate::db;
 use crate::db::queries;
 use crate::import;
+use crate::media_sources::{apply_union_keep_paths, MediaTorrentState};
 use crate::torrent::manager::{fastresume_dir, DownloadManager, DownloadProgress};
 use crate::torrent::TorrentIndex;
 
@@ -259,9 +260,13 @@ pub async fn init_download_manager(
     app: AppHandle,
     db_state: State<'_, DbState>,
     torrent_state: State<'_, TorrentState>,
+    media_state: State<'_, MediaTorrentState>,
 ) -> Result<bool, String> {
-    // Clear existing managers
+    // Clear existing managers. The media sources go with them: they hold the
+    // same session, and one left behind would keep it alive across the switch
+    // to offline and lend it to the next start beside a second one (§19).
     torrent_state.0.write().await.clear();
+    media_state.clear().await;
 
     let data_dir = {
         let conn = db_state.lock()?;
@@ -296,6 +301,7 @@ pub async fn init_download_manager(
     crate::commands::paths::prune_launch_confs(&app);
     crate::commands::media::prune_video_cache(&data_dir);
     crate::commands::media::prune_music_cache(&data_dir);
+    crate::commands::reading::sweep_partial_downloads(&data_dir);
 
     // Offline: no session. The bundled configs are still extracted, and
     // the cleared managers dropped the last Arc to a previous session.
@@ -366,7 +372,7 @@ pub async fn init_download_manager(
 
     // All enabled torrents overlay into the same root - placeholder cleanup
     // in any one manager must keep the union of every torrent's file list.
-    set_union_cleanup_keep_paths(&new_managers);
+    set_union_cleanup_keep_paths(&new_managers, &media_state).await;
 
     // Adopt torrents the session auto-resumed from persistence, so downloads
     // interrupted by an app restart report progress and finish extraction.
@@ -512,17 +518,33 @@ async fn evict_mismatched_session_torrents(
 }
 
 /// Give every manager the union of all managers' torrent file lists as its
-/// placeholder-cleanup keep-list. See DownloadManager::cleanup_keep_paths.
-fn set_union_cleanup_keep_paths(managers: &[(String, Arc<DownloadManager>)]) {
-    let union: Arc<Vec<String>> = Arc::new(
-        managers
-            .iter()
-            .flat_map(|(_, m)| m.index().files.iter().map(|f| f.path.clone()))
-            .collect(),
-    );
-    for (_, mgr) in managers {
-        mgr.set_cleanup_keep_paths(Arc::clone(&union));
+/// placeholder-cleanup keep-list, media sources included - they write into the
+/// same root (§19). See DownloadManager::cleanup_keep_paths.
+async fn set_union_cleanup_keep_paths(
+    managers: &[(String, Arc<DownloadManager>)],
+    media_state: &MediaTorrentState,
+) {
+    let media: Vec<Arc<DownloadManager>> = media_state.0.read().await.values().cloned().collect();
+    apply_union_keep_paths(managers.iter().map(|(_, m)| m).chain(media.iter()));
+}
+
+/// Clear the user's state, never the catalogue: games, curated playlists and
+/// the reading room's issues all come from the bundled DB. A disk magazine's
+/// `installed` flag describes files this reset deletes, so it always goes;
+/// favorites and bookmarks only when the game data goes with them (§19).
+fn reset_user_state(conn: &rusqlite::Connection, delete_game_data: bool) -> rusqlite::Result<()> {
+    conn.execute_batch(
+        "UPDATE games SET in_library = 0, installed = 0, favorited = 0, last_played = NULL;
+         DELETE FROM game_config;
+         -- Only user playlists are user state; their memberships cascade.
+         DELETE FROM playlists WHERE kind = 'user';
+         UPDATE issue_state SET installed = 0;
+         DELETE FROM config;",
+    )?;
+    if delete_game_data {
+        conn.execute_batch("DELETE FROM issue_state;")?;
     }
+    Ok(())
 }
 
 /// Reset all data: clear DB, remove config. Returns to setup state.
@@ -531,6 +553,7 @@ pub async fn factory_reset(
     app: AppHandle,
     db_state: State<'_, DbState>,
     torrent_state: State<'_, TorrentState>,
+    media_state: State<'_, MediaTorrentState>,
     delete_game_data: bool,
 ) -> Result<(), String> {
     log::info!("factory_reset called (delete_game_data={})", delete_game_data);
@@ -559,30 +582,19 @@ pub async fn factory_reset(
         }
     };
 
+    // The reading room's managers hold that same session, so they go first or
+    // the shutdown below leaves a writer behind (§19).
+    media_state.clear().await;
+
     // Stop the session BEFORE deleting: a live writer re-creates files
     // after the wipe and the ledger then claims data that is gone.
     if let Some(mgr) = session_mgr {
         mgr.shutdown_session().await;
     }
 
-    // Reset user state without touching the game catalog.
-    // Games are catalog data (from the bundled DB) - clearing them would leave
-    // the library empty until next restart. Only reset per-user flags and config.
     {
         let conn = db_state.lock()?;
-        conn.execute_batch(
-            "UPDATE games SET in_library = 0, installed = 0, favorited = 0, last_played = NULL;
-             DELETE FROM game_config;
-             DELETE FROM downloads;
-             DELETE FROM images;
-             -- Curated playlists are catalog data like the games rows above:
-             -- deleting them here would leave the Playlists dropdown empty
-             -- until the next launch re-runs the catalog refresh. Only user
-             -- playlists are user state (their memberships cascade).
-             DELETE FROM playlists WHERE kind = 'user';
-             DELETE FROM config;",
-        )
-        .map_err(|e| e.to_string())?;
+        reset_user_state(&conn, delete_game_data).map_err(|e| e.to_string())?;
     }
 
     // Optionally delete the game folder + content packs + stale downloads.
@@ -938,8 +950,11 @@ pub async fn setup_from_local(
     app: AppHandle,
     db_state: State<'_, DbState>,
     torrent_state: State<'_, TorrentState>,
+    media_state: State<'_, MediaTorrentState>,
     exodos_path: String,
 ) -> Result<usize, String> {
+    // A media manager from a previous run holds the session this replaces.
+    media_state.clear().await;
     let root = PathBuf::from(&exodos_path);
 
     // The data_dir is the parent of the selected eXoDOS folder.
@@ -1025,7 +1040,7 @@ pub async fn setup_from_local(
                 }
             }
         }
-        set_union_cleanup_keep_paths(&new_managers);
+        set_union_cleanup_keep_paths(&new_managers, &media_state).await;
         for (id, mgr) in &new_managers {
             if mgr.hydrate_from_session().await {
                 log::info!("{}: adopted persisted torrent from session", id);
@@ -1395,6 +1410,49 @@ mod network_mode_tests {
     }
 }
 
+
+#[cfg(test)]
+mod reset_tests {
+    use super::*;
+
+    fn db_with_issue() -> rusqlite::Connection {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::init(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO issue_state (issue_key, favorited, installed, last_page) \
+             VALUES ('mag:bbd#004', 1, 1, 12)",
+            [],
+        )
+        .unwrap();
+        conn
+    }
+
+    /// The reset deletes a disk magazine's files, so its install flag has to
+    /// go with them - the card would otherwise offer Play on nothing (§19).
+    #[test]
+    fn a_reset_that_keeps_the_data_clears_only_the_install_flag() {
+        let conn = db_with_issue();
+        reset_user_state(&conn, false).unwrap();
+        let (favorited, installed, page): (i64, i64, Option<i64>) = conn
+            .query_row(
+                "SELECT favorited, installed, last_page FROM issue_state",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!((favorited, installed, page), (1, 0, Some(12)));
+    }
+
+    #[test]
+    fn wiping_the_game_data_takes_the_reading_state_with_it() {
+        let conn = db_with_issue();
+        reset_user_state(&conn, true).unwrap();
+        let rows: i64 = conn
+            .query_row("SELECT COUNT(*) FROM issue_state", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 0);
+    }
+}
 
 #[cfg(test)]
 mod data_dir_tests {

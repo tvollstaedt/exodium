@@ -5358,6 +5358,183 @@ body.has-player {
   white-space: nowrap;
 }
 
+/* ── Reading Room (§19) ──────────────────────────────────────────────── */
+/* The tab reuses Browse's toolbar, grid, list, separators and jump bar; only
+   what a document needs that a game does not is defined here. */
+
+.reading-kinds {
+  display: flex;
+  gap: 6px;
+}
+
+.reading-note {
+  padding: 0 0 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.grid-separator .section-count {
+  vertical-align: middle;
+  margin-left: 10px;
+}
+
+/* Scans are not 3:4 (magazines ~0.73, some catalogs landscape): the tile
+   keeps the grid's box and the cover is contained, never cropped. */
+.issue-card .game-card-thumb {
+  object-fit: contain;
+  background: var(--bg-secondary);
+}
+
+.issue-card .card-action-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The label sits beside the size here, so it does not take the bar's width. */
+.issue-card .action-downloading {
+  flex: 0 1 auto;
+  text-align: left;
+}
+
+/* The series name is the meta line's second half; the genre cap is too
+   narrow for "Computer Gaming World". */
+.issue-card .game-card-meta .genre {
+  flex: 1;
+  min-width: 0;
+  max-width: none;
+}
+
+.issue-play {
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.issue-play:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.issue-play:disabled {
+  cursor: default;
+}
+
+.card-action-size {
+  margin-left: auto;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.5);
+  white-space: nowrap;
+}
+
+.action-resume {
+  color: var(--accent-hover);
+}
+
+.badge-disk {
+  background: rgba(240, 163, 94, 0.22);
+  color: #f0a35e;
+}
+
+.badge-ondisk {
+  background: rgba(124, 92, 252, 0.18);
+  color: var(--accent-hover);
+}
+
+/* List columns: fav | cover | title | publication | year | kind | size | status */
+.issue-list-header,
+.issue-row {
+  grid-template-columns:
+    28px 26px minmax(220px, 2.4fr) minmax(150px, 1.4fr) 44px 96px 68px 120px;
+}
+
+.issue-row .row-cover img {
+  object-fit: contain;
+}
+
+@media (max-width: 1000px) {
+  .issue-list-header,
+  .issue-row {
+    grid-template-columns:
+      28px 26px minmax(200px, 2.4fr) minmax(130px, 1.4fr) 44px 68px 120px;
+  }
+
+  .issue-list-header .row-kind,
+  .issue-row .row-kind {
+    display: none;
+  }
+}
+
+/* ── Issue fetch panel (inside the document viewer) ─────────────────── */
+
+.issue-fetch {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 24px;
+  width: min(560px, 100%);
+}
+
+.issue-fetch-cover {
+  aspect-ratio: 3 / 4;
+  background: var(--bg-card);
+  border-radius: var(--border-radius);
+  overflow: hidden;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+}
+
+.issue-fetch-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.issue-fetch-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  align-self: center;
+}
+
+.issue-fetch-headline {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.issue-fetch-detail {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.issue-fetch-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.issue-fetch-pct {
+  min-width: 34px;
+  text-align: right;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.issue-fetch-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.issue-fetch-actions .lib-empty-btn {
+  margin-top: 0;
+  padding: 6px 14px;
+}
 /* ── PDF reader ──────────────────────────────────────────────────────── */
 
 .pdf-reader {
@@ -5544,4 +5721,54 @@ body.has-player {
   padding: 40px;
   color: var(--text-muted);
   font-size: 13px;
+}
+
+/* Magazine mentions in the game panel (§19). */
+.game-detail-article-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.game-detail-article {
+  display: grid;
+  grid-template-columns: 76px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 5px 8px;
+  background: var(--bg-card);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--border-radius);
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.game-detail-article:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.game-detail-article-kind {
+  color: var(--accent-hover);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.game-detail-article-issue {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.game-detail-article-issue .badge {
+  margin-left: 6px;
+  vertical-align: 1px;
+}
+
+.game-detail-article-page {
+  color: var(--text-muted);
+  font-size: 11px;
 }

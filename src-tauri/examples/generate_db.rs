@@ -216,6 +216,213 @@ fn slugify(name: &str) -> String {
         .join("-")
 }
 
+/// One issue of the Media Pack, as `scripts/gen_media_assets.py` writes it.
+#[derive(serde::Deserialize)]
+struct MediaIssue {
+    key: String,
+    kind: String,
+    publication: String,
+    title: String,
+    sort_title: Option<String>,
+    year: Option<i64>,
+    release_date: Option<String>,
+    publisher: Option<String>,
+    developer: Option<String>,
+    notes: Option<String>,
+    zip: String,
+    entry: Option<String>,
+    entry_kind: Option<String>,
+    size: i64,
+    cover_key: Option<String>,
+    runnable: bool,
+    launch_dir: Option<String>,
+    issue_dir: Option<String>,
+    launch_bat: Option<String>,
+    command_line: Option<String>,
+    #[serde(default)]
+    substitutions: std::collections::BTreeMap<String, String>,
+    #[serde(default = "default_source")]
+    source: String,
+    #[serde(default)]
+    inner_zip: Option<String>,
+    #[serde(default = "default_language")]
+    language: String,
+    #[serde(default)]
+    extras_count: i64,
+}
+
+/// The index predates the second source; a record without these fields is a
+/// Media Pack issue.
+fn default_source() -> String {
+    "eXoMedia".to_string()
+}
+
+fn default_language() -> String {
+    "EN".to_string()
+}
+
+#[derive(serde::Deserialize)]
+struct MediaIndex {
+    issues: Vec<MediaIssue>,
+}
+
+/// Import the Lesesaal catalogue: publications, issues and eXo's per-game
+/// article index. Both files are bundled; the archives they describe stay in
+/// the torrent (§19).
+fn import_media(conn: &rusqlite::Connection, metadata_dir: &Path) {
+    let path = metadata_dir.join("media.json.gz");
+    let Ok(file) = std::fs::File::open(&path) else {
+        println!("WARN: {} not found, skipping media catalogue", path.display());
+        return;
+    };
+    let index: MediaIndex = match serde_json::from_reader(BufReader::new(
+        flate2::read::GzDecoder::new(file),
+    )) {
+        Ok(v) => v,
+        Err(e) => {
+            println!("WARN: failed to read {}: {e}", path.display());
+            return;
+        }
+    };
+
+    let tx = conn.unchecked_transaction().unwrap();
+    for issue in &index.issues {
+        tx.execute(
+            "INSERT OR IGNORE INTO publications (kind, name, language) VALUES (?1, ?2, ?3)",
+            params![issue.kind, issue.publication, issue.language],
+        )
+        .unwrap_or_else(|e| panic!("media: publication {}/{}: {e}", issue.kind, issue.publication));
+        let publication_id: i64 = tx
+            .query_row(
+                "SELECT id FROM publications WHERE kind = ?1 AND name = ?2",
+                params![issue.kind, issue.publication],
+                |row| row.get(0),
+            )
+            .unwrap_or_else(|e| panic!("media: publication {}/{}: {e}", issue.kind, issue.publication));
+        tx.execute(
+            "INSERT INTO issues (key, publication_id, kind, title, sort_title, year,
+                 release_date, publisher, developer, notes, zip_file, entry_path,
+                 entry_kind, size_bytes, cover_key, runnable, launch_dir, issue_dir,
+                 launch_bat, command_line, substitutions, source, inner_zip, language,
+                 extras_count)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
+                 ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
+            params![
+                issue.key,
+                publication_id,
+                issue.kind,
+                issue.title,
+                issue.sort_title,
+                issue.year,
+                issue.release_date,
+                issue.publisher,
+                issue.developer,
+                issue.notes,
+                issue.zip,
+                issue.entry,
+                issue.entry_kind,
+                issue.size,
+                issue.cover_key,
+                issue.runnable as i64,
+                issue.launch_dir,
+                issue.issue_dir,
+                issue.launch_bat,
+                issue.command_line,
+                (!issue.substitutions.is_empty())
+                    .then(|| serde_json::to_string(&issue.substitutions).unwrap()),
+                issue.source,
+                issue.inner_zip,
+                issue.language,
+                issue.extras_count,
+            ],
+        )
+        .unwrap_or_else(|e| panic!("media: issue {}: {e}", issue.key));
+    }
+    tx.execute(
+        "UPDATE publications SET
+             issue_count = (SELECT COUNT(*) FROM issues WHERE publication_id = publications.id),
+             first_year  = (SELECT MIN(year) FROM issues WHERE publication_id = publications.id),
+             last_year   = (SELECT MAX(year) FROM issues WHERE publication_id = publications.id),
+             cover_key   = (SELECT cover_key FROM issues WHERE publication_id = publications.id
+                            ORDER BY year, sort_title LIMIT 1)",
+        [],
+    )
+    .unwrap();
+
+    let articles_path = metadata_dir.join("media_articles.txt");
+    let mut articles = 0usize;
+    if let Ok(raw) = std::fs::read_to_string(&articles_path) {
+        for line in raw.lines().filter(|l| !l.trim().is_empty()) {
+            let parts: Vec<&str> = line.splitn(4, ';').collect();
+            let [code, kind, page, entry] = parts[..] else {
+                println!("WARN: malformed article line: {line}");
+                continue;
+            };
+            let Ok(page) = page.parse::<i64>() else {
+                println!("WARN: article line with unparsable page: {line}");
+                continue;
+            };
+            articles += tx
+                .execute(
+                    "INSERT OR IGNORE INTO game_articles (shortcode, entry_path, kind, page)
+                     VALUES (?1, ?2, ?3, ?4)",
+                    params![code, entry, kind, page],
+                )
+                .unwrap_or_else(|e| panic!("media: article {line}: {e}"));
+        }
+    } else {
+        println!("WARN: {} not found", articles_path.display());
+    }
+    tx.commit().unwrap();
+
+    let publications: i64 = conn
+        .query_row("SELECT COUNT(*) FROM publications", [], |r| r.get(0))
+        .unwrap();
+    let runnable: i64 = conn
+        .query_row("SELECT COUNT(*) FROM issues WHERE runnable = 1", [], |r| r.get(0))
+        .unwrap();
+    println!(
+        "\nMedia Pack: {} issues ({} runnable) in {} publications, {} article links",
+        index.issues.len(),
+        runnable,
+        publications,
+        articles
+    );
+    // An issue of a series without its own directory installs the whole
+    // series - the shape that once put 15.6 GB on each Interactive
+    // Entertainment CD issue.
+    let flat_issues: Vec<(String, String, i64)> = conn
+        .prepare(
+            "SELECT i.key, i.launch_dir, i.size_bytes FROM issues i
+             WHERE i.runnable = 1 AND i.launch_dir IS NOT NULL AND i.issue_dir IS NULL
+               AND (SELECT COUNT(*) FROM issues j WHERE j.launch_dir = i.launch_dir) > 1
+             ORDER BY i.key",
+        )
+        .and_then(|mut stmt| {
+            stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .unwrap_or_default();
+    for (key, launch_dir, size) in &flat_issues {
+        println!(
+            "WARN: {key} has no issue directory and would install all of {launch_dir} ({:.1} GB)",
+            *size as f64 / 1e9
+        );
+    }
+
+    let orphans: i64 = conn
+        .query_row(
+            "SELECT COUNT(DISTINCT a.shortcode) FROM game_articles a
+             WHERE NOT EXISTS (SELECT 1 FROM games g WHERE g.shortcode = a.shortcode)",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    if orphans > 0 {
+        println!("WARN: {orphans} article shortcodes match no game");
+    }
+}
+
 /// Parse metadata/Playlists.xml.gz and seed kind='curated' playlist rows.
 ///
 /// The file is a concatenation of one LaunchBox XML document per playlist
@@ -977,6 +1184,9 @@ fn main() {
 
     // Seed curated playlists from the bundled LaunchBox playlist metadata.
     seed_curated_playlists(&conn, &metadata_dir);
+
+    // Lesesaal: magazines, books and catalogs from the Media Pack (§19).
+    import_media(&conn, &metadata_dir);
 
     // Final stats
     println!("\n--- Final Stats ---");

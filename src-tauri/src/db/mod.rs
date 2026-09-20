@@ -1,4 +1,5 @@
 pub mod queries;
+pub mod reading;
 pub mod schema;
 
 use rusqlite::Connection;
@@ -20,7 +21,7 @@ pub type DbResult<T> = Result<T, DbError>;
 /// Version of the bundled catalog. Raise BEFORE `pnpm run gen-db` (the
 /// artefact stamps itself); an installed DB behind it is refreshed at
 /// startup by `refresh_catalog`, user state preserved. History in git.
-pub const CATALOG_VERSION: i64 = 12;
+pub const CATALOG_VERSION: i64 = 15;
 
 /// Open (or create) the Exodium database at the given path.
 pub fn open(path: &Path) -> DbResult<Connection> {
@@ -52,6 +53,35 @@ fn table_columns(conn: &Connection, table: &str) -> DbResult<Vec<String>> {
         .query_map([], |row| row.get::<_, String>(1))?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(cols)
+}
+
+/// Replace pure-catalog tables from the attached `cat` DB, ids included.
+/// Tables are given parent first; deletion walks them backwards so foreign
+/// keys hold in both directions. A table the artefact predates is skipped.
+fn copy_catalog_tables(tx: &rusqlite::Transaction, tables: &[&str]) -> DbResult<()> {
+    let mut plan = Vec::new();
+    for table in tables {
+        let cat_cols = table_columns(tx, &format!("cat.{table}")).unwrap_or_default();
+        if cat_cols.is_empty() {
+            log::info!("refresh_catalog: bundled catalog has no {table}, skipped");
+            continue;
+        }
+        let cols: Vec<String> = table_columns(tx, table)?
+            .into_iter()
+            .filter(|c| cat_cols.contains(c))
+            .collect();
+        plan.push((*table, cols.join(", ")));
+    }
+    for (table, _) in plan.iter().rev() {
+        tx.execute(&format!("DELETE FROM {table}"), [])?;
+    }
+    for (table, cols) in &plan {
+        tx.execute(
+            &format!("INSERT INTO {table} ({cols}) SELECT {cols} FROM cat.{table}"),
+            [],
+        )?;
+    }
+    Ok(())
 }
 
 /// Refresh catalog columns from a newer bundled DB, user state preserved.
@@ -178,6 +208,11 @@ pub fn refresh_catalog(conn: &mut Connection, bundled_db: &Path) -> DbResult<(us
              WHERE cg.application_path IS NULL OR cg.application_path = ''",
             [],
         )?;
+
+        // The Lesesaal tables hold no user state - that lives in issue_state,
+        // keyed by issues.key - so they are replaced whole instead of being
+        // matched row by row.
+        copy_catalog_tables(&tx, &["publications", "issues", "game_articles"])?;
 
         // Stamp the BUNDLED DB's version, not the constant: a stale artefact
         // must not mark itself current (see CATALOG_VERSION).
@@ -357,6 +392,44 @@ fn migrate(conn: &Connection) -> DbResult<()> {
              ALTER TABLE playlists_new RENAME TO playlists;
              PRAGMA foreign_keys=ON;",
         )?;
+    }
+
+    // Lesesaal columns. refresh_catalog copies column-wise, so a catalogue
+    // without the column here never gains it.
+    let issue_cols = table_columns(conn, "issues")?;
+    if !issue_cols.is_empty() {
+        for (name, ddl) in [
+            ("substitutions", "substitutions TEXT"),
+            ("source", "source TEXT NOT NULL DEFAULT 'eXoMedia'"),
+            ("inner_zip", "inner_zip TEXT"),
+            ("language", "language TEXT NOT NULL DEFAULT 'EN'"),
+            ("extras_count", "extras_count INTEGER NOT NULL DEFAULT 0"),
+        ] {
+            if !issue_cols.iter().any(|c| c == name) {
+                conn.execute_batch(&format!("ALTER TABLE issues ADD COLUMN {ddl}"))?;
+            }
+        }
+    }
+    let publication_cols = table_columns(conn, "publications")?;
+    if !publication_cols.is_empty() && !publication_cols.iter().any(|c| c == "language") {
+        conn.execute_batch(
+            "ALTER TABLE publications ADD COLUMN language TEXT NOT NULL DEFAULT 'EN'",
+        )?;
+    }
+
+    // `game_articles` gained `kind` in its primary key. Pure catalog, refilled
+    // wholesale by `copy_catalog_tables`, so the old shape is dropped rather
+    // than copied - the refresh behind the version bump brings the rows back.
+    let articles_sql: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'game_articles'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or_default();
+    if !articles_sql.is_empty() && !articles_sql.contains("page, kind") {
+        conn.execute_batch("DROP TABLE game_articles")?;
+        schema::create_tables(conn)?;
     }
 
     // Bump whenever title_thumbnail_key() or title_canonical() changes, or
@@ -853,6 +926,202 @@ mod tests {
             .query_row("SELECT favorited FROM games WHERE id = ?1", [id_a], |r| r.get(0))
             .unwrap();
         assert_eq!(still_fav, 1);
+    }
+
+    fn insert_issue(conn: &Connection, key: &str, title: &str, publication: &str) {
+        conn.execute(
+            "INSERT OR IGNORE INTO publications (kind, name) VALUES ('magazine', ?1)",
+            [publication],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO issues (key, publication_id, kind, title, zip_file, entry_path) \
+             SELECT ?1, id, 'magazine', ?2, 'Content/DOSMagazines.zip', ?3 \
+             FROM publications WHERE name = ?4",
+            rusqlite::params![key, title, format!("eXo/Magazines/{title}.pdf"), publication],
+        )
+        .unwrap();
+    }
+
+    /// The old key dropped one of two articles that share a page, so the
+    /// table is rebuilt on the way in and refilled by the refresh behind the
+    /// version bump.
+    #[test]
+    fn the_article_index_is_rebuilt_when_its_key_predates_kind() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("installed.db");
+        let installed = open(&path).unwrap();
+        installed
+            .execute_batch(
+                "CREATE TABLE game_articles (
+                     shortcode  TEXT NOT NULL,
+                     entry_path TEXT NOT NULL,
+                     kind       TEXT NOT NULL,
+                     page       INTEGER NOT NULL,
+                     PRIMARY KEY (shortcode, entry_path, page)
+                 );",
+            )
+            .unwrap();
+        init(&installed).unwrap();
+        let sql: String = installed
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'game_articles'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(sql.contains("page, kind"), "{sql}");
+        drop(installed);
+        let mut installed = open(&path).unwrap();
+
+        let (cat_path, cat) = mk_db(dir.path(), "cat.db");
+        insert_issue(&cat, "mag:new", "PC Spiel 1996-11", "PC Spiel");
+        for kind in ["Cheats", "Hints"] {
+            cat.execute(
+                "INSERT INTO game_articles (shortcode, entry_path, kind, page) \
+                 VALUES ('Z1996', 'eXo/Magazines/PC Spiel 1996-11.pdf', ?1, 88)",
+                [kind],
+            )
+            .unwrap();
+        }
+        drop(cat);
+
+        refresh_catalog(&mut installed, &cat_path).unwrap();
+        let articles: i64 = installed
+            .query_row("SELECT COUNT(*) FROM game_articles", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(articles, 2);
+    }
+
+    #[test]
+    fn refresh_catalog_replaces_reading_room_tables_and_keeps_issue_state() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let (_, mut installed) = mk_db(dir.path(), "installed.db");
+        insert_issue(&installed, "mag:old", "ACE 01", "ACE");
+        installed
+            .execute(
+                "INSERT INTO issue_state (issue_key, last_page) VALUES ('mag:new', 42)",
+                [],
+            )
+            .unwrap();
+
+        // The catalog drops the old issue and brings a new one under a
+        // publication the installed DB has never seen.
+        let (cat_path, cat) = mk_db(dir.path(), "cat.db");
+        insert_issue(&cat, "mag:new", "CGW 07", "Computer Gaming World");
+        cat.execute(
+            "INSERT INTO game_articles (shortcode, entry_path, kind, page) \
+             VALUES ('zork1', 'eXo/Magazines/CGW 07.pdf', 'Review', 54)",
+            [],
+        )
+        .unwrap();
+        cat.execute(
+            "INSERT INTO config (key, value) VALUES ('catalog_version', '99')",
+            [],
+        )
+        .unwrap();
+        drop(cat);
+
+        refresh_catalog(&mut installed, &cat_path).unwrap();
+
+        let keys: Vec<String> = installed
+            .prepare("SELECT key FROM issues")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(keys, vec!["mag:new".to_string()]);
+        let publications: i64 = installed
+            .query_row("SELECT COUNT(*) FROM publications", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(publications, 1);
+        let articles: i64 = installed
+            .query_row("SELECT COUNT(*) FROM game_articles", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(articles, 1);
+        // Reading state is keyed by issues.key, so it outlives the replace.
+        let page: i64 = installed
+            .query_row(
+                "SELECT last_page FROM issue_state WHERE issue_key = 'mag:new'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(page, 42);
+    }
+
+    /// `copy_catalog_tables` copies the INTERSECTION of both schemas, so a
+    /// column the installed DB never gained is silently dropped on refresh -
+    /// the ALTERs in `migrate` are the only road a new Lesesaal column takes
+    /// into an existing install.
+    #[test]
+    fn migrate_adds_the_source_columns_so_a_refresh_can_fill_them() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // An installed DB as it looked before the columns existed.
+        let installed_path = dir.path().join("installed.db");
+        let installed = open(&installed_path).unwrap();
+        installed
+            .execute_batch(
+                "CREATE TABLE publications (
+                     id INTEGER PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL,
+                     issue_count INTEGER NOT NULL DEFAULT 0, first_year INTEGER,
+                     last_year INTEGER, cover_key TEXT, UNIQUE (kind, name));
+                 CREATE TABLE issues (
+                     id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE,
+                     publication_id INTEGER NOT NULL REFERENCES publications(id) ON DELETE CASCADE,
+                     kind TEXT NOT NULL, title TEXT NOT NULL, sort_title TEXT, year INTEGER,
+                     release_date TEXT, publisher TEXT, developer TEXT, notes TEXT,
+                     zip_file TEXT NOT NULL, entry_path TEXT, entry_kind TEXT,
+                     size_bytes INTEGER NOT NULL DEFAULT 0, cover_key TEXT,
+                     runnable INTEGER NOT NULL DEFAULT 0, launch_dir TEXT, issue_dir TEXT,
+                     launch_bat TEXT, command_line TEXT);",
+            )
+            .unwrap();
+        drop(installed);
+
+        let mut installed = open(&installed_path).unwrap();
+        init(&installed).unwrap();
+        let cols = table_columns(&installed, "issues").unwrap();
+        for col in ["substitutions", "source", "inner_zip", "language", "extras_count"] {
+            assert!(cols.contains(&col.to_string()), "issues.{col} missing after migrate");
+        }
+
+        let (cat_path, cat) = mk_db(dir.path(), "cat.db");
+        cat.execute_batch(
+            "INSERT INTO publications (id, kind, name, language)
+                 VALUES (1, 'magazine', 'ASM (DE)', 'DE');
+             INSERT INTO issues (key, publication_id, kind, title, zip_file, entry_path,
+                     source, inner_zip, language, extras_count)
+                 VALUES ('mag:asm', 1, 'magazine', 'ASM 1986-03',
+                     'Content/eXoDOS_GLP_Addonpack_MagazinesGLP.zip',
+                     'eXo/Magazines/!german/ASM/ASM 1986-03.pdf',
+                     'eXoDOS_GLP', 'Content/eXoDOS_GLP_Addonpack_MagazinesGLP_1.0.zip', 'DE', 2);",
+        )
+        .unwrap();
+        drop(cat);
+
+        refresh_catalog(&mut installed, &cat_path).unwrap();
+
+        let (source, inner, language, extras): (String, String, String, i64) = installed
+            .query_row(
+                "SELECT source, inner_zip, language, extras_count FROM issues WHERE key = 'mag:asm'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(source, "eXoDOS_GLP");
+        assert_eq!(inner, "Content/eXoDOS_GLP_Addonpack_MagazinesGLP_1.0.zip");
+        assert_eq!(language, "DE");
+        assert_eq!(extras, 2);
+        let publication_language: String = installed
+            .query_row("SELECT language FROM publications WHERE name = 'ASM (DE)'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(publication_language, "DE");
     }
 
     #[test]

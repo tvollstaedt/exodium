@@ -97,6 +97,49 @@ async fn run(torrent: &Path, data_dir: &Path, suffix: &str, out: &Path, timeout:
         std::fs::write(&target, &bytes)?;
         println!("extracted {} ({} bytes) in {:.1}s -> {}", name, bytes.len(), t.elapsed().as_secs_f64(), target.display());
     }
+    // EXTRACT_PREFIX=<prefix> EXTRACT_OUT=<dir>: pull every entry under a
+    // prefix in ONE forward pass (entries of a subtree are contiguous, so
+    // offset order turns thousands of seeks into a sequential read). Dev tool:
+    // this is how the bundled Lesesaal covers are generated. NOT `OUT_DIR` -
+    // cargo sets that one itself and wins.
+    if let (Ok(prefix), Ok(out_dir)) = (std::env::var("EXTRACT_PREFIX"), std::env::var("EXTRACT_OUT")) {
+        let dir = PathBuf::from(&out_dir);
+        std::fs::create_dir_all(&dir)?;
+        let mut wanted: Vec<&zip_range::ZipEntry> = entries
+            .iter()
+            .filter(|e| e.name.starts_with(&prefix) && e.compressed_size > 0 && !e.name.ends_with('/'))
+            .collect();
+        wanted.sort_by_key(|e| e.local_header_offset);
+        let total: u64 = wanted.iter().map(|e| e.compressed_size).sum();
+        let count = wanted.len();
+        println!("extracting {} entries ({:.0} MB) under {}", count, total as f64 / 1e6, prefix);
+        let started = Instant::now();
+        let (mut done, mut bytes) = (0usize, 0u64);
+        for entry in wanted {
+            let name = entry.name.rsplit('/').next().unwrap_or(&entry.name);
+            let target = dir.join(name);
+            if target.exists() {
+                done += 1;
+                continue;
+            }
+            match zip_range::read_entry_with(&mut stream, entry, |_, _| true).await {
+                Ok(data) => {
+                    std::fs::write(&target, &data)?;
+                    bytes += data.len() as u64;
+                    done += 1;
+                }
+                Err(e) => println!("  skip {}: {}", entry.name, e),
+            }
+            if done % 25 == 0 {
+                println!(
+                    "  {}/{} files, {:.0} MB in {:.0}s ({:.0} KB/s)",
+                    done, count, bytes as f64 / 1e6, started.elapsed().as_secs_f64(),
+                    bytes as f64 / 1024.0 / started.elapsed().as_secs_f64().max(1.0)
+                );
+            }
+        }
+        println!("extracted {} files in {:.0}s", done, started.elapsed().as_secs_f64());
+    }
     // NESTED=<album zip entry>: read the album's own directory through a
     // window onto the stored entry and pull its first track.
     if let Ok(name) = std::env::var("NESTED") {
@@ -107,16 +150,42 @@ async fn run(torrent: &Path, data_dir: &Path, suffix: &str, out: &Path, timeout:
         let mut inner = zip_range::OffsetReader::new(stream, base, album.uncompressed_size);
         let tracks = zip_range::read_central_directory(&mut inner, album.uncompressed_size).await?;
         println!("album {}: {} entries after {:.1}s", name, tracks.len(), t.elapsed().as_secs_f64());
+        // The inner directory is the interesting listing for a wrapper zip
+        // (the GLP magazine add-on is one STORED archive inside an installer).
+        let nested_out = out.with_extension("nested.jsonl");
+        let mut nf = std::fs::File::create(&nested_out)?;
+        for e in &tracks {
+            writeln!(
+                nf,
+                "{{\"name\":{},\"compressed\":{},\"uncompressed\":{},\"method\":{},\"offset\":{}}}",
+                serde_json::to_string(&e.name)?, e.compressed_size, e.uncompressed_size, e.method, e.local_header_offset
+            )?;
+        }
+        println!("wrote {}", nested_out.display());
         for tr in tracks.iter().take(30) {
             println!("   {} ({:.1} MB, method {})", tr.name, tr.uncompressed_size as f64 / 1e6, tr.method);
         }
-        if let Some(first) = tracks.iter().find(|e| e.uncompressed_size > 0 && !e.name.ends_with('/')) {
+        // NESTED_EXTRACT=<inner entry>: pull one named entry out of the inner
+        // archive instead of its first file.
+        let wanted = std::env::var("NESTED_EXTRACT").ok();
+        if let Some(first) = tracks.iter().find(|e| {
+            e.uncompressed_size > 0 && !e.name.ends_with('/') && wanted.as_deref().is_none_or(|w| e.name == w)
+        }) {
             let t = Instant::now();
             let s0 = mgr.session_transfer();
             let bytes = zip_range::read_entry_with(&mut inner, first, |_, _| true).await?;
             let target = out.with_extension("track");
             std::fs::write(&target, &bytes)?;
             println!("track {} ({} bytes) in {:.1}s, session peers={} -> {}", first.name, bytes.len(), t.elapsed().as_secs_f64(), s0.peers, target.display());
+        }
+        // NESTED_EXTRACT_PREFIX=<p1,p2,..> NESTED_OUT=<dir>: every inner entry
+        // under the prefixes in one forward pass, full paths under the dir.
+        if let (Ok(prefixes), Ok(dest)) = (std::env::var("NESTED_EXTRACT_PREFIX"), std::env::var("NESTED_OUT")) {
+            let prefixes: Vec<&str> = prefixes.split(',').map(str::trim).filter(|p| !p.is_empty()).collect();
+            let dest = PathBuf::from(dest);
+            let t = Instant::now();
+            let written = zip_range::read_subtree_to_dir(&mut inner, &tracks, &prefixes, &[], &dest, |_, _| true).await?;
+            println!("nested subtree: {:.1} MB in {:.0}s -> {}", written as f64 / 1e6, t.elapsed().as_secs_f64(), dest.display());
         }
         stream = inner.into_inner();
     }

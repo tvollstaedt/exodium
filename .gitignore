@@ -12,6 +12,7 @@ thumbnails/eXoDOS/
 thumbnails/eXoWin3x/
 thumbnails/eXoWin9x/
 thumbnails/eXoScummVM/
+thumbnails/eXoMedia/
 thumbnails/*.tar.gz
 
 # Bundled emulator binaries (platform-specific, fetched via get-dosbox)

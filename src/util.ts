@@ -147,3 +147,14 @@ export function matchesLibraryQuery(
     || (game.sort_title ?? "").toLowerCase().includes(q)
     || (game.variant_titles ?? "").toLowerCase().includes(q);
 }
+
+/** Compact label for the narrow jump bar; the full label stays on
+ *  `data-section-label` for matching and on the tooltip. */
+export function jumpBarDisplayLabel(label: string): string {
+  const stars = label.match(/^[★☆]+$/);
+  if (stars) { return String((label.match(/★/g) || []).length); }
+  if (label === "Unrated") { return "?"; }
+  // 14 chars keeps prefix-sharing genres apart ("Puzzle" / "Puzzle-Solving").
+  if (label.length > 14) { return label.slice(0, 13) + "…"; }
+  return label;
+}

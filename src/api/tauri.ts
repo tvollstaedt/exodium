@@ -713,3 +713,157 @@ export async function getGameMetadata(
 ): Promise<GameMetadata> {
   return invoke("get_game_metadata", { collection, title, shortcode, manualPath });
 }
+
+// ── Lesesaal (§19) ───────────────────────────────────────────────────────────
+
+/** A magazine series, a book category or the catalog shelf. */
+export interface Publication {
+  id: number;
+  /** "magazine" | "book" | "catalog" */
+  kind: string;
+  name: string;
+  issue_count: number;
+  first_year: number | null;
+  last_year: number | null;
+  cover_key: string | null;
+  /** "EN" | "DE" */
+  language: string;
+}
+
+export interface Issue {
+  id: number;
+  key: string;
+  publication_id: number;
+  publication: string;
+  kind: string;
+  title: string;
+  sort_title: string | null;
+  year: number | null;
+  release_date: string | null;
+  publisher: string | null;
+  developer: string | null;
+  notes: string | null;
+  /** Which torrent carries the archive: "eXoMedia" | "eXoDOS_GLP". */
+  source: string;
+  zip_file: string;
+  /** A STORED archive inside `zip_file` that holds the entries (§19); null when
+   *  `zip_file` is the archive itself. */
+  inner_zip: string | null;
+  /** Entry inside the archive; null for a runnable disk magazine. */
+  entry_path: string | null;
+  /** "pdf" | "image" | null */
+  entry_kind: string | null;
+  size_bytes: number;
+  cover_key: string | null;
+  runnable: boolean;
+  launch_dir: string | null;
+  issue_dir: string | null;
+  launch_bat: string | null;
+  command_line: string | null;
+  /** eXo's run.bat placeholders for this issue, as a JSON object. */
+  substitutions: string | null;
+  /** "EN" | "DE" */
+  language: string;
+  /** Cover-disc videos filed with the issue; counted, not shown. */
+  extras_count: number;
+  favorited: boolean;
+  installed: boolean;
+  last_page: number | null;
+  last_opened: string | null;
+}
+
+/** eXo's "this game was covered in" link, page included. */
+export interface Article {
+  kind: string;
+  page: number;
+  issue_key: string;
+  issue_title: string;
+  publication: string;
+  year: number | null;
+  /** The issue's language, "EN" | "DE". */
+  language: string;
+}
+
+/** Same shape as VideoStatus - one issue fetch, polled. */
+export interface ReadingStatus {
+  /** "fetching" | "ready" | "none" | "error" */
+  phase: string;
+  progress: number;
+  total_bytes: number;
+  path: string | null;
+  error: string | null;
+}
+
+export async function listPublications(kind?: string): Promise<Publication[]> {
+  return invoke("list_publications", { kind: kind ?? null });
+}
+
+export async function listIssues(
+  kind?: string | null,
+  publicationId?: number | null,
+  query?: string | null,
+): Promise<Issue[]> {
+  return invoke("list_issues", {
+    kind: kind ?? null,
+    publicationId: publicationId ?? null,
+    query: query ?? null,
+  });
+}
+
+export async function getIssue(key: string): Promise<Issue | null> {
+  return invoke("get_issue", { key });
+}
+
+export async function gameArticles(id: number): Promise<Article[]> {
+  return invoke("game_articles", { id });
+}
+
+export async function setIssueFavorited(key: string, favorited: boolean): Promise<void> {
+  return invoke("set_issue_favorited", { key, favorited });
+}
+
+export async function setIssuePage(key: string, page: number): Promise<void> {
+  return invoke("set_issue_page", { key, page });
+}
+
+/** Start (or join) the fetch of one issue out of its Media Pack archive. */
+export async function openIssue(key: string): Promise<ReadingStatus> {
+  return invoke("open_issue", { key });
+}
+
+/** Issue keys whose document is already on disk. */
+export async function readingCacheIndex(): Promise<string[]> {
+  return invoke("reading_cache_index");
+}
+
+/** Delete one issue's document, or an extracted disk magazine's directory. */
+export async function removeIssue(key: string): Promise<void> {
+  return invoke("remove_issue", { key });
+}
+
+/** What the reading room occupies: downloaded issues and their total size. */
+export interface ReadingUsage {
+  issues: number;
+  bytes: number;
+}
+
+export async function readingStorageUsage(): Promise<ReadingUsage> {
+  return invoke("reading_storage_usage");
+}
+
+export async function getIssueStatus(key: string): Promise<ReadingStatus | null> {
+  return invoke("get_issue_status", { key });
+}
+
+export async function cancelIssueFetch(key: string): Promise<void> {
+  return invoke("cancel_issue_fetch", { key });
+}
+
+/** Fetch a disk magazine's files into the game root. Polled like openIssue. */
+export async function installIssue(key: string): Promise<ReadingStatus> {
+  return invoke("install_issue", { key });
+}
+
+export async function launchIssue(key: string): Promise<string> {
+  return invoke("launch_issue", { key });
+}

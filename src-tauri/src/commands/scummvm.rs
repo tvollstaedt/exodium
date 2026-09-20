@@ -687,7 +687,14 @@ async fn launch_inner(
         entry.game_id,
         variant.run_dir.display()
     );
-    super::games::spawn_emulator_and_track(app, cmd, &bin, &game, id)
+    super::games::spawn_emulator_and_track(
+        app,
+        cmd,
+        &bin,
+        &super::games::running_game_key(&game),
+        &game.title,
+        id,
+    )
 }
 
 #[derive(Debug, Clone, Serialize)]
