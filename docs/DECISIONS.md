@@ -283,3 +283,9 @@
 - Verworfen: nur die Versionsnummer anzuheben - 0.83.0 hat `glshaders` in `shaders` umbenannt, die Staging-Suche lief ins Leere, und der Lauf endete mit "ABORT: RENDER: Error setting fallback shaders".
 - Grund: Gemessen mit dem frisch geholten Binary. Ohne `shader-presets` startet es zwar, meldet aber "Cannot locate shader preset 'crt/crt-hyllian:hercules'" und faellt auf einen einfachen Shader zurueck - der CRT-Modus waere still verschwunden.
 - Gotcha: Der Schluessel `glshader` gilt weiter als veraltetes Synonym fuer `shader`, ebenso `windowresolution` fuer `window_size` - die Startfragmente und alle 750 eXo-Konfigurationen (alle mit `sharp`) brauchten keine Aenderung. Softwarescaler (`scaler=normal2x`) meldet 0.83.0 dagegen als abgeloest.
+
+## 2026-09-20 - pdfjs-dist auf 5.6.205 gepinnt: WebKit kompiliert das OpenJPEG-WASM ab 5.7 nicht
+- Entscheidung: `pdfjs-dist` exakt `5.6.205`; `scripts/copy-pdfjs-wasm.mjs` scannt die gestageten Module auf Relaxed-SIMD-Opcodes und bricht den Build ab, wenn ein Upgrade sie zurueckbringt.
+- Verworfen: nur `openjpeg.wasm` aus 5.6 unter 6.3 legen (die Emscripten-Glue im Worker muss zum Modul passen); auf den JS-Fallback warten (Minuten pro Seite); eigener OpenJPEG-Build ohne Relaxed SIMD (Pflegeaufwand fuer ein Feature, das WebKit irgendwann bringt).
+- Grund: Gemessen in einer nackten WKWebView (macOS 26.6, WebKit 21624): `WebAssembly.compile(openjpeg.wasm)` scheitert ab 5.7.284 mit `relaxed simd instructions not supported`, 5.4.624-5.6.205 kompilieren; PC World 146 Seite 9 rendert mit 5.6 in 1,1 s, mit 6.3 nie (Worker rechnet im JS-Fallback, Hauptthread wartet). jbig2.wasm kompiliert in jeder Version - deshalb verschwanden die weissen Seiten mit dem WASM-Staging, die JPX-Seiten blieben leer.
+- Gotcha: pdf.js meldet den Fallback nur als `warn` im Worker - im Reader sieht man leere Seitenboxen ohne Fehler. `WebAssembly.validate` unter Node ist kein Test (V8 kann Relaxed SIMD), darum der Opcode-Scan.

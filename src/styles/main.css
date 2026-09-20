@@ -424,19 +424,27 @@ body {
 /* 12px wide with a 2px transparent inset: an 8px thumb was near-invisible on
    a dark grid and too thin to grab (Linux report 2026-09-08); the inset keeps
    the full 12px as hit area while the visible bar stays slim. */
-.library::-webkit-scrollbar {
+.library::-webkit-scrollbar,
+.pdf-reader-pages::-webkit-scrollbar,
+.document-viewer-text::-webkit-scrollbar {
   width: 12px;
 }
-.library::-webkit-scrollbar-track {
+.library::-webkit-scrollbar-track,
+.pdf-reader-pages::-webkit-scrollbar-track,
+.document-viewer-text::-webkit-scrollbar-track {
   background: transparent;
 }
-.library::-webkit-scrollbar-thumb {
+.library::-webkit-scrollbar-thumb,
+.pdf-reader-pages::-webkit-scrollbar-thumb,
+.document-viewer-text::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.3);
   border-radius: 6px;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
-.library::-webkit-scrollbar-thumb:hover {
+.library::-webkit-scrollbar-thumb:hover,
+.pdf-reader-pages::-webkit-scrollbar-thumb:hover,
+.document-viewer-text::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.5);
   background-clip: padding-box;
 }
@@ -4180,8 +4188,8 @@ body {
   pointer-events: none;
 }
 
-/* ── Manual viewer ──────────────────────────── */
-.manual-viewer-backdrop {
+/* ── Document viewer (manuals, Lesesaal issues) ────────── */
+.document-viewer-backdrop {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.75);
@@ -4190,7 +4198,7 @@ body {
   animation: modalBackdropIn 0.22s cubic-bezier(0.2, 0.7, 0.3, 1);
 }
 
-.manual-viewer-positioner {
+.document-viewer-positioner {
   position: fixed;
   inset: 0;
   z-index: 301;
@@ -4200,31 +4208,36 @@ body {
   padding: 24px;
 }
 
-.manual-viewer-content {
-  width: min(1100px, 100%);
-  height: 100%;
-  background: var(--bg-primary);
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+.document-viewer-content {
   display: flex;
   flex-direction: column;
+  width: min(1100px, 100%);
+  height: 100%;
+  background: var(--bg-secondary);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--border-radius-lg);
   overflow: hidden;
   outline: none;
   animation: modalContentIn 0.26s cubic-bezier(0.2, 0.7, 0.3, 1);
 }
 
-.manual-viewer-toolbar {
+.document-viewer-header {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  background: var(--bg-secondary);
+  gap: 12px;
+  padding: 10px 14px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.manual-viewer-title {
+.document-viewer-titles {
+  display: flex;
+  flex-direction: column;
   flex: 1;
-  font-size: 13px;
+  min-width: 0;
+}
+
+.document-viewer-title {
+  font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
   overflow: hidden;
@@ -4233,56 +4246,77 @@ body {
   margin: 0;
 }
 
-.manual-viewer-btn,
-.manual-viewer-close {
-  background: transparent;
-  color: var(--text-primary);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 4px;
-  padding: 4px 10px;
-  cursor: pointer;
+.document-viewer-subtitle {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.document-viewer-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--bg-card);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--border-radius);
+  color: var(--text-secondary);
   font-family: inherit;
   font-size: 12px;
+  padding: 5px 10px;
+  cursor: pointer;
+  white-space: nowrap;
 }
 
-.manual-viewer-btn:hover,
-.manual-viewer-close:hover {
-  background: rgba(255, 255, 255, 0.08);
+.document-viewer-btn:hover {
+  color: var(--text-primary);
+  border-color: rgba(255, 255, 255, 0.15);
 }
 
-.manual-viewer-close {
-  width: 28px;
-  padding: 0;
-  height: 28px;
+.document-viewer-btn.is-active {
+  border-color: var(--accent);
+  color: var(--accent-hover);
 }
 
-.manual-viewer-zoom {
+.document-viewer-btn.is-danger:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.document-viewer-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.document-viewer-close:hover {
+  color: var(--text-primary);
+}
+
+.document-viewer-zoom {
   display: flex;
   align-items: center;
-  gap: 0;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--border-radius);
   overflow: hidden;
 }
 
-.manual-viewer-zoom-btn,
-.manual-viewer-zoom-pct {
-  background: transparent;
-  color: var(--text-primary);
+.document-viewer-zoom-btn {
+  background: var(--bg-card);
+  color: var(--text-secondary);
   border: none;
-  padding: 3px 8px;
+  padding: 5px 8px;
   cursor: pointer;
   font-family: inherit;
   font-size: 12px;
   line-height: 1;
 }
 
-.manual-viewer-zoom-btn:hover,
-.manual-viewer-zoom-pct:hover {
-  background: rgba(255, 255, 255, 0.08);
+.document-viewer-zoom-btn:hover {
+  color: var(--text-primary);
 }
 
-.manual-viewer-zoom-pct {
+.document-viewer-zoom-pct {
   min-width: 42px;
   text-align: center;
   font-variant-numeric: tabular-nums;
@@ -4290,45 +4324,71 @@ body {
   border-right: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.manual-viewer-body {
-  flex: 1;
-  background: #fff;
+.document-viewer-status {
   display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-height: 0;
+  padding: 24px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.document-viewer-spinner {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.document-viewer-image {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 24px;
+}
+
+.document-viewer-image img {
+  max-width: 100%;
+  border-radius: var(--border-radius);
+}
+
+/* HTML and text manuals are authored for a white page. */
+.document-viewer-page {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  background: #fff;
   overflow: hidden;
 }
 
-.manual-viewer-iframe-wrap {
+.document-viewer-iframe-wrap {
   flex: 1;
   display: flex;
 }
 
-.manual-viewer-iframe {
+.document-viewer-iframe {
   flex: 1;
   border: 0;
   width: 100%;
   height: 100%;
 }
 
-.manual-viewer-text {
+.document-viewer-text {
   flex: 1;
+  min-height: 0;
   margin: 0;
   padding: 16px 20px;
   overflow: auto;
+  background: #fff;
   font-family: "SF Mono", ui-monospace, monospace;
   font-size: 12px;
   line-height: 1.5;
   color: #1a1a1a;
   white-space: pre-wrap;
-}
-
-.manual-viewer-loading {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-muted);
-  font-size: 13px;
-  background: var(--bg-primary);
 }
 
 /* Full-screen blocking overlay shown while factory_reset runs. Sits above
@@ -5296,4 +5356,192 @@ body.has-player {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ── PDF reader ──────────────────────────────────────────────────────── */
+
+.pdf-reader {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  outline: none;
+}
+
+.pdf-reader-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.pdf-reader-pager,
+.pdf-reader-zoom,
+.pdf-reader-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pdf-reader-search {
+  margin-left: auto;
+}
+
+.pdf-reader-btn {
+  background: var(--bg-card);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--border-radius);
+  color: var(--text-secondary);
+  font-size: 13px;
+  min-width: 28px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.pdf-reader-btn:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.pdf-reader-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.pdf-reader-zoom-pct {
+  min-width: 52px;
+}
+
+.pdf-reader-page-input {
+  width: 56px;
+  background: var(--bg-primary);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--border-radius);
+  color: var(--text-primary);
+  font-size: 12px;
+  padding: 3px 6px;
+  text-align: center;
+}
+
+.pdf-reader-page-total,
+.pdf-reader-hits {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.pdf-reader-search-input {
+  width: 180px;
+  background: var(--bg-primary);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--border-radius);
+  color: var(--text-primary);
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+.pdf-reader-search-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.pdf-reader-hitbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 6px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.pdf-reader-hitbar-label {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-right: 4px;
+}
+
+.pdf-reader-hit {
+  flex: 0 0 auto;
+  background: var(--bg-card);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.pdf-reader-hit:hover {
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+
+.pdf-reader-pages {
+  flex: 1;
+  min-height: 0;
+  /* Both axes: a page zoomed past the fit width is wider than the column,
+     and a clipped one cannot be panned to. */
+  overflow: auto;
+  /* Reading is scrolling, so the bar has to be there before the first wheel
+     tick - macOS hides an overlay scrollbar until then. Styled with the
+     library's rule below. */
+  scrollbar-gutter: stable;
+  display: flex;
+  flex-direction: column;
+  /* "safe" keeps a page wider than the column reachable: centring alone
+     pushes its left edge past the scroll origin. */
+  align-items: safe center;
+  gap: 16px;
+  padding: 16px;
+  background: var(--bg-primary);
+}
+
+.pdf-reader-page {
+  position: relative;
+  /* The placeholder carries the page's aspect so the scrollbar is right
+     before anything is rendered - the same rule the grid needs (§13). */
+  background: #1b1b24;
+  border-radius: 4px;
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+
+.pdf-reader-page-failed {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.pdf-reader-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.pdf-reader-page-number {
+  position: absolute;
+  right: 6px;
+  bottom: 4px;
+  font-size: 10px;
+  color: var(--text-muted);
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: 3px;
+  padding: 0 4px;
+}
+
+.pdf-reader-loading,
+.pdf-reader-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 40px;
+  color: var(--text-muted);
+  font-size: 13px;
 }

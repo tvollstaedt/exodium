@@ -218,10 +218,11 @@ pub async fn set_config(
     Ok(())
 }
 
-/// Open a game file in the system viewer. Only paths under the data dir are
-/// allowed; the webview has no opener capability of its own.
+/// Open a document (manual, magazine issue) in the system viewer. Only paths
+/// under the data dir are allowed; the webview has no opener capability of
+/// its own.
 #[tauri::command]
-pub async fn open_manual(
+pub async fn open_document(
     app: AppHandle,
     state: State<'_, DbState>,
     path: String,
