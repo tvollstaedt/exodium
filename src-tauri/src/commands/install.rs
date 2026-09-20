@@ -1244,6 +1244,23 @@ pub(crate) fn extract_game_zip(zip_path: &std::path::Path, dest: &std::path::Pat
 
     archive.extract(dest)?;
     log::info!("Extracted: {} -> {}", zip_path.display(), dest.display());
+    // Explorer cannot remove what std creates through the long-path form:
+    // paths past MAX_PATH, and names ending in a space or dot. Named here
+    // so a "cannot delete" report has something to quote.
+    #[cfg(windows)]
+    for i in 0..archive.len() {
+        let Ok(entry) = archive.by_index_raw(i) else { continue };
+        let name = entry.name().trim_end_matches('/');
+        let hostile = name.rsplit('/').next().is_some_and(|leaf| leaf.ends_with(' ') || leaf.ends_with('.'));
+        let too_long = dest.to_string_lossy().len() + name.len() + 1 > 259;
+        if hostile || too_long {
+            log::warn!(
+                "{}: '{}' {} - Explorer cannot delete it, Exodium's uninstall can",
+                zip_path.display(), name,
+                if hostile { "ends in a space or dot" } else { "exceeds MAX_PATH" }
+            );
+        }
+    }
 
     // Restore `!save/<shortcode>` from beside the game dir. The legacy shared
     // location one level up is probed ONLY for a row that lives there itself:
