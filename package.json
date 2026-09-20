@@ -1,6 +1,6 @@
 {
   "name": "exodium",
-  "version": "0.14.3",
+  "version": "0.15.0",
   "description": "Cross-platform launcher for the eXoDOS collections",
   "type": "module",
   "scripts": {
