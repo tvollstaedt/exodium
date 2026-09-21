@@ -970,7 +970,10 @@ body {
   padding: 4px;
   max-height: 280px;
   overflow-y: auto;
-  z-index: 100;
+  /* The menu layer, like the context menus: the popup is portalled to the
+     body, and a Select inside a dialog (201/301) would otherwise open
+     behind it. zag copies this value onto the positioner. */
+  z-index: 401;
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
   animation: selectFadeIn 0.12s ease;
 }
@@ -6018,16 +6021,6 @@ body.has-player {
   gap: 6px;
   font-size: 11px;
   color: var(--text-muted);
-}
-
-.storage-sort select {
-  font-family: inherit;
-  font-size: 11.5px;
-  color: var(--text-primary);
-  background: var(--bg-primary);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: var(--border-radius);
-  padding: 3px 6px;
 }
 
 /* Its own scroller: the categories above stay in view while the list of a

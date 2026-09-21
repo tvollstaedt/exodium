@@ -64,6 +64,20 @@ describe("StorageTab", () => {
     dispose();
   });
 
+  /** A native <select> is drawn by the platform: on WebKitGTK that is a white
+   *  box with a near-invisible list inside the dark dialog. The sort control
+   *  is the shared Ark Select like every other dropdown. */
+  it("sorts with the app's own dropdown, not a native select", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const dispose = render(() => <StorageTab active={true} onGoToPacks={() => {}} />, host);
+    await new Promise((r) => setTimeout(r, 30));
+    const sort = host.querySelector(".storage-sort");
+    expect(sort?.querySelector("select")).toBeNull();
+    expect(sort?.querySelector(".ark-select-trigger")?.textContent).toContain("Size");
+    dispose();
+  });
+
   /** The walk takes seconds on a large library: a measurement survives
    *  switching sections and reopening the dialog (module-level state). */
   it("keeps the measurement across mounts", async () => {

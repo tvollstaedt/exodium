@@ -1,5 +1,6 @@
 import { createSignal, createEffect, on, Show, For } from "solid-js";
 import { Button } from "./Button";
+import { Select } from "./Select";
 import { SettingRow, SettingSwitch, SectionTitle } from "./SettingRow";
 import { PieChart, Gamepad2 } from "lucide-solid";
 import {
@@ -274,14 +275,18 @@ export function StorageTab(props: { active: boolean; onGoToPacks: () => void }) 
             <section class="settings-section">
               <div class="storage-games-head">
                 <SectionTitle icon={Gamepad2}>Installed games · {games().length}</SectionTitle>
-                <label class="storage-sort">
+                <div class="storage-sort">
                   Sort by
-                  <select value={sort()} onChange={(e) => setSort(e.currentTarget.value as "size" | "name" | "played")}>
-                    <option value="size">Size</option>
-                    <option value="name">Name</option>
-                    <option value="played">Last played</option>
-                  </select>
-                </label>
+                  <Select
+                    options={[
+                      { value: "size", label: "Size" },
+                      { value: "name", label: "Name" },
+                      { value: "played", label: "Last played" },
+                    ]}
+                    value={sort()}
+                    onChange={(v) => setSort(v as "size" | "name" | "played")}
+                  />
+                </div>
               </div>
               <Show when={games().length === 0}>
                 <p class="settings-row-hint">No games installed.</p>
