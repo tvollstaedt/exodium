@@ -45,7 +45,7 @@ export async function performUninstall(
   setStatus: (s: string) => void,
   onSuccess?: () => void | Promise<void>,
   title?: string,
-): Promise<void> {
+): Promise<boolean> {
   // If a download is in flight, cancel it before removing the directory -
   // otherwise the torrent writer races the uninstall and can leave partial
   // files or error out mid-extract.
@@ -65,10 +65,12 @@ export async function performUninstall(
     await onSuccess?.();
     setStatus("");
     showToast(msg || (title ? `Uninstalled ${title}` : "Uninstalled"), "success");
+    return true;
   } catch (e) {
     console.error("Uninstall failed:", e);
     setStatus("");
     showToast(title ? `Couldn't uninstall ${title}` : "Uninstall failed", "error", { detail: String(e) });
+    return false;
   }
 }
 

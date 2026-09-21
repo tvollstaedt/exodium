@@ -51,7 +51,43 @@ const [overview, setOverview] = createSignal<StorageOverview | null>(null);
 const [games, setGames] = createSignal<GameStorage[]>([]);
 const [installedArchives, setInstalledArchives] = createSignal<ArchiveUsage | null>(null);
 const [keepArchives, setKeepArchives] = createSignal(true);
+const [loading, setLoading] = createSignal(false);
+const [error, setError] = createSignal("");
 let measuredAt = -1;
+// One walk at a time; a request during a walk queues one more pass.
+let walking = false;
+let walkAgain = false;
+// Bumped by every uninstall here: a game list read before it is stale.
+let listGen = 0;
+
+/** Measure the folder, then read the game list - in that order, so the list
+ *  is at most seconds old when it lands, and never older than an uninstall
+ *  made while the walk ran (`listGen`). */
+async function load() {
+  if (walking) { walkAgain = true; return; }
+  walking = true;
+  setLoading(true);
+  setError("");
+  try {
+    do {
+      walkAgain = false;
+      const stamp = lastGameLibraryChange()?.ts ?? 0;
+      const [o, a, keep] = await Promise.all([storageOverview(), archiveUsage(), getConfig("keep_archives")]);
+      const gen = listGen;
+      const g = await installedGamesStorage();
+      setOverview(o);
+      setInstalledArchives(a);
+      setKeepArchives(keep !== "0");
+      if (gen === listGen) { setGames(g); } else { walkAgain = true; }
+      measuredAt = stamp;
+    } while (walkAgain);
+  } catch (e) {
+    setError(String(e));
+  } finally {
+    walking = false;
+    setLoading(false);
+  }
+}
 
 /** A new game folder or a factory reset: nothing measured still applies. */
 export function resetStorageCache() {
@@ -59,11 +95,10 @@ export function resetStorageCache() {
   setGames([]);
   setInstalledArchives(null);
   measuredAt = -1;
+  listGen++;
 }
 
 export function StorageTab(props: { active: boolean; onGoToPacks: () => void }) {
-  const [loading, setLoading] = createSignal(false);
-  const [error, setError] = createSignal("");
   const [busy, setBusy] = createSignal<string | null>(null);
   const [confirm, setConfirm] = createSignal<string | null>(null);
   const [sort, setSort] = createSignal<"size" | "name" | "played">("size");
@@ -74,25 +109,6 @@ export function StorageTab(props: { active: boolean; onGoToPacks: () => void }) 
     setUninstalling(next);
   };
 
-  const load = async () => {
-    setLoading(true);
-    setError("");
-    const stamp = lastGameLibraryChange()?.ts ?? 0;
-    try {
-      const [o, g, a, keep] = await Promise.all([
-        storageOverview(), installedGamesStorage(), archiveUsage(), getConfig("keep_archives"),
-      ]);
-      setOverview(o);
-      setGames(g);
-      setInstalledArchives(a);
-      setKeepArchives(keep !== "0");
-      measuredAt = stamp;
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
-    }
-  };
   // The walk takes seconds on a large library: once per visit, and again
   // only after the library changed (an uninstall from the grid, an install).
   createEffect(on(() => props.active, (active) => {
@@ -151,21 +167,23 @@ export function StorageTab(props: { active: boolean; onGoToPacks: () => void }) 
     }
   };
 
-  /** Several may run at once; the list refreshes per game, the (slow) disk
-   *  walk once the last one is done. */
+  /** The row goes with the uninstall; the walk that follows is coalesced
+   *  with any other still running. */
   const uninstall = async (g: GameStorage) => {
     if (confirm() !== `game:${g.id}`) { setConfirm(`game:${g.id}`); return; }
     setConfirm(null);
     markUninstalling(g.id, true);
+    let ok = false;
     try {
-      await performUninstall(g.id, () => {}, undefined, g.title);
+      ok = await performUninstall(g.id, () => {}, undefined, g.title);
     } finally {
       markUninstalling(g.id, false);
     }
-    // The row goes as soon as the list answers; the walk waits for the last
-    // uninstall in flight.
-    try { setGames(await installedGamesStorage()); } catch { /* keep the old list */ }
-    if (uninstalling().size === 0) { void load(); }
+    if (ok) {
+      listGen++;
+      setGames(games().filter((x) => x.id !== g.id));
+    }
+    void load();
   };
 
   const actionLabel = (key: string, idle: string, armed: string) =>

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render } from "solid-js/web";
 import { invoke } from "@tauri-apps/api/core";
 import { StorageTab, resetStorageCache } from "./StorageTab";
+import { notifyGameLibraryChanged } from "../stores/games";
 
 const mockInvoke = vi.mocked(invoke);
 
@@ -75,6 +76,68 @@ describe("StorageTab", () => {
     const sort = host.querySelector(".storage-sort");
     expect(sort?.querySelector("select")).toBeNull();
     expect(sort?.querySelector(".ark-select-trigger")?.textContent).toContain("Size");
+    dispose();
+  });
+
+  /** A walk that started before an uninstall must not bring the game back
+   *  when it lands, and a request during a walk shares it instead of
+   *  starting another. */
+  it("does not resurrect an uninstalled game from a slow walk", async () => {
+    const tick = () => new Promise((r) => setTimeout(r, 10));
+    let walks = 0;
+    let uninstalled = false;
+    let releaseWalk: (() => void) | null = null;
+    let releaseList: (() => void) | null = null;
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "storage_overview") {
+        walks++;
+        if (walks === 2) { await new Promise<void>((r) => { releaseWalk = r; }); }
+        return OVERVIEW;
+      }
+      if (cmd === "installed_games_storage") {
+        // The second walk's list read is slow too, and answers from before the uninstall.
+        if (walks === 2 && !releaseList) {
+          await new Promise<void>((r) => { releaseList = r; });
+          return GAMES;
+        }
+        return uninstalled ? GAMES.slice(1) : GAMES;
+      }
+      if (cmd === "archive_usage") { return { count: 52, bytes: 25e9 }; }
+      if (cmd === "get_config") { return "0"; }
+      if (cmd === "uninstall_game") { uninstalled = true; return "Uninstalled"; }
+      return null;
+    });
+    const mount = () => {
+      const host = document.createElement("div");
+      document.body.appendChild(host);
+      const dispose = render(() => <StorageTab active={true} onGoToPacks={() => {}} />, host);
+      return { host, dispose };
+    };
+    const seed = mount();
+    await tick();
+    seed.dispose();
+    notifyGameLibraryChanged(2);
+
+    const { host, dispose } = mount();
+    await tick();
+    expect(walks).toBe(2);
+    const row = () => Array.from(host.querySelectorAll("[data-testid=storage-game]")).find((r) => r.textContent?.includes("Grim Fandango"));
+    const button = row()?.querySelector("button") as HTMLButtonElement;
+    button.click();
+    await tick();
+    (row()?.querySelector("button") as HTMLButtonElement).click();
+    await tick();
+    expect(uninstalled).toBe(true);
+    expect(row()).toBeUndefined();
+    expect(walks).toBe(2);
+
+    releaseWalk!();
+    await tick();
+    releaseList!();
+    await tick();
+    await tick();
+    expect(row()).toBeUndefined();
+    expect(walks).toBe(3);
     dispose();
   });
 
