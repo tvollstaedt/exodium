@@ -140,15 +140,19 @@ pub async fn open_log_folder(app: AppHandle) -> Result<(), String> {
         std::fs::create_dir_all(&dir)
             .map_err(|e| format!("Failed to create log folder: {e}"))?;
     }
-    #[cfg(target_os = "windows")]
-    let result = std::process::Command::new("explorer").arg(&dir).spawn();
-    #[cfg(target_os = "macos")]
-    let result = std::process::Command::new("open").arg(&dir).spawn();
+    let failed = |e: String| format!("Failed to open log folder {}: {e}", dir.display());
     #[cfg(target_os = "linux")]
-    let result = std::process::Command::new("xdg-open").arg(&dir).spawn();
-    result
-        .map(|_| ())
-        .map_err(|e| format!("Failed to open log folder {}: {e}", dir.display()))
+    {
+        super::shell_open::open_with_default_app(&app, &dir).await.map_err(failed)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        #[cfg(target_os = "windows")]
+        let result = std::process::Command::new("explorer").arg(&dir).spawn();
+        #[cfg(target_os = "macos")]
+        let result = std::process::Command::new("open").arg(&dir).spawn();
+        result.map(|_| ()).map_err(|e| failed(e.to_string()))
+    }
 }
 
 /// Managed state for the download system - supports multiple torrents.

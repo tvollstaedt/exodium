@@ -374,3 +374,9 @@
 - Verworfen: Seiten nie freigeben (ein Heft hat mehrere hundert Seiten zu je ~6 MB Bitmap).
 - Grund: Report "spaetere Seiten dauern lange, Scrollen laedt nicht sofort". 600 px sind bei einem 600-dpi-Scan (~1400 CSS px hoch) weniger als eine halbe Seite Vorlauf, und jede verlassene Seite wurde sofort genullt und beim Zurueckblaettern komplett neu dekodiert (JPX + JBIG2, einige hundert ms).
 - Gotcha: NICHT gemessen - die Wirkung ist aus dem Code abgeleitet, die Laborlaeufe wurden abgebrochen, getestet wird von Hand. Ob spaete Seiten zusaetzlich am Range-Nachladen ueber den Media-Server haengen, ist offen.
+
+## 2026-09-21 - "Open externally" ohne Spur: Exit-Code lesen, AppImage-Umgebung auch hier saeubern
+- Entscheidung: `open_document` und `open_log_folder` gehen auf Linux durch `shell_open::open_with_default_app` - eigener `xdg-open`-Spawn mit `sanitize_appimage_env`, 2 s auf einen fruehen Exit gewartet, Exit-Code als Fehlertext (xdg-open(1): 3 = kein Handler, 4 = Handler-Start gescheitert), Ergebnis im Log. Der Viewer zeigt den Fehler samt Dateipfad statt nur `console.error`. macOS/Windows bleiben beim Opener-Plugin.
+- Verworfen: nur Logging; das Freedesktop-OpenURI-Portal ueber D-Bus (die saubere Loesung fuer Flatpak-Handler, braucht aber fd-Passing und `zbus` fuer einen Nebenknopf).
+- Grund: Issue #30 (Bazzite/KDE, Okular als Flatpak, AppImage 0.14.3): Knopf tut nichts, Log leer. Das Plugin double-forkt `xdg-open` mit `/dev/null` fuer beide Ausgaben und meldet Erfolg, sobald der Zwischenprozess endet - ein sterbender Launcher ist unsichtbar. Ob die vererbte AppImage-Umgebung die Ursache ist, ist NICHT gemessen: auf der Referenzbox (KDE, CachyOS) oeffnete derselbe Knopf den Browser.
+- Gotcha: `xdg-open` kehrt je nach Desktop sofort zurueck (KDE: `kde-open`) oder erst, wenn der Viewer schliesst (generischer Pfad) - darum das Zeitfenster statt `wait()`. Ein spaeter Exit wird nur geloggt, sein Code ist der des Viewers, nicht des Starts.

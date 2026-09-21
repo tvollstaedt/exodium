@@ -58,6 +58,7 @@ exodium/
 │       │   ├── games.rs       ← get_games, settings, launch_game (DOSBox pipeline)
 │       │   ├── win9x.rs / scummvm.rs ← the other two launchers
 │       │   ├── reading.rs     ← Lesesaal: issue fetch, cache, reading state
+│       │   ├── shell_open.rs  ← system-handler spawns + the AppImage env scrub (§20)
 │       │   └── mod.rs         ← re-exports; lib.rs registers commands from here
 │       ├── media_sources.rs   ← the Media Pack as a non-collection source (§19)
 │       ├── db/
@@ -1794,6 +1795,24 @@ appends a "Reading Room" group last rather than reading the id from the
 gets a torrent). With the store filled, `PackHintBanner` above the reading
 grid fires on exactly Browse's trigger - the grid is on Tier 0 and the
 poster pack is available and not installed.
+
+### 20. Every child of the AppImage gets a cleaned environment
+
+Tauri's AppRun and the linuxdeploy hooks export ~20 variables so the
+bundled GTK, glib and GStreamer are found (`LD_LIBRARY_PATH`,
+`GIO_EXTRA_MODULES`, `GSETTINGS_SCHEMA_DIR`, ...). A host binary that
+inherits them loads the bundled libraries instead of its own - an emulator
+hung in teardown on window close that way. `sanitize_appimage_env`
+(`shell_open.rs`) drops the AppDir-only variables and strips the AppDir
+entries from the prefixed ones (`PATH`, `XDG_DATA_DIRS`); every spawn goes
+through it - emulators, and the system handler for documents and the log
+folder (`open_with_default_app`). Do not call the opener plugin's
+`open_path` directly on Linux: it spawns `xdg-open` with the inherited
+environment, double-forks, nulls both output streams and reports success
+once the intermediate process exits - a launcher that dies leaves no trace
+anywhere (#30). `open_with_default_app` reads the exit code instead
+(xdg-open documents them: 3 = no handler for the type, 4 = handler failed)
+and the viewer shows the reason with the file's path.
 
 ## Conventions
 

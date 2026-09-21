@@ -39,6 +39,7 @@ export function DocumentViewer(props: DocumentViewerProps) {
   const [txt, setTxt] = createSignal<string | null>(null);
   const [txtErr, setTxtErr] = createSignal(false);
   const [zoom, setZoom] = createSignal(1.0);
+  const [externalError, setExternalError] = createSignal<string | null>(null);
 
   /** The document, identified by kind and path. Both effects below start by
    *  dropping what they hold, so a caller whose getter returns a fresh object
@@ -56,6 +57,7 @@ export function DocumentViewer(props: DocumentViewerProps) {
   createEffect(on(active, (source) => {
     setUrl(null);
     setZoom(1.0);
+    setExternalError(null);
     if (!source) { return; }
     if (source.kind !== "pdf") { setUrl(convertFileSrc(source.path)); return; }
     let cancelled = false;
@@ -85,10 +87,12 @@ export function DocumentViewer(props: DocumentViewerProps) {
   const openExternal = async () => {
     const path = props.source?.path;
     if (!path) { return; }
+    setExternalError(null);
     try {
       await openDocument(path);
     } catch (e) {
       console.error("openDocument failed:", e, "path:", path);
+      setExternalError(String(e));
     }
   };
 
@@ -132,6 +136,14 @@ export function DocumentViewer(props: DocumentViewerProps) {
                 </Show>
                 <button class="document-viewer-close" data-testid={testId("close")} onClick={props.onClose} title="Close (Esc)">✕</button>
               </div>
+              <Show when={externalError()}>
+                {(msg) => (
+                  <div class="document-viewer-notice" role="alert" data-testid={testId("open-external-error")}>
+                    <span>Could not open externally: {msg()}</span>
+                    <span class="document-viewer-notice-path">The file is at {props.source?.path}</span>
+                  </div>
+                )}
+              </Show>
 
               <Show when={props.source} fallback={props.placeholder ?? loading("Opening…")}>
                 <Show when={url()} fallback={loading("Resolving the file…")}>

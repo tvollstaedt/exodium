@@ -14,6 +14,7 @@ pub(crate) mod content_packs;
 mod games;
 mod playlists;
 pub(crate) mod setup;
+pub(crate) mod shell_open;
 pub(crate) mod updates;
 pub(crate) mod scummvm;
 pub(crate) mod win9x;

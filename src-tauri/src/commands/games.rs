@@ -16,6 +16,7 @@ use super::TorrentState;
 use super::paths::launch_conf_dir;
 use super::collections::{collection_game_prefix, collection_lang_dir};
 use super::install::{copy_dir_recursive, extract_before_launch};
+use super::shell_open::{open_with_default_app, sanitize_appimage_env};
 
 
 pub struct DbState(pub Mutex<Connection>);
@@ -291,10 +292,7 @@ pub async fn open_document(
     if !canonical.starts_with(&base) {
         return Err(format!("Refusing to open path outside the data directory: {}", path));
     }
-    use tauri_plugin_opener::OpenerExt;
-    app.opener()
-        .open_path(canonical.to_string_lossy(), None::<&str>)
-        .map_err(|e| e.to_string())
+    open_with_default_app(&app, &canonical).await
 }
 
 /// Can this install apply updates via the tauri updater? Linux deb/rpm
@@ -1911,91 +1909,6 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
     spawn_emulator_and_track(&app, cmd, &dosbox_bin, &running_game_key(&game), &game.title, id)
 }
 
-/// AppImage/linuxdeploy variables that point only into `$APPDIR`. Dropped for
-/// emulator children; unset, each falls back to its default.
-#[cfg(target_os = "linux")]
-const APPIMAGE_ONLY_VARS: &[&str] = &[
-    // AppImage runtime / Tauri's AppRun
-    "LD_LIBRARY_PATH",
-    "LD_PRELOAD",
-    "APPDIR",
-    "APPIMAGE",
-    "OWD",
-    "ARGV0",
-    "PYTHONHOME",
-    // linuxdeploy-plugin-gtk.sh
-    "GDK_BACKEND",
-    "GTK_DATA_PREFIX",
-    "GTK_THEME",
-    "GTK_EXE_PREFIX",
-    "GTK_PATH",
-    "GTK_IM_MODULE_FILE",
-    "GDK_PIXBUF_MODULE_FILE",
-    "GIO_EXTRA_MODULES",
-    "GSETTINGS_SCHEMA_DIR",
-    // linuxdeploy-plugin-gstreamer.sh + AppRun
-    "GST_REGISTRY_REUSE_PLUGIN_SCANNER",
-    "GST_PLUGIN_SYSTEM_PATH",
-    "GST_PLUGIN_SYSTEM_PATH_1_0",
-    "GST_PLUGIN_PATH_1_0",
-    "GST_PLUGIN_SCANNER_1_0",
-    "GST_PTP_HELPER_1_0",
-];
-
-/// Variables the AppRun PREPENDS `$APPDIR` entries to, keeping the host value
-/// behind them. Removing these outright would take the host's own entries with
-/// them (`PATH` most obviously), so only the `$APPDIR` entries are stripped.
-#[cfg(target_os = "linux")]
-const APPIMAGE_PREFIXED_PATH_VARS: &[&str] = &[
-    "PATH",
-    "XDG_DATA_DIRS",
-    "PERLLIB",
-    "PYTHONPATH",
-    "QT_PLUGIN_PATH",
-];
-
-/// Drop the `$APPDIR`-rooted entries from a colon-separated path list.
-/// `None` means nothing but AppImage entries were left.
-#[cfg(target_os = "linux")]
-fn strip_appdir_entries(value: &str, appdir: &str) -> Option<String> {
-    let kept: Vec<&str> = value
-        .split(':')
-        .filter(|e| !e.is_empty() && !Path::new(e).starts_with(appdir))
-        .collect();
-    if kept.is_empty() {
-        None
-    } else {
-        Some(kept.join(":"))
-    }
-}
-
-/// Strip the AppImage's environment from an emulator child: with the bundled
-/// `LD_LIBRARY_PATH` inherited, an emulator mixes bundled and host libraries
-/// and hangs in teardown on window close. Gated on `APPIMAGE`.
-#[cfg(target_os = "linux")]
-fn sanitize_appimage_env(cmd: &mut Command) {
-    if std::env::var_os("APPIMAGE").is_none() {
-        return;
-    }
-    let appdir = std::env::var("APPDIR").ok();
-    for var in APPIMAGE_ONLY_VARS {
-        cmd.env_remove(var);
-    }
-    if let Some(appdir) = appdir.as_deref().filter(|d| !d.is_empty()) {
-        for var in APPIMAGE_PREFIXED_PATH_VARS {
-            if let Ok(value) = std::env::var(var) {
-                match strip_appdir_entries(&value, appdir) {
-                    Some(kept) => cmd.env(var, kept),
-                    None => cmd.env_remove(var),
-                };
-            }
-        }
-    }
-}
-
-#[cfg(not(target_os = "linux"))]
-fn sanitize_appimage_env(_cmd: &mut Command) {}
-
 /// Emitted when the emulator process ends, so the frontend can undo what a
 /// launch changed (the music player pauses for a running game).
 #[derive(Clone, Serialize)]
@@ -2159,33 +2072,6 @@ mod tests {
         std::fs::create_dir_all(lp.join("ODYSSEY")).unwrap();
         let conf = "[autoexec]\nmount c .\\eXoDOS\\AlienOdy\nc:\n@cd odyssey\n@call run\nexit\n";
         assert!(!lp_autoexec_compatible(conf, "AlienOdy", &lp, tmp.path()));
-    }
-    // The AppImage's LD_LIBRARY_PATH is what makes an emulator hang on window
-    // close, and PATH must survive the cleanup or nothing launches at all.
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn appimage_cleanup_drops_the_library_overrides_but_keeps_path() {
-        assert!(super::APPIMAGE_ONLY_VARS.contains(&"LD_LIBRARY_PATH"));
-        assert!(super::APPIMAGE_ONLY_VARS.contains(&"GIO_EXTRA_MODULES"));
-        assert!(super::APPIMAGE_ONLY_VARS.contains(&"GST_PLUGIN_SYSTEM_PATH_1_0"));
-        assert!(!super::APPIMAGE_ONLY_VARS.contains(&"PATH"));
-        assert!(super::APPIMAGE_PREFIXED_PATH_VARS.contains(&"PATH"));
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn strip_appdir_entries_keeps_the_host_half() {
-        assert_eq!(
-            super::strip_appdir_entries("/tmp/.mount_x/usr/share/:/usr/share:/usr/local/share", "/tmp/.mount_x"),
-            Some("/usr/share:/usr/local/share".to_string())
-        );
-        // A path that merely starts with the same characters is not inside it.
-        assert_eq!(
-            super::strip_appdir_entries("/tmp/.mount_xy/usr/bin:/usr/bin", "/tmp/.mount_x"),
-            Some("/tmp/.mount_xy/usr/bin:/usr/bin".to_string())
-        );
-        // Nothing but AppImage entries left → the child gets no variable at all.
-        assert_eq!(super::strip_appdir_entries("/tmp/.mount_x/usr/bin:", "/tmp/.mount_x"), None);
     }
 
 
