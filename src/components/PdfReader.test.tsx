@@ -9,7 +9,7 @@ const pdf = vi.hoisted(() => ({
 vi.mock("pdfjs-dist", () => ({ GlobalWorkerOptions: {}, getDocument: pdf.getDocument }));
 vi.mock("pdfjs-dist/build/pdf.worker.mjs?url", () => ({ default: "pdf.worker.mjs" }));
 
-import { PdfReader, documentOptions } from "./PdfReader";
+import { PdfReader, documentOptions, evictable } from "./PdfReader";
 
 /** What each engine really reports - jsdom's own UA says "linux" in lower case
  *  and would match neither branch. */
@@ -50,6 +50,39 @@ describe("PdfReader document options", () => {
     for (const ua of [WEBKITGTK, WKWEBVIEW, WEBVIEW2]) {
       expect(documentOptions(ua)).toMatchObject({ wasmUrl: expect.stringMatching(/pdfjs\/$/) });
     }
+  });
+
+  /** Releasing a page the moment it leaves the viewport means decoding it
+   *  again on the way back - a few hundred ms per 600 dpi scan, every time.
+   *  The budget keeps the recent ones instead, and must never take a page
+   *  that is on screen. */
+  describe("render budget", () => {
+    const set = (...pages: number[]) => new Set(pages);
+
+    it("keeps everything while it fits", () => {
+      expect(evictable([1, 2, 3], set(2), [2, 1, 3], 6)).toEqual([]);
+    });
+
+    it("drops the least recently seen pages first", () => {
+      // Seen order 9, 8, 7, …: 4 and 5 are the coldest two.
+      const rendered = [4, 5, 6, 7, 8, 9];
+      const recent = [9, 8, 7, 6, 5, 4];
+      expect(evictable(rendered, set(9), recent, 4)).toEqual([4, 5]);
+    });
+
+    it("never releases a page that is on screen", () => {
+      const rendered = [1, 2, 3, 4];
+      // 1 is the coldest but visible, so the next coldest goes instead.
+      const dropped = evictable(rendered, set(1), [4, 3, 2, 1], 3);
+      expect(dropped).not.toContain(1);
+      expect(dropped).toEqual([2]);
+    });
+
+    /** A page rendered before anyone looked at it (the initial jump) has no
+     *  entry in the recent list; it must still be evictable rather than pinned. */
+    it("treats a never-touched page as the coldest of all", () => {
+      expect(evictable([1, 2, 3], set(), [3, 2], 2)).toEqual([1]);
+    });
   });
 
   /** The option only helps if the reader actually passes it: the call site is

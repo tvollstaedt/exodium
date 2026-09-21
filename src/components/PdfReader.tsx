@@ -34,12 +34,39 @@ export function documentOptions(userAgent: string) {
     : RUNTIME_PAYLOADS;
 }
 
-/** Pages within this many pixels of the viewport are rendered; beyond it
- *  their canvas is released. A magazine issue runs to several hundred pages
- *  and one rendered page is a few MB of bitmap. */
-const RENDER_MARGIN = "600px 0px";
+/** How far ahead of the viewport a page starts rendering. A 600 dpi scan is
+ *  ~1400 CSS px tall, so the old 600 px was less than half a page of lead and
+ *  scrolling always arrived before the picture did. */
+const RENDER_MARGIN_PX = 1600;
+const RENDER_MARGIN = `${RENDER_MARGIN_PX}px 0px`;
+/** How many rendered pages to hold at once. Beyond the ones on screen this is
+ *  what makes paging back instant: a released page is decoded again from
+ *  scratch, which for JPX + JBIG2 is a few hundred ms. One page is roughly
+ *  6 MB of bitmap, so this is the memory budget as much as the cache size. */
+const RENDER_BUDGET = 6;
 const MIN_SCALE = 0.5;
 const MAX_SCALE = 4;
+
+/** Which pages to release so that at most `budget` stay rendered: least
+ *  recently seen first, and never one that is currently on screen. */
+export function evictable(
+  rendered: Iterable<number>,
+  visible: ReadonlySet<number>,
+  recent: readonly number[],
+  budget: number,
+): number[] {
+  const held = [...rendered];
+  const over = held.length - budget;
+  if (over <= 0) { return []; }
+  const rank = (page: number) => {
+    const i = recent.indexOf(page);
+    return i === -1 ? Number.MAX_SAFE_INTEGER : i;
+  };
+  return held
+    .filter((page) => !visible.has(page))
+    .sort((a, b) => rank(b) - rank(a))
+    .slice(0, over);
+}
 
 interface PdfReaderProps {
   /** URL the webview can fetch: asset protocol, or the localhost media server on Linux. */
@@ -82,6 +109,10 @@ export function PdfReader(props: PdfReaderProps) {
   let container: HTMLDivElement | undefined;
   const canvases = new Map<number, HTMLCanvasElement>();
   const rendered = new Set<number>();
+  /** Pages the observer currently reports as within the render margin. */
+  const visible = new Set<number>();
+  /** Page numbers, most recently seen first: what the budget evicts by. */
+  const recent: number[] = [];
   let observer: IntersectionObserver | undefined;
   /** The in-flight render per page. pdf.js refuses a second render() on a
    *  canvas still busy, so the old one is cancelled and awaited first. */
@@ -103,6 +134,8 @@ export function PdfReader(props: PdfReaderProps) {
     // makes it throw its bitmap away instead of painting it here.
     generation += 1;
     rendered.clear();
+    visible.clear();
+    recent.length = 0;
     const task = pdfjs.getDocument({ url: src, ...documentOptions(navigator.userAgent) });
     task.promise
       .then(async (loaded) => {
@@ -221,6 +254,21 @@ export function PdfReader(props: PdfReaderProps) {
     canvas.height = 0;
   }
 
+  /** Most recently seen first. */
+  function touch(pageNumber: number) {
+    const at = recent.indexOf(pageNumber);
+    if (at !== -1) { recent.splice(at, 1); }
+    recent.unshift(pageNumber);
+  }
+
+  /** A page leaving the viewport is kept until the budget needs its memory,
+   *  so a short scroll back finds it already drawn. */
+  function trimRendered() {
+    for (const page of evictable(rendered, visible, recent, RENDER_BUDGET)) {
+      releasePage(page);
+    }
+  }
+
   function retryPage(pageNumber: number) {
     rendered.delete(pageNumber);
     void renderPage(pageNumber);
@@ -234,9 +282,12 @@ export function PdfReader(props: PdfReaderProps) {
             const page = Number((entry.target as HTMLElement).dataset.page);
             if (!page) { continue; }
             if (entry.isIntersecting) {
+              visible.add(page);
+              touch(page);
               void renderPage(page);
             } else {
-              releasePage(page);
+              visible.delete(page);
+              trimRendered();
             }
           }
         },
@@ -258,7 +309,7 @@ export function PdfReader(props: PdfReaderProps) {
       for (const [page, canvas] of canvases) {
         const box = canvas.parentElement?.getBoundingClientRect();
         const view = root.getBoundingClientRect();
-        if (box && box.bottom > view.top - 600 && box.top < view.bottom + 600) {
+        if (box && box.bottom > view.top - RENDER_MARGIN_PX && box.top < view.bottom + RENDER_MARGIN_PX) {
           void renderPage(page);
         }
       }
