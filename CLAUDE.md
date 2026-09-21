@@ -1686,6 +1686,22 @@ modules for the relaxed-SIMD opcodes and fails the build on an upgrade that
 brings them back; retest with a WKWebView `WebAssembly.compile` before moving
 the pin.
 
+**A second blank-page cause, and it is WebKitGTK's, not the decoders':** pdf.js
+hands decoded images from its worker to the page as OffscreenCanvas bitmaps,
+and on the accelerated Linux render path (§17) those land in the page canvas
+only some of the time - the page comes out pure white while pdf.js reports a
+finished render and logs nothing at all, not even "Dependent image isn't ready
+yet". `documentOptions` (`PdfReader.tsx`) therefore passes
+`isOffscreenCanvasSupported: false` on Linux; raw pixel data is correct there
+and measurably faster. Do NOT widen it to the other engines (macOS renders
+these issues on the default path) and do NOT reach for
+`WEBKIT_SKIA_ENABLE_CPU_RENDERING` instead - it fixes this too and costs the
+whole UI its GPU path. Two things make this expensive to rediscover: only a
+pixel readback sees it, since every API says success; and it does NOT
+reproduce under Xvfb, where `choose_render_path` takes the disable_dmabuf arm
+and the software rasterizer paints correctly. Measure canvas bugs on the
+Wayland session. Guard: `PdfReader.test.tsx`.
+
 **eXo ships the game-to-page index, and it joins on shortcode.**
 `Content/DOS_linux_Magazines.zip` (2.8 MB, fetched whole) holds 910 launcher
 scripts named `!dos/<shortcode>/Magazines/<Kind> <Magazine> <date> page <N>`,

@@ -23,6 +23,17 @@ const RUNTIME_PAYLOADS = {
   standardFontDataUrl: `${RUNTIME_URL}standard_fonts/`,
 };
 
+/** What `getDocument` gets besides the URL. On WebKitGTK the worker must not
+ *  hand images over as OffscreenCanvas bitmaps: drawn into the page canvas,
+ *  they intermittently arrive empty and the page comes out white with no
+ *  warning anywhere - scans of every kind, a third to all of an issue (§19).
+ *  Raw pixel data is correct there and faster; other engines keep the default. */
+export function documentOptions(userAgent: string) {
+  return /Linux/.test(userAgent)
+    ? { ...RUNTIME_PAYLOADS, isOffscreenCanvasSupported: false }
+    : RUNTIME_PAYLOADS;
+}
+
 /** Pages within this many pixels of the viewport are rendered; beyond it
  *  their canvas is released. A magazine issue runs to several hundred pages
  *  and one rendered page is a few MB of bitmap. */
@@ -92,7 +103,7 @@ export function PdfReader(props: PdfReaderProps) {
     // makes it throw its bitmap away instead of painting it here.
     generation += 1;
     rendered.clear();
-    const task = pdfjs.getDocument({ url: src, ...RUNTIME_PAYLOADS });
+    const task = pdfjs.getDocument({ url: src, ...documentOptions(navigator.userAgent) });
     task.promise
       .then(async (loaded) => {
         if (cancelled) {
