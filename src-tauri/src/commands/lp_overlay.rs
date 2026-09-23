@@ -102,21 +102,28 @@ fn archive_size(collection: &str, index: i64) -> Option<u64> {
     sizes_for(collection)?.get(idx).copied()
 }
 
-/// The English row this variant needs underneath it, or None when the
-/// variant stands on its own. Only language packs can be overlays - they
-/// are the collections that share eXoDOS' directory tree.
-pub fn base_for(conn: &rusqlite::Connection, game: &Game) -> Option<Game> {
+/// The English row of a language-pack variant's family, whether or not the
+/// variant depends on it.
+pub fn english_sibling(conn: &rusqlite::Connection, game: &Game) -> Option<Game> {
     if game.language == "EN" {
         return None;
     }
     let source = game.torrent_source.as_deref()?;
-    let lang_dir = collection_def(source).and_then(|c| c.lang_dir)?;
+    collection_def(source).and_then(|c| c.lang_dir)?;
     let shortcode = game.shortcode.as_deref()?;
-
-    let base = crate::db::queries::fetch_game_variants(conn, shortcode, source)
+    crate::db::queries::fetch_game_variants(conn, shortcode, source)
         .ok()?
         .into_iter()
-        .find(|g| g.language == "EN")?;
+        .find(|g| g.language == "EN")
+}
+
+/// The English row this variant needs underneath it, or None when the
+/// variant stands on its own. Only language packs can be overlays - they
+/// are the collections that share eXoDOS' directory tree.
+pub fn base_for(conn: &rusqlite::Connection, game: &Game) -> Option<Game> {
+    let base = english_sibling(conn, game)?;
+    let source = game.torrent_source.as_deref()?;
+    let lang_dir = collection_def(source).and_then(|c| c.lang_dir)?;
 
     // eXo's list decides where it exists. It is the same lookup eXo's own
     // installer does, so a variant is treated exactly as the pack intends.

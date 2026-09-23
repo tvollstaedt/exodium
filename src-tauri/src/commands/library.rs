@@ -1085,11 +1085,15 @@ pub async fn uninstall_game(
     let game_dir: Option<PathBuf> = Some(torrent_root.join(&rel_game_dir)).filter(|d| d.exists());
     let rel_zip = collection_rel_zip(source, &game_name, game.application_path.as_deref());
 
-    let (db_path, base) = {
+    let (db_path, base, sibling) = {
         let conn = db_state.lock()?;
         let db_path = conn.path().map(PathBuf::from)
             .ok_or_else(|| "Cannot determine database path".to_string())?;
-        (db_path, crate::commands::lp_overlay::base_for(&conn, &game))
+        let base = crate::commands::lp_overlay::base_for(&conn, &game);
+        let sibling = base.is_none()
+            .then(|| crate::commands::lp_overlay::english_sibling(&conn, &game))
+            .flatten();
+        (db_path, base, sibling)
     };
 
     let task_game = game.clone();
@@ -1100,14 +1104,20 @@ pub async fn uninstall_game(
             if let Some(ref dir) = game_dir {
                 // Pristine = this variant's archive (or its manifest); an
                 // overlay sits on the English archive too (§10a), or the
-                // copied base tree would all read as user data.
+                // copied base tree would all read as user data. A standalone
+                // variant takes the English archive when it is there: a
+                // shared-backup restore once filled localized folders with
+                // the English game, and this is the pass that drops it.
                 let own = super::archives::pristine_for(&task_data_dir, &torrent_root, &task_game);
                 let pristine = match base.as_ref() {
                     Some(b) => match (super::archives::pristine_for(&task_data_dir, &torrent_root, b), own) {
                         (Some(b), Some(o)) => Some(b.merge(o)),
                         _ => None,
                     },
-                    None => own,
+                    None => match (own, sibling.as_ref().and_then(|s| super::archives::pristine_for(&task_data_dir, &torrent_root, s))) {
+                        (Some(o), Some(s)) => Some(o.merge(s)),
+                        (own, _) => own,
+                    },
                 };
                 let save_dir = torrent_root.join(&rel_save_dir);
                 let kept = back_up_user_data(dir, &save_dir, pristine.as_ref())

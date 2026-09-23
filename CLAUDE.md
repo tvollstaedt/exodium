@@ -257,7 +257,10 @@ and moves only what is new or changed to `!save/<shortcode>/` (EN) or
 `<lang_dir>/!save/<shortcode>/` (LP variants - language-scoped so variants
 can't clobber each other's backup); the pristine rest is deleted. An overlay
 variant (§10a) is compared against base plus patch, or the copied English tree
-would all read as user data. On reinstall, `extract_game_zip` copies the backup
+would all read as user data. A standalone variant is compared against its
+archive PLUS the English sibling's when that is on disk: a match to either is
+not user data, which is what clears a localized folder an old shared-backup
+restore filled with the English game. On reinstall, `extract_game_zip` copies the backup
 over the fresh extraction, probing the lang-scoped location first, then the
 legacy shared one, and removes the backup once it is restored. Without an
 archive to compare against (no ZIP and no manifest) the WHOLE directory is

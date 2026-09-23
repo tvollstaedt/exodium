@@ -66,9 +66,10 @@ fn clear_readonly(root: &Path) {
 fn clear_readonly(_root: &Path) {}
 
 /// Size and CRC-32 of every file an archive unpacks, keyed by the path
-/// below the archive's top-level directory (forward slashes).
+/// below the archive's top-level directory (forward slashes). A key holds
+/// one entry per merged archive: a file matching ANY of them is pristine.
 #[derive(Default, Debug, Clone)]
-pub(crate) struct PristineIndex(HashMap<String, (u64, u32)>);
+pub(crate) struct PristineIndex(HashMap<String, Vec<(u64, u32)>>);
 
 impl PristineIndex {
     /// Reads the central directory only. `None` for a placeholder or a
@@ -93,14 +94,22 @@ impl PristineIndex {
             if first != top || rel.is_empty() {
                 continue;
             }
-            map.insert(rel.to_string(), (entry.size(), entry.crc32()));
+            map.insert(rel.to_string(), vec![(entry.size(), entry.crc32())]);
         }
         Some(Self(map))
     }
 
-    /// Later archives win: an overlay patch replaces files of its base.
+    /// Union: nobody hand-writes a byte-identical copy of a shipped file, so
+    /// a base's, a patch's or a sibling variant's copy all read as pristine.
     pub(crate) fn merge(mut self, other: Self) -> Self {
-        self.0.extend(other.0);
+        for (rel, entries) in other.0 {
+            let slot = self.0.entry(rel).or_default();
+            for e in entries {
+                if !slot.contains(&e) {
+                    slot.push(e);
+                }
+            }
+        }
         self
     }
 
@@ -116,8 +125,10 @@ impl PristineIndex {
         let tmp = path.with_extension("tmp");
         {
             let mut w = std::io::BufWriter::new(std::fs::File::create(&tmp)?);
-            for (rel, (size, crc)) in &self.0 {
-                writeln!(w, "{crc:08x}\t{size}\t{rel}")?;
+            for (rel, entries) in &self.0 {
+                for (size, crc) in entries {
+                    writeln!(w, "{crc:08x}\t{size}\t{rel}")?;
+                }
             }
             w.flush()?;
         }
@@ -132,7 +143,7 @@ impl PristineIndex {
             let mut parts = line.splitn(3, '\t');
             let crc = u32::from_str_radix(parts.next()?, 16).ok()?;
             let size = parts.next()?.parse().ok()?;
-            map.insert(parts.next()?.to_string(), (size, crc));
+            map.entry(parts.next()?.to_string()).or_insert_with(Vec::new).push((size, crc));
         }
         Some(Self(map))
     }
@@ -155,7 +166,12 @@ impl PristineIndex {
             let key = rel.to_string_lossy().into_owned();
             let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
             let pristine = match self.0.get(&key) {
-                Some(&(psize, pcrc)) => psize == size && crc32_of(entry.path()) == Some(pcrc),
+                Some(entries) => {
+                    let mut crc = None;
+                    entries.iter().any(|&(psize, pcrc)| {
+                        psize == size && *crc.get_or_insert_with(|| crc32_of(entry.path())) == Some(pcrc)
+                    })
+                }
                 None => false,
             };
             if !pristine {
@@ -339,10 +355,10 @@ mod tests {
         assert_eq!(back.0, index.0);
     }
 
-    /// A patch archive overrides its base's entries, so an overlay install
-    /// with the localized config in place reads as pristine.
+    /// An overlay install with the localized config in place reads as
+    /// pristine, and so does the base's copy of the same file.
     #[test]
-    fn overlay_patch_entries_win_over_the_base() {
+    fn merged_index_accepts_either_archives_copy() {
         let tmp = tempfile::tempdir().unwrap();
         let base = tmp.path().join("base.zip");
         let patch = tmp.path().join("patch.zip");
@@ -354,6 +370,34 @@ mod tests {
         fs::write(dir.join("GAME.CFG"), b"Language 4").unwrap();
         fs::write(dir.join("GAME.EXE"), b"exe").unwrap();
         assert!(index.changed_files(&dir).unwrap().is_empty());
+
+        fs::write(dir.join("GAME.CFG"), b"Language 0").unwrap();
+        assert!(index.changed_files(&dir).unwrap().is_empty());
+        fs::write(dir.join("GAME.CFG"), b"Language 9").unwrap();
+        assert_eq!(index.changed_files(&dir).unwrap().len(), 1);
+    }
+
+    /// A localized folder that a shared save restore once filled with the
+    /// English game (§5) must not carry those files as user data forever:
+    /// merged with the English archive, only the real savegame is kept.
+    #[test]
+    fn a_sibling_archives_files_are_not_user_data() {
+        let tmp = tempfile::tempdir().unwrap();
+        let de = tmp.path().join("de.zip");
+        let en = tmp.path().join("en.zip");
+        write_zip(&de, &[("SQ3/resource.001", b"deutsch"), ("SQ3/instgame.bat", b"Kopiere")]);
+        write_zip(&en, &[("SQ3/resource.001", b"english"), ("SQ3/RESOURCE.004", b"more"), ("SQ3/run.bat", b"menu")]);
+        let index = PristineIndex::from_zip(&de).unwrap().merge(PristineIndex::from_zip(&en).unwrap());
+        let dir = tmp.path().join("SQ3");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("resource.001"), b"english").unwrap();
+        fs::write(dir.join("RESOURCE.004"), b"more").unwrap();
+        fs::write(dir.join("run.bat"), b"menu").unwrap();
+        fs::write(dir.join("instgame.bat"), b"Kopiere").unwrap();
+        fs::write(dir.join("SQ3SG.000"), b"savegame").unwrap();
+        let changed = index.changed_files(&dir).unwrap();
+        assert_eq!(changed.len(), 1);
+        assert_eq!(changed[0].0, PathBuf::from("SQ3SG.000"));
     }
 
     #[test]
