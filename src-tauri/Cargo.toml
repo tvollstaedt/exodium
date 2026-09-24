@@ -92,6 +92,8 @@ tauri-plugin-process = "2.3.1"
 # Directory junctions for the LP overlay mount - unlike symlinks they need
 # no admin rights / developer mode on Windows.
 junction = "1"
+# FSCTL_SET_SPARSE / FSCTL_SET_ZERO_DATA for torrent::sparse (§21).
+windows-sys = { version = "0.60", features = ["Win32_Foundation", "Win32_System_IO", "Win32_System_Ioctl"] }
 
 [target."cfg(unix)".dependencies]
 libc = "0.2.189"
@@ -120,4 +122,4 @@ tokio = { version = "1", features = ["fs", "sync", "macros", "rt", "test-util", 
 # commit on top of the commit the rc.0 crate was published from (§11);
 # branch fix/update-only-files-lock-order on the fork, PR pending upstream.
 [patch.crates-io]
-librqbit = { git = "https://github.com/tvollstaedt/rqbit.git", rev = "b5454b9314d30a00b5b2fc8f49c2badb33401ef5" }
+librqbit = { git = "https://github.com/tvollstaedt/rqbit.git", rev = "ad57d887715c35c39de1dafc0d27b0a0b6f8740d" }

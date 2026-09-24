@@ -1817,6 +1817,27 @@ anywhere (#30). `open_with_default_app` reads the exit code instead
 (xdg-open documents them: 3 = no handler for the type, 4 = handler failed)
 and the viewer shows the reason with the file's path.
 
+### 21. Windows torrent files must be sparse, and the fix is in the fork
+
+NTFS allocates every cluster between the old end and a write far past it
+unless the file carries `FILE_ATTRIBUTE_SPARSE_FILE`. librqbit sets it
+before the first write - but upstream (and the fork up to `b5454b9`) issued
+the FSCTL as a field of a `tracing::debug!` event, and tracing evaluates
+fields only when the event is enabled: at Exodium's `info` level no file was
+ever marked. A Reading Room stream that reads a zip's tail then allocated
+the whole archive (60 GB of zeros for the GLP magazines) or failed with
+`ERROR_DISK_FULL` and put the torrent into FATAL. Fixed in the fork
+(`ad57d887`, upstream ikatson/rqbit#681) with a test that runs without a
+subscriber, exactly like the shipped binary; keep that commit in the pin.
+`torrent::sparse::reclaim_allocated_gaps` is the migration for installs the
+old build touched: once per game root (`sparse_reclaimed_root`), before the
+session opens any file, every full-length non-sparse torrent file over
+64 MiB is read once, marked sparse and its all-zero runs deallocated with
+`FSCTL_SET_ZERO_DATA`. Zeroing an all-zero range changes nothing a reader
+sees, so the fastresume ledger stays valid and real data (an imported eXo
+install, a fetched tail piece) survives - which is why it scans content
+instead of trusting the selection.
+
 ## Conventions
 
 - **Every Tauri command that touches the DB, filesystem, or network MUST be

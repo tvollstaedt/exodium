@@ -1,4 +1,5 @@
 pub mod manager;
+pub mod sparse;
 pub mod zip_range;
 
 use std::path::Path;

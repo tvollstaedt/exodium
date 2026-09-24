@@ -195,6 +195,49 @@ fn torrent_root_looks_empty(torrent_root: &Path) -> bool {
 /// Write an all-zero `<info_hash>.bitv` per enabled collection when the root
 /// is fresh: librqbit then accepts "0 pieces" and skips the initial check
 /// (minutes on Windows).
+/// Windows only, once per game root (§21): torrent files an earlier build
+/// wrote without the sparse attribute give their zero ranges back. Runs
+/// before the session opens them.
+async fn reclaim_sparse_gaps(db_state: &DbState, collections: &[&str], data_dir: &str) {
+    if !cfg!(windows) {
+        return;
+    }
+    const KEY: &str = "sparse_reclaimed_root";
+    let root = game_root(data_dir);
+    let stamp = root.to_string_lossy().into_owned();
+    let done = db_state.lock().ok().and_then(|c| queries::get_config(&c, KEY).ok().flatten());
+    if done.as_deref() == Some(stamp.as_str()) {
+        return;
+    }
+    let indexes: Vec<TorrentIndex> = COLLECTION_MAP
+        .iter()
+        .filter(|c| collections.contains(&c.id))
+        .map(|c| c.torrent_file)
+        .chain(crate::media_sources::MEDIA_SOURCES.iter().map(|s| s.torrent_file))
+        .filter_map(|t| bundled_torrent_path(t).ok())
+        .filter_map(|p| TorrentIndex::from_file(&p).ok())
+        .collect();
+    let scan_root = root.clone();
+    let report = tauri::async_runtime::spawn_blocking(move || {
+        let mut total = crate::torrent::sparse::ReclaimReport::default();
+        for idx in &indexes {
+            let r = crate::torrent::sparse::reclaim_allocated_gaps(&scan_root, &idx.files, idx.piece_length);
+            total.scanned += r.scanned;
+            total.freed_bytes += r.freed_bytes;
+        }
+        total
+    })
+    .await
+    .unwrap_or_default();
+    log::info!(
+        "sparse: {} file(s) scanned under {}, {} MB freed",
+        report.scanned, root.display(), report.freed_bytes >> 20
+    );
+    if let Ok(conn) = db_state.lock() {
+        let _ = queries::set_config(&conn, KEY, &stamp);
+    }
+}
+
 fn seed_fastresume_bitvs(
     persistence_dir: &Path,
     collections: &[&str],
@@ -306,6 +349,7 @@ pub async fn init_download_manager(
     crate::commands::media::prune_video_cache(&data_dir);
     crate::commands::media::prune_music_cache(&data_dir);
     crate::commands::reading::sweep_partial_downloads(&data_dir);
+    reclaim_sparse_gaps(&db_state, &collections, &data_dir).await;
 
     // Offline: no session. The bundled configs are still extracted, and
     // the cleared managers dropped the last Arc to a previous session.
