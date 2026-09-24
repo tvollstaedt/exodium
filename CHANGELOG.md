@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.15.0 - 2026-09-20
+## 0.15.0 - 2026-09-24
 
 ### Added
 
@@ -28,6 +28,20 @@
 - A dying peer during a download could deadlock the torrent client and every
   command with it.
 - Wide jump-bar labels no longer cover the grid's last column.
+- Linux: "Open externally" in the document viewer could do nothing at all.
+  It now reports why it failed, and the AppImage no longer hands its bundled
+  libraries to the viewer it starts.
+- Settings → Storage: an uninstalled game could come back into the list once
+  a slow measurement finished.
+- Windows: files the torrent engine wrote were not marked sparse, so reading
+  a magazine from the end of a large archive allocated the whole archive on
+  disk, or failed with "not enough space" and stopped the torrent. The engine
+  is fixed and the first start gives the space back to installs already hit.
+- Reading Room: scrolling far through a large document no longer leaves the
+  page you stop on blank for many seconds. Pages that scrolled past are
+  dropped and the nearest page renders first.
+- Covers appear as soon as the window opens instead of after the torrent
+  engine has started.
 - Non-collection ids no longer fall back to the eXoDOS poster set.
 
 ## 0.14.0 - 2026-09-04
