@@ -44,6 +44,10 @@ const RENDER_MARGIN = `${RENDER_MARGIN_PX}px 0px`;
  *  scratch, which for JPX + JBIG2 is a few hundred ms. One page is roughly
  *  6 MB of bitmap, so this is the memory budget as much as the cache size. */
 const RENDER_BUDGET = 6;
+/** Renders in the worker at once. pdf.js decodes strictly in request order,
+ *  so a queue of every page that scrolled past is what puts the one on
+ *  screen 20 s behind the picture. */
+const MAX_IN_FLIGHT = 2;
 const MIN_SCALE = 0.5;
 const MAX_SCALE = 4;
 
@@ -66,6 +70,23 @@ export function evictable(
     .filter((page) => !visible.has(page))
     .sort((a, b) => rank(b) - rank(a))
     .slice(0, over);
+}
+
+/** Which of the `wanted` pages to start next: the nearest to `focus` first,
+ *  a page below it before the one above at equal distance, at most `slots`.
+ *  Pages already drawn or in flight are never restarted. */
+export function nextToRender(
+  wanted: Iterable<number>,
+  drawn: ReadonlySet<number>,
+  inFlight: ReadonlySet<number>,
+  focus: number,
+  slots: number,
+): number[] {
+  if (slots <= 0) { return []; }
+  return [...wanted]
+    .filter((page) => !drawn.has(page) && !inFlight.has(page))
+    .sort((a, b) => Math.abs(a - focus) - Math.abs(b - focus) || b - a)
+    .slice(0, slots);
 }
 
 interface PdfReaderProps {
@@ -108,15 +129,18 @@ export function PdfReader(props: PdfReaderProps) {
   let reader: HTMLDivElement | undefined;
   let container: HTMLDivElement | undefined;
   const canvases = new Map<number, HTMLCanvasElement>();
-  const rendered = new Set<number>();
+  /** Pages whose bitmap is on their canvas. */
+  const drawn = new Set<number>();
   /** Pages the observer currently reports as within the render margin. */
   const visible = new Set<number>();
   /** Page numbers, most recently seen first: what the budget evicts by. */
   const recent: number[] = [];
   let observer: IntersectionObserver | undefined;
-  /** The in-flight render per page. pdf.js refuses a second render() on a
-   *  canvas still busy, so the old one is cancelled and awaited first. */
-  const renders = new Map<number, pdfjs.RenderTask>();
+  /** The render per page from the moment it is picked until its bitmap is
+   *  there or it is abandoned; `task` exists once pdf.js has it. pdf.js
+   *  refuses a second render() on a busy canvas, so a cancel is awaited. */
+  const inFlight = new Map<number, { task?: pdfjs.RenderTask; abandoned: boolean }>();
+  let scheduled = false;
   /** Bumped on every document/scale change; a render that finishes late
    *  compares against it and throws its bitmap away. */
   let generation = 0;
@@ -133,7 +157,8 @@ export function PdfReader(props: PdfReaderProps) {
     // A render still in flight belongs to the previous document; the bump
     // makes it throw its bitmap away instead of painting it here.
     generation += 1;
-    rendered.clear();
+    for (const page of [...inFlight.keys()]) { void cancelRender(page); }
+    drawn.clear();
     visible.clear();
     recent.length = 0;
     const task = pdfjs.getDocument({ url: src, ...documentOptions(navigator.userAgent) });
@@ -178,37 +203,51 @@ export function PdfReader(props: PdfReaderProps) {
   onCleanup(() => {
     observer?.disconnect();
     searchGeneration += 1;
-    for (const page of [...renders.keys()]) { void cancelRender(page); }
+    for (const page of [...inFlight.keys()]) { void cancelRender(page); }
     void doc()?.cleanup();
   });
 
-  /** Cancelling rejects the task's promise; awaiting it is what guarantees
-   *  the canvas is free before the next render touches it. The entry is
-   *  dropped only afterwards, so a second caller waits on the same task
-   *  instead of walking past a cancellation still in flight. */
+  /** Abandon a render wherever it stands: a task is cancelled and awaited
+   *  (what guarantees the canvas is free), a page still waiting on getPage
+   *  finds the flag and stops. The entry is dropped only afterwards, so a
+   *  second caller waits on the same task instead of walking past it. */
   async function cancelRender(pageNumber: number) {
-    const task = renders.get(pageNumber);
-    if (!task) { return; }
-    task.cancel();
-    await task.promise.catch(() => {});
-    if (renders.get(pageNumber) === task) { renders.delete(pageNumber); }
+    const entry = inFlight.get(pageNumber);
+    if (!entry) { return; }
+    entry.abandoned = true;
+    if (entry.task) {
+      entry.task.cancel();
+      await entry.task.promise.catch(() => {});
+    }
+    if (inFlight.get(pageNumber) === entry) { inFlight.delete(pageNumber); }
+  }
+
+  /** One pass over the queue on the next frame: a page that only scrolls
+   *  past never reaches the worker, and after a stop the nearest page goes
+   *  first. Every change to `visible`, `drawn` or `inFlight` calls this. */
+  function schedule() {
+    if (scheduled) { return; }
+    scheduled = true;
+    requestAnimationFrame(() => {
+      scheduled = false;
+      for (const page of nextToRender(visible, drawn, new Set(inFlight.keys()), current(), MAX_IN_FLIGHT - inFlight.size)) {
+        void renderPage(page);
+      }
+    });
   }
 
   async function renderPage(pageNumber: number) {
     const document = doc();
     const canvas = canvases.get(pageNumber);
-    if (!document || !canvas || rendered.has(pageNumber)) { return; }
+    if (!document || !canvas || drawn.has(pageNumber) || inFlight.has(pageNumber)) { return; }
     const mine = generation;
-    rendered.add(pageNumber);
+    const entry: { task?: pdfjs.RenderTask; abandoned: boolean } = { abandoned: false };
+    inFlight.set(pageNumber, entry);
     setFailed((pages) => (pages.includes(pageNumber) ? pages.filter((p) => p !== pageNumber) : pages));
-    let task: pdfjs.RenderTask | undefined;
+    const stale = () => entry.abandoned || mine !== generation || !visible.has(pageNumber);
     try {
-      await cancelRender(pageNumber);
       const page = await document.getPage(pageNumber);
-      if (mine !== generation) {
-        rendered.delete(pageNumber);
-        return;
-      }
+      if (stale()) { return; }
       // Zoom is a multiple of THIS page's own fit width: a two-page spread
       // in a magazine is twice as wide as the cover the placeholder was sized
       // from, and a scale shared across pages let it run out of the column.
@@ -230,25 +269,24 @@ export function PdfReader(props: PdfReaderProps) {
         box.style.width = `${Math.round(viewport.width / ratio)}px`;
         box.style.aspectRatio = `${viewport.width} / ${viewport.height}`;
       }
-      task = page.render({ canvas, canvasContext: context, viewport });
-      renders.set(pageNumber, task);
-      await task.promise;
-      if (renders.get(pageNumber) === task) { renders.delete(pageNumber); }
-      if (mine !== generation) { rendered.delete(pageNumber); }
+      entry.task = page.render({ canvas, canvasContext: context, viewport });
+      await entry.task.promise;
+      if (!stale()) { drawn.add(pageNumber); }
     } catch (e) {
-      if (task && renders.get(pageNumber) === task) { renders.delete(pageNumber); }
-      rendered.delete(pageNumber);
       // A cancelled render is this component's own doing, not a failure.
       if ((e as { name?: string })?.name === "RenderingCancelledException") { return; }
       console.error("page render failed", pageNumber, e);
       setFailed((pages) => (pages.includes(pageNumber) ? pages : [...pages, pageNumber]));
+    } finally {
+      if (inFlight.get(pageNumber) === entry) { inFlight.delete(pageNumber); }
+      schedule();
     }
   }
 
   function releasePage(pageNumber: number) {
     const canvas = canvases.get(pageNumber);
-    if (!canvas || !rendered.has(pageNumber)) { return; }
-    rendered.delete(pageNumber);
+    if (!canvas) { return; }
+    drawn.delete(pageNumber);
     void cancelRender(pageNumber);
     canvas.width = 0;
     canvas.height = 0;
@@ -264,14 +302,14 @@ export function PdfReader(props: PdfReaderProps) {
   /** A page leaving the viewport is kept until the budget needs its memory,
    *  so a short scroll back finds it already drawn. */
   function trimRendered() {
-    for (const page of evictable(rendered, visible, recent, RENDER_BUDGET)) {
+    for (const page of evictable(drawn, visible, recent, RENDER_BUDGET)) {
       releasePage(page);
     }
   }
 
   function retryPage(pageNumber: number) {
-    rendered.delete(pageNumber);
-    void renderPage(pageNumber);
+    drawn.delete(pageNumber);
+    schedule();
   }
 
   function getObserver(): IntersectionObserver {
@@ -284,12 +322,14 @@ export function PdfReader(props: PdfReaderProps) {
             if (entry.isIntersecting) {
               visible.add(page);
               touch(page);
-              void renderPage(page);
             } else {
               visible.delete(page);
+              // Unfinished and off screen: the worker's time goes to what is.
+              if (inFlight.has(page)) { void cancelRender(page); }
               trimRendered();
             }
           }
+          schedule();
         },
         { root: container, rootMargin: RENDER_MARGIN },
       );
@@ -302,7 +342,8 @@ export function PdfReader(props: PdfReaderProps) {
   createEffect(() => {
     scale();
     generation += 1;
-    for (const page of [...rendered]) { releasePage(page); }
+    for (const page of [...inFlight.keys()]) { void cancelRender(page); }
+    for (const page of [...drawn]) { releasePage(page); }
     const root = container;
     if (!root) { return; }
     requestAnimationFrame(() => {
@@ -310,9 +351,10 @@ export function PdfReader(props: PdfReaderProps) {
         const box = canvas.parentElement?.getBoundingClientRect();
         const view = root.getBoundingClientRect();
         if (box && box.bottom > view.top - RENDER_MARGIN_PX && box.top < view.bottom + RENDER_MARGIN_PX) {
-          void renderPage(page);
+          visible.add(page);
         }
       }
+      schedule();
     });
   });
 
@@ -324,7 +366,8 @@ export function PdfReader(props: PdfReaderProps) {
     onCleanup(() => {
       observer?.unobserve(el);
       canvases.delete(pageNumber);
-      rendered.delete(pageNumber);
+      drawn.delete(pageNumber);
+      visible.delete(pageNumber);
     });
   }
 

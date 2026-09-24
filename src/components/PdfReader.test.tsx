@@ -9,7 +9,7 @@ const pdf = vi.hoisted(() => ({
 vi.mock("pdfjs-dist", () => ({ GlobalWorkerOptions: {}, getDocument: pdf.getDocument }));
 vi.mock("pdfjs-dist/build/pdf.worker.mjs?url", () => ({ default: "pdf.worker.mjs" }));
 
-import { PdfReader, documentOptions, evictable } from "./PdfReader";
+import { PdfReader, documentOptions, evictable, nextToRender } from "./PdfReader";
 
 /** What each engine really reports - jsdom's own UA says "linux" in lower case
  *  and would match neither branch. */
@@ -56,6 +56,23 @@ describe("PdfReader document options", () => {
    *  again on the way back - a few hundred ms per 600 dpi scan, every time.
    *  The budget keeps the recent ones instead, and must never take a page
    *  that is on screen. */
+  /** Scrolling 200 pages must not queue 200 decodes ahead of the one on
+   *  screen: the nearest page goes first and only a few run at once. */
+  describe("render order", () => {
+    const set = (...pages: number[]) => new Set(pages);
+
+    it("starts the pages nearest the viewport, the one below before the one above", () => {
+      expect(nextToRender([3, 4, 5, 6, 7, 8], set(), set(), 6, 2)).toEqual([6, 7]);
+      expect(nextToRender([3, 4, 5, 6, 7, 8], set(), set(), 6, 3)).toEqual([6, 7, 5]);
+    });
+
+    it("skips what is drawn or in flight and fills only the free slots", () => {
+      expect(nextToRender([3, 4, 5, 6], set(6), set(5), 6, 2)).toEqual([4, 3]);
+      expect(nextToRender([3, 4, 5, 6], set(), set(), 6, 0)).toEqual([]);
+      expect(nextToRender([3, 4, 5, 6], set(), set(), 6, -1)).toEqual([]);
+    });
+  });
+
   describe("render budget", () => {
     const set = (...pages: number[]) => new Set(pages);
 
