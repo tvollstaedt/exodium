@@ -36,9 +36,10 @@ fn zero_runs(chunks: impl Iterator<Item = (u64, u64, bool)>) -> Vec<(u64, u64)> 
 }
 
 /// Full-length, non-sparse torrent files under `root` become sparse with
-/// their zero ranges deallocated. Reads every candidate once.
+/// their zero ranges deallocated. Reads every candidate once; `on_first`
+/// fires before the first scan, so a UI can announce the wait.
 #[cfg(windows)]
-pub fn reclaim_allocated_gaps(root: &Path, files: &[TorrentFileEntry], chunk: u64) -> ReclaimReport {
+pub fn reclaim_allocated_gaps(root: &Path, files: &[TorrentFileEntry], chunk: u64, on_first: &mut dyn FnMut()) -> ReclaimReport {
     use std::os::windows::fs::MetadataExt;
     const FILE_ATTRIBUTE_SPARSE_FILE: u32 = 0x200;
     let mut report = ReclaimReport::default();
@@ -49,6 +50,9 @@ pub fn reclaim_allocated_gaps(root: &Path, files: &[TorrentFileEntry], chunk: u6
             continue;
         }
         report.scanned += 1;
+        if report.scanned == 1 {
+            on_first();
+        }
         match win::reclaim_file(&path, chunk.max(1 << 20) as usize) {
             Ok(freed) => {
                 log::info!("sparse: {} freed {} MB", path.display(), freed >> 20);
@@ -61,7 +65,7 @@ pub fn reclaim_allocated_gaps(root: &Path, files: &[TorrentFileEntry], chunk: u6
 }
 
 #[cfg(not(windows))]
-pub fn reclaim_allocated_gaps(_root: &Path, _files: &[TorrentFileEntry], _chunk: u64) -> ReclaimReport {
+pub fn reclaim_allocated_gaps(_root: &Path, _files: &[TorrentFileEntry], _chunk: u64, _on_first: &mut dyn FnMut()) -> ReclaimReport {
     ReclaimReport::default()
 }
 
@@ -163,8 +167,9 @@ mod tests {
         }
         assert!(std::fs::File::open(&path).unwrap().allocated_size().unwrap() >= size);
         let files = vec![TorrentFileEntry { index: 0, path: "Content/big.zip".into(), size, offset: 0 }];
-        let report = reclaim_allocated_gaps(td.path(), &files, 8 << 20);
-        assert_eq!(report.scanned, 1);
+        let mut announced = 0;
+        let report = reclaim_allocated_gaps(td.path(), &files, 8 << 20, &mut || announced += 1);
+        assert_eq!((report.scanned, announced), (1, 1));
         assert!(report.freed_bytes > size / 2, "freed {}", report.freed_bytes);
         let mut f = std::fs::File::open(&path).unwrap();
         assert!(f.metadata().unwrap().file_attributes() & 0x200 != 0);
@@ -174,6 +179,6 @@ mod tests {
         f.read_exact(&mut tail).unwrap();
         assert_eq!(&tail, b"tailtail");
         // A second pass finds nothing to do.
-        assert_eq!(reclaim_allocated_gaps(td.path(), &files, 8 << 20), ReclaimReport::default());
+        assert_eq!(reclaim_allocated_gaps(td.path(), &files, 8 << 20, &mut || panic!("nothing to announce")), ReclaimReport::default());
     }
 }

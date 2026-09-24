@@ -35,6 +35,7 @@ import { fetchGames } from "./stores/games";
 import { isOffline, loadNetworkMode } from "./stores/network";
 import { loadThumbnailDir } from "./stores/thumbnails";
 import { refreshInstalledPacks, initContentPackEvents } from "./stores/contentPacks";
+import { initStartupTaskEvents, startupTask } from "./stores/startupTasks";
 import { showToast } from "./stores/toasts";
 import { startTransferPolling } from "./stores/transfer";
 import { NowPlayingBar } from "./components/NowPlayingBar";
@@ -127,6 +128,7 @@ function App() {
     // Before anything else: the backend can start pack installs on its own
     // (Win9x emulator auto-queue), and only this listener makes them visible.
     initContentPackEvents().catch(() => {});
+    initStartupTaskEvents().catch(() => {});
     initDependencyDownloads().catch(() => {});
     initMusic().catch(() => {});
     try {
@@ -134,6 +136,9 @@ function App() {
       if (status.ready) {
         setPhase("ready");
         await loadNetworkMode();
+        // Covers depend on the data dir, not on the torrent session: resolved
+        // first, so the grid never stands cover-less while the engine starts.
+        loadThumbnailDir();
         try {
           await initDownloadManager();
         } catch (e) {
@@ -150,7 +155,6 @@ function App() {
         // root at startup.
         const root = await getConfig("root_folder");
         if (root) { setRootFolder(root); }
-        loadThumbnailDir();
         refreshInstalledPacks();
         // No onCleanup: this runs after an await, where Solid has no owner to
         // attach it to, so it would silently never fire. The poll lives as
@@ -436,6 +440,24 @@ function App() {
           open={showWelcomeModal()}
           onClose={() => setShowWelcomeModal(false)}
         />
+
+        <Show when={startupTask()}>
+          <Portal>
+            <div class="ark-dialog-backdrop" />
+            <div class="ark-dialog-positioner">
+              <div class="ark-dialog-content playlist-dialog" data-testid="startup-task">
+                <h2 class="ark-dialog-title">Tidying up disk space</h2>
+                <p class="ark-dialog-desc">
+                  An earlier version left some downloaded files fully allocated on disk. They are being trimmed once; this takes a moment.
+                </p>
+                <div class="dialog-progress">
+                  <span class="btn-spinner" />
+                  <span>Reclaiming space…</span>
+                </div>
+              </div>
+            </div>
+          </Portal>
+        </Show>
 
         {/* No cancel and no backdrop dismiss: half a move is the one state
             worth avoiding, so the app stays busy until it is done. */}

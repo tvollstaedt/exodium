@@ -197,8 +197,9 @@ fn torrent_root_looks_empty(torrent_root: &Path) -> bool {
 /// (minutes on Windows).
 /// Windows only, once per game root (§21): torrent files an earlier build
 /// wrote without the sparse attribute give their zero ranges back. Runs
-/// before the session opens them.
-async fn reclaim_sparse_gaps(db_state: &DbState, collections: &[&str], data_dir: &str) {
+/// before the session opens them; `startup-task` events frame the wait when
+/// there is one.
+async fn reclaim_sparse_gaps(app: &AppHandle, db_state: &DbState, collections: &[&str], data_dir: &str) {
     if !cfg!(windows) {
         return;
     }
@@ -218,12 +219,23 @@ async fn reclaim_sparse_gaps(db_state: &DbState, collections: &[&str], data_dir:
         .filter_map(|p| TorrentIndex::from_file(&p).ok())
         .collect();
     let scan_root = root.clone();
+    let emitter = app.clone();
     let report = tauri::async_runtime::spawn_blocking(move || {
+        use tauri::Emitter;
         let mut total = crate::torrent::sparse::ReclaimReport::default();
+        let mut announced = false;
         for idx in &indexes {
-            let r = crate::torrent::sparse::reclaim_allocated_gaps(&scan_root, &idx.files, idx.piece_length);
+            let r = crate::torrent::sparse::reclaim_allocated_gaps(&scan_root, &idx.files, idx.piece_length, &mut || {
+                if !announced {
+                    announced = true;
+                    let _ = emitter.emit("startup-task", StartupTask { task: "sparse", state: "started", freed_mb: 0 });
+                }
+            });
             total.scanned += r.scanned;
             total.freed_bytes += r.freed_bytes;
+        }
+        if announced {
+            let _ = emitter.emit("startup-task", StartupTask { task: "sparse", state: "done", freed_mb: total.freed_bytes >> 20 });
         }
         total
     })
@@ -236,6 +248,14 @@ async fn reclaim_sparse_gaps(db_state: &DbState, collections: &[&str], data_dir:
     if let Ok(conn) = db_state.lock() {
         let _ = queries::set_config(&conn, KEY, &stamp);
     }
+}
+
+/// A one-time job at startup the frontend frames with a blocking dialog.
+#[derive(Clone, Serialize)]
+struct StartupTask {
+    task: &'static str,
+    state: &'static str,
+    freed_mb: u64,
 }
 
 fn seed_fastresume_bitvs(
@@ -349,7 +369,7 @@ pub async fn init_download_manager(
     crate::commands::media::prune_video_cache(&data_dir);
     crate::commands::media::prune_music_cache(&data_dir);
     crate::commands::reading::sweep_partial_downloads(&data_dir);
-    reclaim_sparse_gaps(&db_state, &collections, &data_dir).await;
+    reclaim_sparse_gaps(&app, &db_state, &collections, &data_dir).await;
 
     // Offline: no session. The bundled configs are still extracted, and
     // the cleared managers dropped the last Arc to a previous session.

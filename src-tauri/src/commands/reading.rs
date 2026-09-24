@@ -467,8 +467,8 @@ pub async fn open_issue(
             return Err(format!(
                 "Not enough disk space: {} needs {:.1} GB, {:.1} GB free",
                 issue.title,
-                needed as f64 / 1e9,
-                free as f64 / 1e9
+                needed as f64 / (1024.0 * 1024.0 * 1024.0),
+                free as f64 / (1024.0 * 1024.0 * 1024.0)
             ));
         }
     }
@@ -568,8 +568,8 @@ pub async fn install_issue(
             return Err(format!(
                 "Not enough disk space: {} needs {:.1} GB, {:.1} GB free",
                 issue.title,
-                needed as f64 / 1e9,
-                free as f64 / 1e9
+                needed as f64 / (1024.0 * 1024.0 * 1024.0),
+                free as f64 / (1024.0 * 1024.0 * 1024.0)
             ));
         }
     }
