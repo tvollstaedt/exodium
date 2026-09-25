@@ -908,6 +908,63 @@ fn trim_trailing_sep(path: &str) -> String {
     }
 }
 
+/// Rewrite `.\`-relative host paths in the game's own bats to `./`-relative
+/// ones. eXo's multi-disc `run.bat`s `imgmount` images by a host path
+/// relative to DOSBox's cwd, and a backslash is not a separator on POSIX:
+/// the mount fails silently and the game reports no CD drive (§10a).
+/// Windows DOSBox reads both forms, so there the files stay as authored.
+pub(crate) fn rewrite_bat_host_paths(game_dir: &Path, working_dir: &Path) {
+    if cfg!(windows) {
+        return;
+    }
+    for bat in bat_files(game_dir, 2) {
+        let Ok(bytes) = std::fs::read(&bat) else { continue };
+        // Byte-per-char so a CP437 menu survives the round trip unchanged.
+        let content: String = bytes.iter().map(|&b| b as char).collect();
+        if !content.contains(".\\") {
+            continue;
+        }
+        let rewritten = rewrite_host_paths(&content, &|body| {
+            if body.is_empty() {
+                return ".\\".to_string();
+            }
+            let fwd = body.replace('\\', "/");
+            if working_dir.join(&fwd).exists() {
+                trim_trailing_sep(&format!("./{}", fwd))
+            } else {
+                format!(".\\{}", body)
+            }
+        });
+        if rewritten == content {
+            continue;
+        }
+        let out: Vec<u8> = rewritten.chars().map(|c| c as u8).collect();
+        match std::fs::write(&bat, out) {
+            Ok(()) => log::info!("Rewrote host paths in {}", bat.display()),
+            Err(e) => log::warn!("Cannot rewrite host paths in {}: {}", bat.display(), e),
+        }
+    }
+}
+
+fn bat_files(dir: &Path, depth: usize) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir(dir) else { return out };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if depth > 1 {
+                out.extend(bat_files(&path, depth - 1));
+            }
+        } else if path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("bat"))
+        {
+            out.push(path);
+        }
+    }
+    out
+}
+
 /// Rewrite a conf's `.\`-relative host paths to absolute ones. For LP games
 /// (`lp_info`) the EN conf runs verbatim against the overlay mount; only an
 /// incompatible LP layout gets a generated autoexec (§10a).
@@ -1784,6 +1841,13 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
         let dir = torrent_root.join(format!("{}/{}/{}", src_game_prefix, ld, shortcode));
         (shortcode, ld, game_folder, dir)
     });
+    if !shortcode.is_empty() {
+        let game_dir = match &lp_info {
+            Some((_, _, _, dir)) => dir.clone(),
+            None => torrent_root.join(src_game_prefix).join(shortcode),
+        };
+        rewrite_bat_host_paths(&game_dir, &working_dir);
+    }
 
     let ece_bin = resolve_engine(
         game.dosbox_variant.as_deref(),
@@ -2413,6 +2477,39 @@ mod tests {
             "config values stay unquoted: {}",
             sf_line
         );
+    }
+
+    /// C&C's run.bat mounts its discs by a host path relative to DOSBox's
+    /// cwd; only that token changes, guest text and a missing target stay.
+    #[test]
+    fn rewrite_bat_host_paths_turns_existing_targets_into_forward_slashes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let working_dir = tmp.path();
+        let game_dir = working_dir.join("eXoDOS/comcon");
+        fs::create_dir_all(game_dir.join("cd")).unwrap();
+        fs::write(game_dir.join("cd/CD-1.iso"), b"").unwrap();
+        let run_bat = game_dir.join("run.bat");
+        let content = b"@echo off\r\n\
+            imgmount d \".\\eXoDOS\\comcon\\cd\\CD-1.iso\" \".\\eXoDOS\\comcon\\cd\\CD-9.iso\" -t cdrom\r\n\
+            game.exe .\\\r\n\
+            cd \\\r\n\xC9\xCD\xBB\r\n";
+        fs::write(&run_bat, content).unwrap();
+
+        rewrite_bat_host_paths(&game_dir, working_dir);
+        let out = fs::read(&run_bat).unwrap();
+        let has = |needle: &[u8]| out.windows(needle.len()).any(|w| w == needle);
+
+        let shown = String::from_utf8_lossy(&out);
+        assert!(has(b"\"./eXoDOS/comcon/cd/CD-1.iso\""), "existing target rewritten: {}", shown);
+        assert!(has(b"\".\\eXoDOS\\comcon\\cd\\CD-9.iso\""), "missing target untouched: {}", shown);
+        assert!(has(b"game.exe .\\\r\n"), "bare .\\ is guest text: {}", shown);
+        assert!(has(b"cd \\\r\n"), "guest cd stays: {}", shown);
+        assert!(has(b"\xC9\xCD\xBB"), "CP437 bytes survive");
+
+        // Idempotent: a second pass writes nothing.
+        let mtime = fs::metadata(&run_bat).unwrap().modified().unwrap();
+        rewrite_bat_host_paths(&game_dir, working_dir);
+        assert_eq!(fs::metadata(&run_bat).unwrap().modified().unwrap(), mtime);
     }
 
     #[test]

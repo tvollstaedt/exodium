@@ -510,6 +510,17 @@ splits a command's arguments on whitespace. `on_mount_line` limits the added
 quotes to `mount`/`imgmount` arguments - a config PROPERTY is read verbatim,
 so quotes there would land inside the path.
 
+**The same backslash rule reaches into the game's OWN bats.** eXo's
+multi-disc `run.bat` (`@call run` from 1,778 eXoDOS confs) does its
+`imgmount` with `.\eXoDOS\<code>\cd\…` - a host path relative to DOSBox's
+cwd, and on POSIX a backslash is not a separator, so the mount fails and the
+game reports no CD drive. `rewrite_bat_host_paths` rewrites those tokens to
+`./`-relative forward-slash form before every launch, non-Windows only,
+gated on the target existing under the working dir and byte-preserving (a
+CP437 menu must survive). Relative on purpose: an absolute path breaks when
+the data dir moves. The patched bat differs from the archive, so uninstall
+files it under `!save` as user data - harmless, it is already patched.
+
 **A failing DOSBox ECE run on Windows leaves NO diagnostic trace at all, and
 no amount of log plumbing on our side changes that.** Our `dosbox-<id>.log`
 stays empty, and eXo's build writes no `stdout.txt`/`stderr.txt` next to the

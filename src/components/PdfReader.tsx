@@ -1,11 +1,13 @@
 import { createSignal, createEffect, onCleanup, onMount, For, Show } from "solid-js";
-import * as pdfjs from "pdfjs-dist";
-import workerSrc from "pdfjs-dist/build/pdf.worker.mjs?url";
+import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
+import workerSrc from "pdfjs-dist/legacy/build/pdf.worker.mjs?url";
 
 /** Page rendering for the Lesesaal and for game manuals. The webview's own
  *  PDF viewer is not an option: WebKitGTK has none at all, so a Linux user
  *  saw a blank iframe (#30). Rendering to canvas with pdf.js is the same
- *  picture on all three platforms. */
+ *  picture on all three platforms. The LEGACY build, because WKWebView is the
+ *  system WebKit: the modern one calls Promise.try and Promise.withResolvers
+ *  unpolyfilled, so every document fails on a Mac below macOS 15.2. */
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerSrc;
 

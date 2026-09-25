@@ -6,8 +6,8 @@ import { render } from "solid-js/web";
 const pdf = vi.hoisted(() => ({
   getDocument: vi.fn(() => ({ promise: new Promise(() => {}), destroy: vi.fn(async () => {}) })),
 }));
-vi.mock("pdfjs-dist", () => ({ GlobalWorkerOptions: {}, getDocument: pdf.getDocument }));
-vi.mock("pdfjs-dist/build/pdf.worker.mjs?url", () => ({ default: "pdf.worker.mjs" }));
+vi.mock("pdfjs-dist/legacy/build/pdf.mjs", () => ({ GlobalWorkerOptions: {}, getDocument: pdf.getDocument }));
+vi.mock("pdfjs-dist/legacy/build/pdf.worker.mjs?url", () => ({ default: "pdf.worker.mjs" }));
 
 import { PdfReader, documentOptions, evictable, nextToRender } from "./PdfReader";
 
