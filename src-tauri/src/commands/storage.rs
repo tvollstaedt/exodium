@@ -134,6 +134,30 @@ fn classify(rel: &[&str], in_root: bool, size: u64) -> (Category, Option<String>
     }
 }
 
+/// A file a sync client (OneDrive, Dropbox, Phone Link, iCloud) has evicted
+/// to a placeholder: opening it downloads it, and Windows names the app that
+/// did. Such a file is measured by its stat and never opened.
+#[cfg(windows)]
+fn is_cloud_placeholder(meta: &std::fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const OFFLINE: u32 = 0x1000;
+    const RECALL_ON_OPEN: u32 = 0x40000;
+    const RECALL_ON_DATA_ACCESS: u32 = 0x400000;
+    meta.file_attributes() & (OFFLINE | RECALL_ON_OPEN | RECALL_ON_DATA_ACCESS) != 0
+}
+
+#[cfg(target_os = "macos")]
+fn is_cloud_placeholder(meta: &std::fs::Metadata) -> bool {
+    use std::os::macos::fs::MetadataExt;
+    const SF_DATALESS: u32 = 0x4000_0000;
+    meta.st_flags() & SF_DATALESS != 0
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+fn is_cloud_placeholder(_meta: &std::fs::Metadata) -> bool {
+    false
+}
+
 #[cfg(unix)]
 fn allocated(meta: &std::fs::Metadata, _path: &Path, _maybe_sparse: bool) -> u64 {
     use std::os::unix::fs::MetadataExt;
@@ -174,13 +198,19 @@ fn account(data_dir: &Path, root: &Path, entry: &walkdir::DirEntry, tally: &mut 
     let comps: Vec<String> = rel.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
     let refs: Vec<&str> = comps.iter().map(String::as_str).collect();
     let (mut cat, mut key) = classify(&refs, in_root, meta.len());
+    // Only Exodium's own trees are ever opened: a data folder that is also
+    // someone's home or Dropbox holds cloud placeholders, and one open per
+    // file downloaded a user's phone into it (#35).
+    let may_open = refs.first().is_some_and(|c| *c == "eXo" || c.eq_ignore_ascii_case("content"))
+        && !is_cloud_placeholder(&meta);
     // A piece-sized fragment left by a neighbour's download (§16) is a zip
     // by name only.
-    if cat == Category::Archives && real_archive_bytes(path).is_none() {
+    if cat == Category::Archives && may_open && real_archive_bytes(path).is_none() {
         cat = Category::Other;
         key = None;
     }
-    let maybe_sparse = matches!(cat, Category::Archives | Category::Extras | Category::PackArchives | Category::Other | Category::Support);
+    let maybe_sparse = may_open
+        && matches!(cat, Category::Archives | Category::Extras | Category::PackArchives | Category::Other | Category::Support);
     *tally.0.entry(cat).or_default() += allocated(&meta, path, maybe_sparse);
     if let Some(k) = key {
         tally.1.entry(cat).or_default().insert(k);

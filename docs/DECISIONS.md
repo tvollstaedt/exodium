@@ -428,3 +428,9 @@
 - Verworfen: eigene Polyfills fuer `Promise.try`/`withResolvers`/`toBase64` (der Worker ist ein eigener Kontext, dort muessten sie ebenfalls hin, und die Liste waechst mit jedem pdf.js-Release).
 - Grund: Reddit-Meldung, Manuals und Magazine laden auf dem Mac nicht. Der Modern-Build ruft `Promise.withResolvers` (Safari 17.4) und `Promise.try` (Safari 18.2) ungeguardet, letzteres im MessageHandler - unter macOS vor 15.2 scheitert jedes Dokument. WKWebView ist das System-WebKit, Tauri-Minimum ist 10.13. Nachgestellt in Node mit geloeschten APIs: Modern `TypeError: Promise.withResolvers is not a function`, Legacy oeffnet 246 Seiten.
 - Gotcha: pdf.js nennt fuer den Legacy-Build offiziell Safari 18+; die core-js-Polyfills reichen in der Praxis weiter, versprochen ist es nicht.
+
+## 2026-09-25 - Storage Overview oeffnet nur noch Exodiums eigene Baeume und nie Cloud-Platzhalter
+- Entscheidung: `account` oeffnet eine Datei nur, wenn sie unter `eXo/` oder `content/` liegt und kein Cloud-Platzhalter ist (Windows: Attribute `OFFLINE`/`RECALL_ON_OPEN`/`RECALL_ON_DATA_ACCESS`; macOS: `SF_DATALESS`). Alles andere wird per stat gemessen; ein nicht pruefbares Zip gilt als Archiv.
+- Verworfen: Datenordner im Setup auf Home/OneDrive/Dropbox pruefen (sinnvoll, aber ein zweites Thema - der Walk darf so oder so nichts hydrieren); Walk auf Game-Root und `content/` beschraenken (der Tab soll zeigen, was der Ordner sonst noch traegt).
+- Grund: Issue #35, Windows 11: Storage Overview loeste den Toast "Exodium is downloading from Patrick's S24 Ultra, 14 files" aus. Datenordner enthielt Phone-Link-/Dropbox-Platzhalter, die als `Other` in der `maybe_sparse`-Liste standen, und `allocated()` braucht auf Windows ein Handle - ein `File::open` pro Datei hydriert jeden Platzhalter.
+- Gotcha: Der Windows-Zweig ist auf dem Mac nicht kompilierbar (kein Target); CI prueft ihn. Ohne Cloud-Provider gibt es keinen Test auf Attribut-Ebene.
