@@ -912,11 +912,8 @@ fn trim_trailing_sep(path: &str) -> String {
 /// ones. eXo's multi-disc `run.bat`s `imgmount` images by a host path
 /// relative to DOSBox's cwd, and a backslash is not a separator on POSIX:
 /// the mount fails silently and the game reports no CD drive (§10a).
-/// Windows DOSBox reads both forms, so there the files stay as authored.
+/// Windows DOSBox reads both forms, so the caller skips it there.
 pub(crate) fn rewrite_bat_host_paths(game_dir: &Path, working_dir: &Path) {
-    if cfg!(windows) {
-        return;
-    }
     for bat in bat_files(game_dir, 2) {
         let Ok(bytes) = std::fs::read(&bat) else { continue };
         // Byte-per-char so a CP437 menu survives the round trip unchanged.
@@ -1841,7 +1838,7 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
         let dir = torrent_root.join(format!("{}/{}/{}", src_game_prefix, ld, shortcode));
         (shortcode, ld, game_folder, dir)
     });
-    if !shortcode.is_empty() {
+    if !shortcode.is_empty() && !cfg!(windows) {
         let game_dir = match &lp_info {
             Some((_, _, _, dir)) => dir.clone(),
             None => torrent_root.join(src_game_prefix).join(shortcode),
