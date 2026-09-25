@@ -1838,6 +1838,32 @@ sees, so the fastresume ledger stays valid and real data (an imported eXo
 install, a fetched tail piece) survives - which is why it scans content
 instead of trusting the selection.
 
+### 22. A network share as data dir: no full-tree walks, no blocking on the runtime
+
+A user's eXoDOS library on an NFS share (Unraid) took ten minutes to reach
+the grid and then answered no click. Measured in the vm-lab (loopback NFS,
+`sync` export, 1 ms per round trip, 129k files; `jobs/exodium-nfs.sh`): the
+config extraction alone was 598 s (30,859 files, ~19 ms each), the
+placeholder cleanup 345 s (two walks over the whole root), the first app
+start 875 s - the same passes take 3.5 s, 0.5 s and 3 s on local disk. The
+install scan is cheap (0.3 s: READDIRPLUS caches attributes). Three rules
+follow, and `examples/nfs_probe.rs` measures each of them:
+
+- **Config extraction lays down only what is missing** (`extract_missing_entries`):
+  presence is decided per game directory from ONE listing of its parent,
+  never per file. An imported eXo tree keeps its own confs untouched.
+- **Placeholder cleanup reads only the directories that hold torrent files**
+  (derived from the keep list) - a placeholder never sits anywhere else, and
+  a walk of the root pays one round trip per file of every extracted game.
+- **Filesystem passes leave the runtime workers**: `block_in_place` around
+  the scan and the extraction, `spawn_blocking` for the cleanup. Blocking a
+  tokio worker is invisible on an SSD and stalls every `invoke` on a share -
+  that was the "Play does nothing".
+
+After the three: extraction 0.2 s, cleanup 0.1 s, first start 20 s on the
+same share. Not addressed: a game directory counts as complete once it
+exists, so an extraction that died halfway is not resumed.
+
 ## Conventions
 
 - **Every Tauri command that touches the DB, filesystem, or network MUST be

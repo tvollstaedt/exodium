@@ -302,7 +302,7 @@ fn is_year_dir(p: &Path) -> bool {
 /// `in_flight`: torrent-relative paths of archives the live session is still
 /// downloading. librqbit writes them sparse, so they reach full length long
 /// before they are complete - size alone would confirm a half-fetched game.
-pub(crate) fn scan_installed_games_with_db(
+pub fn scan_installed_games_with_db(
     db: &std::sync::Mutex<rusqlite::Connection>,
     data_dir: &str,
     adopt_from_disk: bool,
@@ -689,7 +689,9 @@ pub async fn scan_installed_games(
     }
     let in_flight: std::collections::HashSet<String> =
         pending.into_iter().filter(|d| !d.complete).map(|d| d.rel_path).collect();
-    scan_installed_games_with_db(&db_state.0, &data_dir, adopt.unwrap_or(false), &in_flight)
+    // One stat per game directory; on a network share that is seconds the
+    // runtime workers must not spend.
+    tokio::task::block_in_place(|| scan_installed_games_with_db(&db_state.0, &data_dir, adopt.unwrap_or(false), &in_flight))
 }
 
 #[cfg(test)]

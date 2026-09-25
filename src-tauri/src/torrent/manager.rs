@@ -10,7 +10,6 @@ use librqbit::{
 use serde::Serialize;
 use tokio::sync::RwLock;
 
-use walkdir::WalkDir;
 
 /// Upload cap applied when sharing is off. Not zero: librqbit throttles rather
 /// than blocks, and a hard zero would stall the handshakes that keep downloads
@@ -91,50 +90,48 @@ fn to_long_path(p: &Path) -> String {
     p.to_string_lossy().into_owned()
 }
 
-/// Remove 0-byte zips under `root` that no enabled torrent declares.
-/// `keep_paths` must be the FULL file list of every collection sharing the
-/// root, not the selection: librqbit creates a placeholder per declared file
-/// and its fastresume ledger marks shared pieces "have", so deleting a
-/// tracked placeholder leaves a file at "100%" that never appears on disk.
-fn cleanup_placeholder_files(root: &Path, keep_paths: &[String]) -> std::io::Result<()> {
+/// Remove 0-byte zips that no enabled torrent declares. `keep_paths` must
+/// be the FULL file list of every collection sharing the root, not the
+/// selection: librqbit creates a placeholder per declared file and its
+/// fastresume ledger marks shared pieces "have", so deleting a tracked
+/// placeholder leaves a file at "100%" that never appears on disk.
+/// Only the directories that hold torrent files are read - a placeholder
+/// never sits anywhere else, and a walk of the whole root is one round
+/// trip per file on a network share (§22).
+pub fn cleanup_placeholder_files(root: &Path, keep_paths: &[String]) -> std::io::Result<()> {
+    let keep: HashSet<&str> = keep_paths.iter().map(String::as_str).collect();
+    let dirs: std::collections::BTreeSet<PathBuf> = keep_paths
+        .iter()
+        .filter_map(|p| Path::new(p).parent().map(Path::to_path_buf))
+        .collect();
     let mut removed = 0;
     let mut kept = 0;
-    for entry in WalkDir::new(root).into_iter().filter_map(|e| e.ok()) {
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
+    // Deepest first, so a directory emptied here is gone before its parent
+    // is tried.
+    for rel_dir in dirs.iter().rev() {
+        let dir = root.join(rel_dir);
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else { continue };
+            if Path::new(name).extension().is_none_or(|e| e != "zip") {
+                continue;
+            }
+            let Ok(meta) = entry.metadata() else { continue };
+            if !meta.is_file() || meta.len() != 0 {
+                continue;
+            }
+            let rel = rel_dir.join(name).to_string_lossy().replace('\\', "/");
+            if keep.contains(rel.as_str()) {
+                kept += 1;
+                continue;
+            }
+            log::info!("Cleanup: deleting orphan 0-byte placeholder {}", entry.path().display());
+            let _ = std::fs::remove_file(entry.path());
+            removed += 1;
         }
-        let meta = match path.metadata() {
-            Ok(m) => m,
-            Err(_) => continue,
-        };
-        if meta.len() != 0 {
-            continue;
-        }
-        if path.extension().map(|e| e != "zip").unwrap_or(true) {
-            continue;
-        }
-        // Forward-slash form of the absolute path on disk. `keep_paths`
-        // entries are torrent-relative ("eXoDOS/Content/.../Foo.zip"), so a
-        // suffix match is enough - and it is slash-direction-agnostic now.
-        let path_fwd = path.to_string_lossy().replace('\\', "/");
-        let in_torrent = keep_paths.iter().any(|sp| path_fwd.ends_with(sp));
-        if in_torrent {
-            // No per-file logging: this fires ~14k times per torrent add
-            // (observed 14,616 lines in one field session) - the summary
-            // line below carries the counts.
-            kept += 1;
-            continue;
-        }
-        log::info!("Cleanup: deleting orphan 0-byte placeholder {}", path.display());
-        let _ = std::fs::remove_file(path);
-        removed += 1;
-    }
-    // Remove empty directories left behind
-    for entry in WalkDir::new(root).contents_first(true).into_iter().filter_map(|e| e.ok()) {
-        let path = entry.path();
-        if path.is_dir() && path != root {
-            let _ = std::fs::remove_dir(path);
+        if dir != root {
+            let _ = std::fs::remove_dir(&dir);
         }
     }
     log::info!(
@@ -619,7 +616,10 @@ impl DownloadManager {
                 });
             tokio::spawn(async move {
                 tokio::time::sleep(Duration::from_secs(10)).await;
-                if let Err(e) = cleanup_placeholder_files(&root, &keep_paths) {
+                // Off the runtime workers: on a network share this is
+                // seconds of blocking I/O, and every command shares them.
+                let result = tokio::task::spawn_blocking(move || cleanup_placeholder_files(&root, &keep_paths)).await;
+                if let Err(e) = result.unwrap_or_else(|e| Err(std::io::Error::other(e))) {
                     log::warn!("Failed to clean up placeholder files: {}", e);
                 }
             });
@@ -945,5 +945,34 @@ mod tests {
         let mut untouched = vec![0xFFu8; 2];
         clear_file_pieces(&mut untouched, 100, 0, 64);
         assert_eq!(untouched, vec![0xFF, 0xFF]);
+    }
+}
+
+#[cfg(test)]
+mod placeholder_cleanup_tests {
+    use super::cleanup_placeholder_files;
+
+    /// Only the directories that hold torrent files are read: a 0-byte zip
+    /// inside a game directory is never a placeholder and must survive.
+    #[test]
+    fn removes_orphans_in_torrent_dirs_only() {
+        let root = tempfile::tempdir().unwrap();
+        let r = root.path();
+        std::fs::create_dir_all(r.join("eXo/eXoDOS/GAME")).unwrap();
+        std::fs::create_dir_all(r.join("eXo/eXoWin9x/1995")).unwrap();
+        std::fs::write(r.join("eXo/eXoDOS/Tracked.zip"), b"").unwrap();
+        std::fs::write(r.join("eXo/eXoDOS/Orphan.zip"), b"").unwrap();
+        std::fs::write(r.join("eXo/eXoDOS/Real.zip"), b"PK").unwrap();
+        std::fs::write(r.join("eXo/eXoDOS/GAME/save.zip"), b"").unwrap();
+        std::fs::write(r.join("eXo/eXoWin9x/1995/Gone.zip"), b"").unwrap();
+        let keep = vec!["eXo/eXoDOS/Tracked.zip".to_string(), "eXo/eXoWin9x/1995/Kept.zip".to_string()];
+
+        cleanup_placeholder_files(r, &keep).unwrap();
+
+        assert!(r.join("eXo/eXoDOS/Tracked.zip").exists());
+        assert!(!r.join("eXo/eXoDOS/Orphan.zip").exists());
+        assert!(r.join("eXo/eXoDOS/Real.zip").exists());
+        assert!(r.join("eXo/eXoDOS/GAME/save.zip").exists());
+        assert!(!r.join("eXo/eXoWin9x/1995").exists(), "an emptied torrent dir goes");
     }
 }

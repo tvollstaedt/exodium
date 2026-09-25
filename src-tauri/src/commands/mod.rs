@@ -48,3 +48,10 @@ pub use library::{game_name_from_app_path, reset_game_data, scan_installed_games
 pub use assets::{get_game_metadata, get_poster_dir, get_preview_dir};
 pub use paths::{bundled_metadata_dir, init_log_dir, init_resource_dir};
 pub use collections::{collection_base_id, CollectionDef, COLLECTION_MAP};
+// Hot paths the nfs_probe example times against a slow filesystem.
+#[doc(hidden)]
+pub use library::scan_installed_games_with_db;
+#[doc(hidden)]
+pub use paths::{load_root_folder, set_root_folder};
+#[doc(hidden)]
+pub use setup::extract_bundled_configs;

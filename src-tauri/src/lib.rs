@@ -12,6 +12,8 @@ pub use commands::game_name_from_app_path;
 pub use commands::torrent_search_names;
 pub use commands::paths::game_root;
 pub use commands::{collection_base_id, CollectionDef, COLLECTION_MAP};
+#[doc(hidden)]
+pub use commands::{bundled_metadata_dir, extract_bundled_configs, load_root_folder, scan_installed_games_with_db, set_root_folder};
 
 use std::path::Path;
 use std::sync::Mutex;
@@ -20,7 +22,7 @@ use tauri::Manager;
 use tokio::sync::RwLock;
 
 use commands::{
-    bundled_metadata_dir, cancel_content_pack_install, cancel_download,
+    cancel_content_pack_install, cancel_download,
     download_game, factory_reset, get_available_collections, get_config,
     get_content_pack_progress, get_default_data_dir, get_download_progress, get_game,
     data_dir_is_empty, get_game_metadata, get_game_settings, get_log_dir, get_poster_dir,

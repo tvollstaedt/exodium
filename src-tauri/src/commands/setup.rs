@@ -374,7 +374,7 @@ pub async fn init_download_manager(
     // Offline: no session. The bundled configs are still extracted, and
     // the cleared managers dropped the last Arc to a previous session.
     if is_offline(&db_state.0) {
-        extract_all_bundled_configs(&collections, metadata_dir.as_ref(), &data_path);
+        tokio::task::block_in_place(|| extract_all_bundled_configs(&collections, metadata_dir.as_ref(), &data_path));
         log::info!("Offline mode: torrent engine not started (data_dir: {})", data_dir);
         return Ok(false);
     }
@@ -427,7 +427,9 @@ pub async fn init_download_manager(
                         Err(e) => log::warn!("Failed to compute infohash for {}: {}", col.id, e),
                     }
 
-                    extract_bundled_configs(col, metadata_dir.as_ref(), &mgr.torrent_root());
+                    // Blocking I/O on a runtime worker starves every other
+                    // command while it runs; minutes on a network share.
+                    tokio::task::block_in_place(|| extract_bundled_configs(col, metadata_dir.as_ref(), &mgr.torrent_root()));
                     log::info!("Initialized download manager: {}", col.id);
                     new_managers.push((col.id.to_string(), Arc::new(mgr)));
                 }
@@ -472,7 +474,7 @@ pub async fn init_download_manager(
 
 /// Extract a collection's bundled config zip into the root once (marker
 /// file). Both network modes: offline installs need the confs too.
-fn extract_bundled_configs(col: &CollectionDef, metadata_dir: Option<&PathBuf>, torrent_root: &Path) {
+pub fn extract_bundled_configs(col: &CollectionDef, metadata_dir: Option<&PathBuf>, torrent_root: &Path) {
     let (Some(cfg_zip), Some(md)) = (col.configs_zip, metadata_dir) else {
         return;
     };
@@ -490,9 +492,10 @@ fn extract_bundled_configs(col: &CollectionDef, metadata_dir: Option<&PathBuf>, 
     let extracted = std::fs::File::open(&cfg_path)
         .map_err(|e| e.to_string())
         .and_then(|f| zip::ZipArchive::new(f).map_err(|e| e.to_string()))
-        .and_then(|mut a| a.extract(torrent_root).map_err(|e| e.to_string()));
+        .and_then(|mut a| extract_missing_entries(&mut a, torrent_root));
     match extracted {
-        Ok(()) => {
+        Ok(n) => {
+            log::info!("Extracted {} missing {} config file(s)", n, col.id);
             if let Err(e) = std::fs::write(&lock, "") {
                 log::warn!("Could not write configs lock for {}: {}", col.id, e);
             }
@@ -502,6 +505,61 @@ fn extract_bundled_configs(col: &CollectionDef, metadata_dir: Option<&PathBuf>, 
             col.id, e
         ),
     }
+}
+
+/// Unpack only the entries whose game directory is absent. eXo lays a
+/// game's config files down as a unit, so a present directory already
+/// carries them - an imported install has all of them, and its own edits
+/// must survive. The game directory is the entry's ancestor at the most
+/// common parent depth (`!dos/<shortcode>`; a per-game subfolder is one
+/// level deeper), and presence is read from ONE listing of its parent,
+/// never per file: on a network share every check is a round trip (§22).
+fn extract_missing_entries<R: std::io::Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    root: &Path,
+) -> Result<usize, String> {
+    let mut depth_counts: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+    for name in archive.file_names().filter(|n| !n.ends_with('/')) {
+        let depth = Path::new(name).parent().map(|p| p.components().count()).unwrap_or(0);
+        *depth_counts.entry(depth).or_default() += 1;
+    }
+    let unit_depth = depth_counts.iter().max_by_key(|(d, n)| (**n, **d)).map(|(d, _)| *d).unwrap_or(0);
+    let mut listed: std::collections::HashMap<PathBuf, std::collections::HashSet<std::ffi::OsString>> =
+        std::collections::HashMap::new();
+    let mut present = |parent: &Path| -> bool {
+        let (Some(grandparent), Some(name)) = (parent.parent(), parent.file_name()) else {
+            return false;
+        };
+        listed
+            .entry(grandparent.to_path_buf())
+            .or_insert_with(|| {
+                std::fs::read_dir(root.join(grandparent))
+                    .map(|it| it.flatten().map(|e| e.file_name()).collect())
+                    .unwrap_or_default()
+            })
+            .contains(name)
+    };
+    let mut written = 0;
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
+        if entry.is_dir() {
+            continue;
+        }
+        let Some(rel) = entry.enclosed_name() else { continue };
+        let parent = rel.parent().unwrap_or(Path::new(""));
+        let unit: PathBuf = parent.components().take(unit_depth.max(1)).collect();
+        if !unit.as_os_str().is_empty() && present(&unit) {
+            continue;
+        }
+        let dest = root.join(&rel);
+        if let Some(dir) = dest.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        }
+        let mut out = std::fs::File::create(&dest).map_err(|e| format!("{}: {e}", dest.display()))?;
+        std::io::copy(&mut entry, &mut out).map_err(|e| format!("{}: {e}", dest.display()))?;
+        written += 1;
+    }
+    Ok(written)
 }
 
 /// Push the stored seeding consent and caps into a fresh session, which
@@ -1309,7 +1367,7 @@ pub async fn setup_from_local(
     // (init_download_manager handles the bundled configs zip for fresh installs.)
 
     // Scan the existing eXoDOS tree to mark games that are already on disk as installed.
-    let installed_count = scan_installed_games_with_db(&db_state.0, &data_dir, true, &Default::default())
+    let installed_count = tokio::task::block_in_place(|| scan_installed_games_with_db(&db_state.0, &data_dir, true, &Default::default()))
         .unwrap_or_else(|e| { log::warn!("scan_installed_games failed: {}", e); 0 });
     log::info!("Import from local complete: {} games, {} installed, data_dir={}", count, installed_count, data_dir);
 
@@ -1558,5 +1616,54 @@ mod data_dir_tests {
         ))
         .unwrap();
         assert!(empty);
+    }
+}
+
+#[cfg(test)]
+mod config_extraction_tests {
+    use super::extract_missing_entries;
+    use std::io::Write;
+
+    fn archive() -> zip::ZipArchive<std::io::Cursor<Vec<u8>>> {
+        let mut buf = std::io::Cursor::new(Vec::new());
+        {
+            let mut z = zip::ZipWriter::new(&mut buf);
+            let opts = zip::write::SimpleFileOptions::default();
+            for (name, body) in [
+                ("eXo/eXoDOS/!dos/A/dosbox.conf", "bundled A"),
+                ("eXo/eXoDOS/!dos/A/A.bat", "bat"),
+                ("eXo/eXoDOS/!dos/A/extra/game.cfg", "nested"),
+                ("eXo/eXoDOS/!dos/B/dosbox.conf", "bundled B"),
+            ] {
+                z.start_file(name, opts).unwrap();
+                z.write_all(body.as_bytes()).unwrap();
+            }
+            z.finish().unwrap();
+        }
+        buf.set_position(0);
+        zip::ZipArchive::new(buf).unwrap()
+    }
+
+    #[test]
+    fn fresh_root_gets_every_entry() {
+        let root = tempfile::tempdir().unwrap();
+        assert_eq!(extract_missing_entries(&mut archive(), root.path()).unwrap(), 4);
+        assert_eq!(std::fs::read_to_string(root.path().join("eXo/eXoDOS/!dos/B/dosbox.conf")).unwrap(), "bundled B");
+    }
+
+    /// An imported install keeps its own configs: a game directory that is
+    /// there is not touched, only the missing one is laid down.
+    #[test]
+    fn present_directories_are_left_alone() {
+        let root = tempfile::tempdir().unwrap();
+        let a = root.path().join("eXo/eXoDOS/!dos/A");
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::write(a.join("dosbox.conf"), "user edit").unwrap();
+
+        assert_eq!(extract_missing_entries(&mut archive(), root.path()).unwrap(), 1);
+        assert_eq!(std::fs::read_to_string(a.join("dosbox.conf")).unwrap(), "user edit");
+        assert!(!a.join("A.bat").exists(), "a present directory is taken as complete");
+        assert!(!a.join("extra").exists(), "a nested entry belongs to its game directory, not its own");
+        assert!(root.path().join("eXo/eXoDOS/!dos/B/dosbox.conf").exists());
     }
 }
