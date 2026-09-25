@@ -1860,7 +1860,18 @@ follow, and `examples/nfs_probe.rs` measures each of them:
   tokio worker is invisible on an SSD and stalls every `invoke` on a share -
   that was the "Play does nothing".
 
-After the three: extraction 0.2 s, cleanup 0.1 s, first start 20 s on the
+**A listing without attributes poisons the directory for the pass that
+follows.** Linux's NFS client answers a plain `read_dir` with READDIR and
+caches the pages; a later `is_dir()`/`metadata()` per entry then costs one
+GETATTR each, because the cached pages carry none. A pass that stats as it
+lists gets READDIRPLUS pages instead (the client notices and switches).
+Measured: the extraction's one attribute-less listing of the game root made
+the startup scan right behind it 17 s (7,600 RPCs) instead of 0.5 s. So no
+pass may list a directory another pass is about to stat through - the
+extraction now writes eXo's one shallow file unconditionally rather than
+listing `eXo/eXoDOS` to decide it.
+
+After the three: extraction 0.2 s, cleanup 0.1 s, first start 3 s on the
 same share. Not addressed: a game directory counts as complete once it
 exists, so an extraction that died halfway is not resumed.
 

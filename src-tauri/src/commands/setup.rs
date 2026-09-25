@@ -514,6 +514,9 @@ pub fn extract_bundled_configs(col: &CollectionDef, metadata_dir: Option<&PathBu
 /// common parent depth (`!dos/<shortcode>`; a per-game subfolder is one
 /// level deeper), and presence is read from ONE listing of its parent,
 /// never per file: on a network share every check is a round trip (§22).
+/// An entry above that depth (eXo's `!create_update_index.bat`) is always
+/// written: deciding it would list the game root without attributes, and
+/// the scan that follows would then pay one GETATTR per entry there.
 fn extract_missing_entries<R: std::io::Read + std::io::Seek>(
     archive: &mut zip::ZipArchive<R>,
     root: &Path,
@@ -547,9 +550,11 @@ fn extract_missing_entries<R: std::io::Read + std::io::Seek>(
         }
         let Some(rel) = entry.enclosed_name() else { continue };
         let parent = rel.parent().unwrap_or(Path::new(""));
-        let unit: PathBuf = parent.components().take(unit_depth.max(1)).collect();
-        if !unit.as_os_str().is_empty() && present(&unit) {
-            continue;
+        if parent.components().count() >= unit_depth {
+            let unit: PathBuf = parent.components().take(unit_depth.max(1)).collect();
+            if present(&unit) {
+                continue;
+            }
         }
         let dest = root.join(&rel);
         if let Some(dir) = dest.parent() {
@@ -1634,6 +1639,7 @@ mod config_extraction_tests {
                 ("eXo/eXoDOS/!dos/A/A.bat", "bat"),
                 ("eXo/eXoDOS/!dos/A/extra/game.cfg", "nested"),
                 ("eXo/eXoDOS/!dos/B/dosbox.conf", "bundled B"),
+                ("eXo/eXoDOS/!dos/!index.bat", "shallow"),
             ] {
                 z.start_file(name, opts).unwrap();
                 z.write_all(body.as_bytes()).unwrap();
@@ -1647,7 +1653,7 @@ mod config_extraction_tests {
     #[test]
     fn fresh_root_gets_every_entry() {
         let root = tempfile::tempdir().unwrap();
-        assert_eq!(extract_missing_entries(&mut archive(), root.path()).unwrap(), 4);
+        assert_eq!(extract_missing_entries(&mut archive(), root.path()).unwrap(), 5);
         assert_eq!(std::fs::read_to_string(root.path().join("eXo/eXoDOS/!dos/B/dosbox.conf")).unwrap(), "bundled B");
     }
 
@@ -1660,7 +1666,7 @@ mod config_extraction_tests {
         std::fs::create_dir_all(&a).unwrap();
         std::fs::write(a.join("dosbox.conf"), "user edit").unwrap();
 
-        assert_eq!(extract_missing_entries(&mut archive(), root.path()).unwrap(), 1);
+        assert_eq!(extract_missing_entries(&mut archive(), root.path()).unwrap(), 2, "B and the shallow bat");
         assert_eq!(std::fs::read_to_string(a.join("dosbox.conf")).unwrap(), "user edit");
         assert!(!a.join("A.bat").exists(), "a present directory is taken as complete");
         assert!(!a.join("extra").exists(), "a nested entry belongs to its game directory, not its own");
