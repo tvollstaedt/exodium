@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.15.1 - 2026-09-25
+
+### Fixed
+
+- macOS and Linux: multi-disc games could not find their CD. eXo's disc menu
+  mounts images by a Windows-style path, which is now rewritten before launch.
+- macOS: manuals and magazines failed to open on macOS versions before 15.2.
+
 ## 0.15.0 - 2026-09-24
 
 ### Added
