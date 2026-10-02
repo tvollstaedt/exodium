@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.15.2 - 2026-10-02
+
+### Added
+
+- Settings → General → Sound: a switch for the preview video sound.
+
+### Changed
+
+- Dialogs, the game panel and the download overlay no longer blur what is
+  behind them, and endless animations pause while the window has no focus.
+  This cuts the GPU load, most of all on integrated graphics.
+
+### Fixed
+
+- Linux: eXoWin3x games could not be launched ("Game config not found"). The
+  catalogue spells the folder with a different capitalization than the
+  download.
+- Windows: the Storage Overview opened files that only exist in the cloud
+  (Dropbox, Phone Link) and started downloading them. It now stays inside
+  Exodium's own folders and never touches such files.
+- Network shares: checking for cover and content packs no longer blocks the
+  rest of the app while the share answers slowly.
+
 ## 0.15.1 - 2026-09-25
 
 ### Fixed
