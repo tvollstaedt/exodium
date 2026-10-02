@@ -1971,7 +1971,6 @@ body {
   justify-content: center;
   gap: 10px;
   background: rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(2px);
   z-index: 2;
   border-radius: inherit;
 }
@@ -2003,7 +2002,6 @@ body {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
   z-index: 200;
   animation: modalBackdropIn 0.22s cubic-bezier(0.2, 0.7, 0.3, 1);
 }
@@ -2033,17 +2031,18 @@ body {
   to { opacity: 1; }
 }
 
-/* Shared modal entry animations - backdrop fades + ramps blur, content
-   fades and lifts a touch (less jarring than instantaneous appearance).
-   Used by ark dialog, manual viewer, lightbox, game settings. */
+/* Shared modal entry animations - backdrop fades, content fades and lifts a
+   touch (less jarring than instantaneous appearance). No blur anywhere in
+   the chain: a backdrop-filter is re-evaluated every frame that anything
+   beneath it animates. Used by ark dialog, manual viewer, lightbox, game settings. */
 @keyframes modalBackdropIn {
-  from { opacity: 0; backdrop-filter: blur(0); }
+  from { opacity: 0; }
   to   { opacity: 1; }
 }
 
 @keyframes modalContentIn {
-  from { opacity: 0; transform: translateY(6px) scale(0.98); filter: blur(2px); }
-  to   { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 /* Exit pair for dialogs that stay mounted during close (`.closing` is set
@@ -2060,7 +2059,7 @@ body {
 
 @keyframes modalBackdropOut {
   from { opacity: 1; }
-  to   { opacity: 0; backdrop-filter: blur(0); }
+  to   { opacity: 0; }
 }
 
 @keyframes modalContentOut {
@@ -3039,7 +3038,6 @@ body {
   inset: 0;
   z-index: 149;
   background: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(3px);
   animation: modalBackdropIn 0.22s cubic-bezier(0.2, 0.7, 0.3, 1);
 }
 
@@ -3834,7 +3832,6 @@ body {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
   z-index: 300;
   animation: modalBackdropIn 0.22s cubic-bezier(0.2, 0.7, 0.3, 1);
 }
@@ -4035,7 +4032,6 @@ body {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.8);
-  backdrop-filter: blur(6px);
   z-index: 300;
   animation: modalBackdropIn 0.22s cubic-bezier(0.2, 0.7, 0.3, 1);
 }
@@ -4183,7 +4179,6 @@ body {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.75);
-  backdrop-filter: blur(5px);
   z-index: 300;
   animation: modalBackdropIn 0.22s cubic-bezier(0.2, 0.7, 0.3, 1);
 }
@@ -4409,7 +4404,6 @@ body {
   align-items: center;
   justify-content: center;
   background: rgba(10, 10, 15, 0.85);
-  backdrop-filter: blur(4px);
 }
 
 .reset-overlay-card {
@@ -5096,12 +5090,24 @@ body {
 /* ── Linux software rendering ──────────────────────────────────────────────
    Linux runs WebKit's fallback renderer (the DMA-BUF path aborts with a
    Wayland protocol error on NVIDIA - see lib.rs), where backdrop blur is
-   recomputed on the CPU every frame; two dialogs even ANIMATE the blur, and
-   transitions visibly stutter. The overlays keep their rgba dim - only the
-   blur goes. Class set in App.tsx at mount. */
+   recomputed on the CPU every frame. Only the small chips (preview controls,
+   back-to-top) still blur, and this class drops that. Class set in App.tsx
+   at mount. */
 html.soft-render * {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
+}
+
+/* ── Window without focus ──────────────────────────────────────────────────
+   A game in front or another app on top: the endless animations stop, the
+   transitions and one-shot motion stay. Class set by windowActivity.ts. */
+html.app-inactive .row-play-btn.is-busy,
+html.app-inactive .ark-progress-range.indeterminate,
+html.app-inactive .circular-progress.indeterminate svg,
+html.app-inactive .btn-spinner,
+html.app-inactive .reset-overlay-spinner,
+html.app-inactive .net-badge-dot.is-active {
+  animation-play-state: paused;
 }
 
 /* ── WebKitGTK compositing ─────────────────────────────────────────────────

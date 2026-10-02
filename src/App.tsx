@@ -44,6 +44,7 @@ import {
 } from "./stores/music";
 import { IconMusicNote } from "./components/icons";
 import "./styles/main.css";
+import { trackWindowActivity } from "./windowActivity";
 import { Button } from "./components/Button";
 
 type AppPhase = "loading" | "setup" | "ready";
@@ -125,6 +126,7 @@ function App() {
     if (navigator.userAgent.includes("Linux")) {
       document.documentElement.classList.add("soft-render");
     }
+    onCleanup(trackWindowActivity());
     // Before anything else: the backend can start pack installs on its own
     // (Win9x emulator auto-queue), and only this listener makes them visible.
     initContentPackEvents().catch(() => {});
