@@ -513,6 +513,12 @@ fn resolve_game_conf(data_dir: &str, dosbox_conf: &str) -> Option<(PathBuf, Path
     if direct.exists() {
         return Some((direct, root));
     }
+    if let Some(respelled) = super::collections::with_canonical_prefix(&rel) {
+        let respelled = root.join(respelled);
+        if respelled.exists() {
+            return Some((respelled, root));
+        }
+    }
 
     let prefix = collection_game_prefix("eXoDOS");
     let segment = crate::commands::collections::collection_def("eXoDOS")

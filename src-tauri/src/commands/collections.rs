@@ -86,6 +86,19 @@ pub fn collection_base_id(source: &str) -> &'static str {
         .unwrap_or("eXoDOS")
 }
 
+/// `rel` (forward slashes) with its leading `game_prefix` in the spelling the
+/// torrent writes, or None when it already is. eXo's catalogue says `eXoWin3X`
+/// for most Win3x rows, the pack `eXoWin3x`: invisible on case-insensitive
+/// filesystems, a missing conf everywhere else.
+pub fn with_canonical_prefix(rel: &str) -> Option<String> {
+    COLLECTION_MAP.iter().find_map(|c| {
+        let n = c.game_prefix.len();
+        let (head, tail) = (rel.get(..n)?, rel.get(n..)?);
+        (head != c.game_prefix && head.eq_ignore_ascii_case(c.game_prefix) && tail.starts_with('/'))
+            .then(|| format!("{}{tail}", c.game_prefix))
+    })
+}
+
 /// Every collection. Language packs come BEFORE eXoDOS so title matching
 /// reaches them first. A new pack is one entry here (§15).
 pub const COLLECTION_MAP: &[CollectionDef] = &[
@@ -272,6 +285,21 @@ mod tests {
             super::collection_rel_game_dir("eXoWin9x", "Connect4 (1995)", None),
             "eXo/eXoWin9x/Connect4 (1995)"
         );
+    }
+
+    #[test]
+    fn catalogue_prefix_is_respelled_the_way_the_torrent_writes_it() {
+        // 1,081 of 1,138 eXoWin3x rows say `eXoWin3X`.
+        assert_eq!(
+            super::with_canonical_prefix("eXo/eXoWin3X/!win3x/GeoGeo/dosbox.conf").as_deref(),
+            Some("eXo/eXoWin3x/!win3x/GeoGeo/dosbox.conf")
+        );
+        assert_eq!(super::with_canonical_prefix("eXo/eXoWin3x/!win3x/GeoGeo/dosbox.conf"), None);
+        assert_eq!(super::with_canonical_prefix("eXo/exodos/!dos/SQ5/dosbox.conf").as_deref(), Some("eXo/eXoDOS/!dos/SQ5/dosbox.conf"));
+        // A longer folder name is not the same folder.
+        assert_eq!(super::with_canonical_prefix("eXo/eXoWin3XL/!win3x/A/dosbox.conf"), None);
+        assert_eq!(super::with_canonical_prefix("eXo"), None);
+        assert_eq!(super::with_canonical_prefix("é"), None);
     }
 
     #[test]
