@@ -1362,8 +1362,7 @@ collection) therefore reports `ExtractError::NotAnArchive` as "incomplete or
 corrupted (torrent placeholder)" and clears `installed`, or the user hits the
 same failure on every click.
 
-**Linux verified 2026-08-07** (CachyOS x86_64, see
-`docs/HANDOVER-linux-emulator-packs.md`): the self-built DOSBox-X AppImage
+**Linux verified 2026-08-07** (CachyOS x86_64): the self-built DOSBox-X AppImage
 boots Windows 98 through the full conf chain, the 86Box chain works once
 `launch_86box` rewrites the child VHD (eXo's shipped child has a
 backslash locator minivhd cannot resolve), and `getcap` round-trips exactly
