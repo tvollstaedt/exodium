@@ -22,6 +22,8 @@ import {
   musicAutoplay, setMusicAutoplay, ensureMusicAutoplayLoaded,
   musicContinuous, setMusicContinuous, ensureMusicContinuousLoaded,
 } from "../stores/music";
+import { previewMuted, setPreviewMuted, ensurePreviewMutedLoaded } from "../stores/playback";
+import { setPreviewMutedNow } from "../stores/heroVideo";
 
 export type SettingsSection = "general" | "storage" | "network" | "packs" | "about";
 
@@ -72,6 +74,7 @@ export function SettingsDialog(props: Props) {
     setScanResult("");
     ensureMusicAutoplayLoaded();
     ensureMusicContinuousLoaded();
+    ensurePreviewMutedLoaded();
     loadNetworkMode();
     loadSeeding();
     win9xNetworkStatus().then(setNetStatus).catch(() => {});
@@ -261,7 +264,10 @@ export function SettingsDialog(props: Props) {
                       </section>
 
                       <section class="settings-section">
-                        <SectionTitle icon={Music}>Music</SectionTitle>
+                        <SectionTitle icon={Music}>Sound</SectionTitle>
+                        <SettingRow htmlFor="preview-sound" label="Preview video sound" hint="The speaker button on a game's preview does the same.">
+                          <SettingSwitch id="preview-sound" checked={!previewMuted()} label="Preview video sound" onChange={(v) => { void setPreviewMuted(!v); setPreviewMutedNow(!v); }} />
+                        </SettingRow>
                         <SettingRow htmlFor="music-autoplay" label="Play theme music" hint="Starts a game's theme when you open its details.">
                           <SettingSwitch id="music-autoplay" checked={musicAutoplay()} label="Play theme music" onChange={(v) => { void setMusicAutoplay(v); }} />
                         </SettingRow>
