@@ -95,21 +95,27 @@ pub async fn get_poster_dir(
     db_state: State<'_, DbState>,
     collection: String,
 ) -> Result<String, String> {
-    let conn = db_state.lock()?;
-    let data_dir = crate::commands::games::configured_data_dir(&conn)?;
+    let data_dir = {
+        let conn = db_state.lock()?;
+        crate::commands::games::configured_data_dir(&conn)?
+    };
     let base = PathBuf::from(&data_dir).join("content").join("posters");
     // Check collection-specific dir first, fall back to eXoDOS.
     // All poster thumbnails live in the eXoDOS pack; LP collections share them.
-    let poster_path = base.join(&collection);
-    if poster_path.exists() {
-        return Ok(path_to_fwd_slash(&poster_path));
-    }
-    if let Some(fallback) = asset_fallback(&collection).map(|c| base.join(c)) {
-        if fallback.exists() {
-            return Ok(path_to_fwd_slash(&fallback));
+    // The guard is gone before the first stat: on a network share each one is
+    // a round trip, and the grid asks for every collection at once (§22).
+    tokio::task::block_in_place(|| {
+        let poster_path = base.join(&collection);
+        if poster_path.exists() {
+            return Ok(path_to_fwd_slash(&poster_path));
         }
-    }
-    Err("Poster directory not found".to_string())
+        if let Some(fallback) = asset_fallback(&collection).map(|c| base.join(c)) {
+            if fallback.exists() {
+                return Ok(path_to_fwd_slash(&fallback));
+            }
+        }
+        Err("Poster directory not found".to_string())
+    })
 }
 
 /// A game's gallery images (originals plus 160 px thumbnails) and manual.

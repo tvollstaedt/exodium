@@ -487,6 +487,7 @@ pub fn extract_bundled_configs(col: &CollectionDef, metadata_dir: Option<&PathBu
         return;
     }
     log::info!("Extracting {} configs to {}", col.id, torrent_root.display());
+    let started = std::time::Instant::now();
     // Write the lock ONLY on success - latching a failed extract (disk full,
     // permissions) left the configs permanently missing with no retry.
     let extracted = std::fs::File::open(&cfg_path)
@@ -495,7 +496,7 @@ pub fn extract_bundled_configs(col: &CollectionDef, metadata_dir: Option<&PathBu
         .and_then(|mut a| extract_missing_entries(&mut a, torrent_root));
     match extracted {
         Ok(n) => {
-            log::info!("Extracted {} missing {} config file(s)", n, col.id);
+            log::info!("Extracted {} missing {} config file(s) in {:.1?}", n, col.id, started.elapsed());
             if let Err(e) = std::fs::write(&lock, "") {
                 log::warn!("Could not write configs lock for {}: {}", col.id, e);
             }

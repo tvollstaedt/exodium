@@ -162,30 +162,45 @@ pub struct ContentPackStatus {
     pub installed_version: Option<u32>,
 }
 
+/// Which of the manifest's packs have files on disk, by pack id. Touches the
+/// filesystem only: a caller must not hold the DbState guard, or a slow share
+/// parks every command behind it (§22). A pack the current platform cannot see
+/// is left out - a data dir moved from another OS must not grow ledger rows
+/// for binaries this build can never use.
+fn packs_on_disk(
+    data_dir: &str,
+    col: &crate::commands::updates::CollectionManifest,
+) -> HashMap<String, bool> {
+    let mut found = HashMap::new();
+    for (id, info) in &col.content_packs {
+        let Some(info) = info.for_current_platform() else { continue };
+        // install_path names the exact directory - it already carries the
+        // collection (`content/posters/eXoWin9x`). Appending it a second time
+        // meant metadata packs were never adopted at all.
+        let dir = Path::new(data_dir).join(&info.install_path);
+        let present =
+            dir.is_dir() && !std::fs::read_dir(&dir).map(|mut d| d.next().is_none()).unwrap_or(true);
+        found.insert(id.clone(), present);
+    }
+    found
+}
+
 /// Record packs present on disk but missing from the ledger (a factory reset
 /// keeps `content/` but clears the config table). Adopted at the manifest's
 /// version, or the stale-pack cleanup would delete them next start.
-fn adopt_packs_on_disk(
+fn reconcile_pack_ledger(
     conn: &rusqlite::Connection,
     collection: &str,
     col: &crate::commands::updates::CollectionManifest,
+    on_disk: &HashMap<String, bool>,
 ) {
-    let Ok(Some(data_dir)) = queries::get_config(conn, "data_dir") else { return };
     let mut state = read_installed_packs(conn);
     let recorded = state.entry(collection.to_string()).or_default();
     let mut adopted = Vec::new();
     let mut vanished = Vec::new();
     for (id, info) in &col.content_packs {
-        // A pack the current platform cannot see must not be adopted either,
-        // or a data dir moved from another OS would grow ledger rows for
-        // binaries this build can never use.
+        let Some(&present) = on_disk.get(id) else { continue };
         let Some(info) = info.for_current_platform() else { continue };
-        // install_path names the exact directory - it already carries the
-        // collection (`content/posters/eXoWin9x`). Appending it a second time
-        // meant metadata packs were never adopted at all.
-        let dir = Path::new(&data_dir).join(&info.install_path);
-        let present =
-            dir.is_dir() && !std::fs::read_dir(&dir).map(|mut d| d.next().is_none()).unwrap_or(true);
         match (recorded.contains_key(id), present) {
             (false, true) => {
                 recorded.insert(
@@ -222,6 +237,16 @@ fn adopt_packs_on_disk(
     }
 }
 
+#[cfg(test)]
+fn adopt_packs_on_disk(
+    conn: &rusqlite::Connection,
+    collection: &str,
+    col: &crate::commands::updates::CollectionManifest,
+) {
+    let Ok(Some(data_dir)) = queries::get_config(conn, "data_dir") else { return };
+    reconcile_pack_ledger(conn, collection, col, &packs_on_disk(&data_dir, col));
+}
+
 #[tauri::command]
 pub async fn list_content_packs(
     db_state: State<'_, DbState>,
@@ -233,8 +258,16 @@ pub async fn list_content_packs(
         .get(&collection)
         .ok_or_else(|| format!("Unknown collection '{}'", collection))?;
 
+    let data_dir = {
+        let conn = db_state.lock()?;
+        queries::get_config(&conn, "data_dir").ok().flatten()
+    };
+    let on_disk = match data_dir {
+        Some(dir) => tokio::task::block_in_place(|| packs_on_disk(&dir, col)),
+        None => HashMap::new(),
+    };
     let conn = db_state.lock()?;
-    adopt_packs_on_disk(&conn, &collection, col);
+    reconcile_pack_ledger(&conn, &collection, col, &on_disk);
     let installed = read_installed_packs(&conn);
     let col_installed = installed.get(&collection);
 
