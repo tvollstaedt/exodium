@@ -458,3 +458,9 @@
 - Rejected: a second "default" key next to the button's state (two values for one preference, unclear which wins).
 - Why: Issue #37. The button only exists while a preview plays, so the first preview of a session always sounded before anyone could find it.
 - Gotcha: The switch also calls `setPreviewMutedNow`, which is a no-op without a hero video, so toggling it while a preview runs behaves like the button.
+
+## 2026-10-05 - Library shelves poll a fingerprint, not their lists
+- Decision: The 5 s tick asks `get_library_fingerprint` (`library_fingerprint`: id-weighted sums of installed / in_library / favorited plus the newest `last_played`). `createLibraryPoll` re-fetches the three shelf lists only when it moved, never overlaps itself, and stays quiet while `html.app-inactive`; `prime()` runs before every list fetch, so a change that lands during the fetch shows on the next tick.
+- Rejected: dropping the poll (background completions such as dependency downloads would go unseen, and not every path sets `lastGameLibraryChange`); `total_changes()` as the fingerprint (every config write would reload the lists).
+- Why: Discord report, Linux, still hanging on 0.15.2 and with ~3000 games copied to a local disk, so not the share. The old tick fetched every installed game in full: ~4.5 MiB of JSON for 3000 rows (~900 KiB/s; the reporter's monitor showed 492 KiB/s), a 0.9 s correlated-subquery scan on an M4 Max under the single DB mutex, then merge and re-render of thousands of cards, every 5 s. The fingerprint is one scan of ~12k rows without output.
+- Gotcha: Not reproduced end to end. The frontend share (rendering thousands of cards) is unmeasured and "window controls dead" is inferred (IPC starved while workers park on the DB mutex). A real change still costs one full list fetch; slimmer shelf rows, a faster installed query and virtualised shelves are the follow-ups.

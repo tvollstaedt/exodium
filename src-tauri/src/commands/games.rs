@@ -227,6 +227,14 @@ pub async fn get_installed_games(state: State<'_, DbState>) -> Result<Vec<Game>,
     queries::fetch_installed_games(&conn).map_err(|e| e.to_string())
 }
 
+/// What the Library shelves poll: a short string that changes whenever their
+/// lists would. The lists themselves are re-fetched only then.
+#[tauri::command]
+pub async fn get_library_fingerprint(state: State<'_, DbState>) -> Result<String, String> {
+    let conn = state.lock()?;
+    queries::library_fingerprint(&conn).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn toggle_favorite(state: State<'_, DbState>, id: i64) -> Result<bool, String> {
     let conn = state.lock()?;

@@ -577,6 +577,29 @@ pub fn fetch_installed_games(conn: &Connection) -> DbResult<Vec<Game>> {
     Ok(games)
 }
 
+/// Cheap stand-in for "did the shelves change?": install, library and favorite
+/// state weighted by id (twice, so two opposite changes cannot cancel) plus the
+/// newest play. One scan, no rows out - the shelves' full lists are megabytes
+/// on a big library.
+pub fn library_fingerprint(conn: &Connection) -> DbResult<String> {
+    Ok(conn.query_row(
+        "SELECT COALESCE(SUM(installed * id), 0), COALESCE(SUM(installed * id * id), 0),
+                COALESCE(SUM(in_library * id), 0), COALESCE(SUM(in_library * id * id), 0),
+                COALESCE(SUM(favorited * id), 0), COALESCE(SUM(favorited * id * id), 0),
+                COALESCE(MAX(last_played), '')
+         FROM games",
+        [],
+        |r| {
+            Ok(format!(
+                "{}:{}:{}:{}:{}:{}:{}",
+                r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?,
+                r.get::<_, i64>(3)?, r.get::<_, i64>(4)?, r.get::<_, i64>(5)?,
+                r.get::<_, String>(6)?
+            ))
+        },
+    )?)
+}
+
 /// Fetch recently played games, ordered by last_played descending. One card
 /// per game: when several variants of a shortcode were played, only the most
 /// recently played row represents the group.
@@ -830,6 +853,42 @@ mod tests {
         assert_eq!(rows[0].available_languages, None, "the plain fetch stays cheap");
         attach_language_maps(&conn, &mut rows).unwrap();
         assert_eq!(rows[0].available_languages.as_deref(), Some("EN:0,DE:2"));
+    }
+
+    /// The shelves poll this instead of their own lists, so it has to move for
+    /// every change they show - including two that would cancel in a plain
+    /// count - and stay put for everything else.
+    #[test]
+    fn library_fingerprint_follows_exactly_what_the_shelves_show() {
+        let conn = open_test_db();
+        let games: Vec<Game> = (0..4).map(|i| make_game(&format!("Game {i}"))).collect();
+        insert_games(&conn, &games).unwrap();
+        let before = library_fingerprint(&conn).unwrap();
+        assert_eq!(library_fingerprint(&conn).unwrap(), before, "a read changes nothing");
+
+        conn.execute("UPDATE games SET description = 'x', rating = 4.0", []).unwrap();
+        assert_eq!(library_fingerprint(&conn).unwrap(), before, "fields the shelves never show");
+
+        conn.execute("UPDATE games SET installed = 1 WHERE title = 'Game 1'", []).unwrap();
+        let one = library_fingerprint(&conn).unwrap();
+        assert_ne!(one, before);
+
+        // Same count, different game: uninstall one, install another.
+        conn.execute("UPDATE games SET installed = 0 WHERE title = 'Game 1'", []).unwrap();
+        conn.execute("UPDATE games SET installed = 1 WHERE title = 'Game 2'", []).unwrap();
+        assert_ne!(library_fingerprint(&conn).unwrap(), one);
+
+        let installed = library_fingerprint(&conn).unwrap();
+        conn.execute("UPDATE games SET in_library = 1 WHERE title = 'Game 3'", []).unwrap();
+        let in_library = library_fingerprint(&conn).unwrap();
+        assert_ne!(in_library, installed);
+
+        conn.execute("UPDATE games SET favorited = 1 WHERE title = 'Game 0'", []).unwrap();
+        let favorited = library_fingerprint(&conn).unwrap();
+        assert_ne!(favorited, in_library);
+
+        conn.execute("UPDATE games SET last_played = '2026-10-05 10:00:00' WHERE title = 'Game 0'", []).unwrap();
+        assert_ne!(library_fingerprint(&conn).unwrap(), favorited);
     }
 
     fn open_test_db() -> Connection {

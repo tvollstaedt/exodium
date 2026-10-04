@@ -145,6 +145,11 @@ export async function getInstalledGames(): Promise<Game[]> {
   return invoke("get_installed_games");
 }
 
+/** Changes whenever the Library shelves' lists would; cheap to ask. */
+export async function getLibraryFingerprint(): Promise<string> {
+  return invoke("get_library_fingerprint");
+}
+
 export async function getRecentlyPlayed(limit?: number): Promise<Game[]> {
   return invoke("get_recently_played", { limit });
 }

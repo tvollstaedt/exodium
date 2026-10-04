@@ -18,7 +18,7 @@ import {
   setPlaylistDialog, deletePlaylist,
 } from "../stores/playlists";
 import { PackHintBanner } from "../components/PackHintBanner";
-import { getGame, getGenres, getInstalledGames, getRecentlyPlayed, getConfig, getAvailableCollections, getSectionKeys, getGames, type CollectionInfo, type Game, type Playlist } from "../api/tauri";
+import { getGame, getGenres, getInstalledGames, getLibraryFingerprint, getRecentlyPlayed, getConfig, getAvailableCollections, getSectionKeys, getGames, type CollectionInfo, type Game, type Playlist } from "../api/tauri";
 import { GameCard } from "../components/GameCard";
 import { IconEmptySearch, IconEmptyLibrary } from "../components/icons";
 import { GameRow } from "../components/GameRow";
@@ -31,6 +31,7 @@ import { Select } from "../components/Select";
 import { showToast } from "../stores/toasts";
 import { openGameRequest, setOpenGameRequest, musicUnsupported, refreshMusicIndex } from "../stores/music";
 import { matchesLibraryQuery, jumpBarDisplayLabel, jumpBarIsWide } from "../util";
+import { createLibraryPoll } from "../libraryPoll";
 import { ReadingRoom } from "../components/ReadingRoom";
 import { ViewToggle } from "../components/ViewToggle";
 
@@ -140,9 +141,7 @@ export function Library() {
   createEffect(() => {
     const change = lastGameLibraryChange();
     if (!change) { return; }
-    refreshRecent();
-    refreshInstalled();
-    refreshFavorites();
+    void refreshShelves();
     // Playlist shelf cards show installed/in_library state too.
     refreshPlaylistShelves();
     const dg = detailGame();
@@ -492,6 +491,20 @@ export function Library() {
     }
   };
 
+  // The shelves' lists are megabytes on a big library, so the 5 s tick asks for
+  // a fingerprint and fetches them only when it moved.
+  const libraryPoll = createLibraryPoll({
+    fingerprint: getLibraryFingerprint,
+    refresh: () => { refreshRecent(); refreshInstalled(); refreshFavorites(); },
+    paused: () => document.documentElement.classList.contains("app-inactive"),
+  });
+  const refreshShelves = async () => {
+    await libraryPoll.prime();
+    refreshRecent();
+    refreshInstalled();
+    refreshFavorites();
+  };
+
   const handleFavoriteChanged = (id: number, favorited: boolean) => {
     // Not updateGameFavorited: a new object remounts the card (flicker).
     // The card tracks the state itself; games() heals on the next fetch.
@@ -529,12 +542,13 @@ export function Library() {
 
     if (sentinelRef) { observer.observe(sentinelRef); }
 
-    const interval = setInterval(() => { refreshRecent(); refreshInstalled(); refreshFavorites(); }, 5000);
-    onCleanup(() => { clearInterval(interval); observer.disconnect(); });
+    libraryPoll.start();
+    onCleanup(() => { libraryPoll.stop(); observer.disconnect(); });
 
     loadViewMode();
 
     (async () => {
+      await libraryPoll.prime();
       // Load recently played first - if any exist, auto-switch to My Library tab.
       const recent = await getRecentlyPlayed(12).catch(() => [] as Game[]);
       setRecentGames(recent);
