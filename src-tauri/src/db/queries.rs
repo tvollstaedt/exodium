@@ -560,16 +560,21 @@ pub fn fetch_installed_rows(conn: &Connection) -> DbResult<Vec<Game>> {
     Ok(games)
 }
 
-pub fn fetch_installed_games(conn: &Connection) -> DbResult<Vec<Game>> {
-    let sql = format!(
+/// `+p.installed` keeps SQLite off idx_games_installed for the inner lookup, which
+/// would walk every installed row per outer row: 17 s at 7.7k installed games.
+fn installed_games_sql() -> String {
+    format!(
         "SELECT {} FROM games g WHERE g.installed = 1 AND (g.shortcode IS NULL OR g.id = (
-            SELECT p.id FROM games p WHERE {} AND p.installed = 1
+            SELECT p.id FROM games p WHERE {} AND +p.installed = 1
             ORDER BY CASE WHEN p.language = 'EN' THEN 0 ELSE 1 END, p.id LIMIT 1))
          ORDER BY title, language",
         GAME_COLUMNS,
         same_group("p", "g")
-    );
-    let mut stmt = conn.prepare(&sql)?;
+    )
+}
+
+pub fn fetch_installed_games(conn: &Connection) -> DbResult<Vec<Game>> {
+    let mut stmt = conn.prepare(&installed_games_sql())?;
     let mut games: Vec<Game> = stmt
         .query_map([], row_to_game)?
         .collect::<Result<Vec<_>, _>>()?;
@@ -889,6 +894,41 @@ mod tests {
 
         conn.execute("UPDATE games SET last_played = '2026-10-05 10:00:00' WHERE title = 'Game 0'", []).unwrap();
         assert_ne!(library_fingerprint(&conn).unwrap(), favorited);
+    }
+
+    /// A library of thousands made the shelf query quadratic: with
+    /// `p.installed = 1` visible to the planner it chose idx_games_installed
+    /// for the per-row group lookup. The plan, not a stopwatch, is the guard.
+    #[test]
+    fn the_installed_shelf_looks_its_group_up_by_shortcode() {
+        let conn = open_test_db();
+        let games: Vec<Game> = (0..3)
+            .map(|i| {
+                let mut g = make_game(&format!("Game {i}"));
+                g.shortcode = Some(format!("G{i}"));
+                g
+            })
+            .collect();
+        insert_games(&conn, &games).unwrap();
+        conn.execute("UPDATE games SET installed = 1", []).unwrap();
+
+        let mut stmt = conn
+            .prepare(&format!("EXPLAIN QUERY PLAN {}", installed_games_sql()))
+            .unwrap();
+        let plan: Vec<String> = stmt
+            .query_map([], |r| r.get::<_, String>(3))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(
+            plan.iter().any(|d| d.contains("p USING INDEX idx_games_shortcode")),
+            "group lookup must use the shortcode index: {plan:?}"
+        );
+        assert!(
+            !plan.iter().any(|d| d.contains("p USING INDEX idx_games_installed")),
+            "group lookup must not walk the installed rows: {plan:?}"
+        );
+        assert_eq!(fetch_installed_games(&conn).unwrap().len(), 3);
     }
 
     fn open_test_db() -> Connection {
