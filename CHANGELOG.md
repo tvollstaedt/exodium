@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.15.3 - 2026-10-08
+
+### Fixed
+
+- Large libraries: Exodium could freeze for many seconds, or hang, with
+  thousands of games installed. The list of installed games took longer the
+  more games you had (17 seconds with a full eXoDOS install) and was reloaded
+  every 5 seconds. It is now ready in milliseconds, and the Library tab only
+  reloads it when something changed, and not at all while the window is in the
+  background.
+
 ## 0.15.2 - 2026-10-02
 
 ### Added
