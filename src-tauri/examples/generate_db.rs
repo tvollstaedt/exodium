@@ -1167,7 +1167,7 @@ fn main() {
                 for (id, title, app_path) in &rows {
                     let by_stem = app_path
                         .as_deref()
-                        .and_then(&bat_stem)
+                        .and_then(bat_stem)
                         .and_then(|s| variant_map.get(&normalize_title(&s)));
                     if let Some(variant) = by_stem.or_else(|| variant_map.get(&normalize_title(title))) {
                         update.execute(params![variant, id]).unwrap();
