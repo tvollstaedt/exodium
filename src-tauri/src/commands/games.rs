@@ -709,8 +709,6 @@ fn build_lp_overlay(
     Ok(staging)
 }
 
-/// Can the EN autoexec run against the LP dir through the overlay? Simulates
-/// the cd chain and requires the launch command's program to exist there.
 /// A path as the emulator would see it: exact match first, then the one
 /// entry of the parent whose name differs only in case.
 fn resolve_ignoring_case(path: &std::path::Path) -> Option<PathBuf> {
@@ -726,9 +724,61 @@ fn resolve_ignoring_case(path: &std::path::Path) -> Option<PathBuf> {
         .map(|e| e.path())
 }
 
+/// Where a `.\<game_folder>\[<lang_dir>\]<shortcode>\rest` host path lands
+/// under the LP game dir. `None` when the path is not inside the game's
+/// own directory (the collection root, another game).
+fn lp_game_subpath(
+    host_path: &str,
+    shortcode: &str,
+    lang_dir: &str,
+    lp_game_dir: &std::path::Path,
+) -> Option<PathBuf> {
+    let mut comps = host_path
+        .split(['\\', '/'])
+        .filter(|c| !c.is_empty() && *c != ".");
+    comps.next()?; // the collection folder
+    let mut first = comps.next()?;
+    if first.eq_ignore_ascii_case(lang_dir) {
+        first = comps.next()?;
+    }
+    if !first.eq_ignore_ascii_case(shortcode) {
+        return None;
+    }
+    let mut dir = lp_game_dir.to_path_buf();
+    dir.extend(comps);
+    Some(dir)
+}
+
+/// The program an autoexec command line runs: the first non-option token
+/// after `call` / `loadfix`.
+fn launch_program(cmd: &str) -> &str {
+    let lower = cmd.to_ascii_lowercase();
+    let rest = if lower.starts_with("call ") {
+        &cmd[5..]
+    } else if lower.starts_with("loadfix ") {
+        &cmd[8..]
+    } else {
+        cmd
+    };
+    rest.split_whitespace()
+        .find(|tok| !tok.starts_with('-'))
+        .unwrap_or(rest)
+}
+
+/// `call x`, `loadfix x` and `x.ext` name a file on disk. A bare token may be
+/// an emulator-internal command (`ASPECT`, `MIXER`) and proves nothing
+/// when it resolves to no file.
+fn names_a_file(cmd: &str) -> bool {
+    let lower = cmd.to_ascii_lowercase();
+    lower.starts_with("call ") || lower.starts_with("loadfix ") || launch_program(cmd).contains('.')
+}
+
+/// Can the EN autoexec run against the LP dir through the overlay? Simulates
+/// the cd chain and requires the launch command's program to exist there.
 fn lp_autoexec_compatible(
     en_conf: &str,
     shortcode: &str,
+    lang_dir: &str,
     lp_game_dir: &std::path::Path,
     real_root: &std::path::Path,
 ) -> bool {
@@ -740,6 +790,11 @@ fn lp_autoexec_compatible(
     // relative to that, not to the staging dir the paths are rewritten to.
     let mut cwd: Option<PathBuf> = None;
     let mut mount_root: Option<PathBuf> = None;
+    // The launch line is the first command that resolves to a file. eXo puts
+    // emulator-internal commands (`ASPECT`, `MIXER`, `KEYB`) and its own
+    // utilities in front of it; a bare token that resolves to nothing is
+    // skipped, a missing `call x` / `x.bat` is final (`names_a_file`).
+    let mut unresolved: Option<(String, PathBuf)> = None;
     for line in autoexec.lines() {
         let t = line.trim();
         let t = t.strip_prefix('@').unwrap_or(t).trim();
@@ -794,15 +849,27 @@ fn lp_autoexec_compatible(
             continue;
         }
 
-        // `mount c <host path>` decides what C:\ is. Only the form that
-        // mounts the game's OWN directory is read here; every other target
-        // (eXo's confs often mount the collection root) leaves the staging
-        // dir as the root, which is what `cwd = None` already means.
-        if let Some(rest) = lower.strip_prefix("mount c ") {
-            let target = rest.trim().trim_matches('"').trim_end_matches(['\\', '/']);
-            let leaf = target.rsplit(['\\', '/']).next().unwrap_or(target);
-            if leaf.eq_ignore_ascii_case(shortcode) {
-                mount_root = Some(lp_game_dir.to_path_buf());
+        // `mount c <host path>` decides what C:\ is. Only a target inside
+        // the game's OWN directory is read here (it may name a subdirectory:
+        // `.\eXoDOS\dott\DOTT\`); every other target (eXo's confs often mount
+        // the collection root) leaves the staging dir as the root, which is
+        // what `cwd = None` already means.
+        if lower.starts_with("mount c ") {
+            // First argument only: 18 LP confs append `-freesize N`.
+            let rest = t["mount c ".len()..].trim();
+            let target = match rest.strip_prefix('"') {
+                Some(quoted) => quoted.split('"').next().unwrap_or(""),
+                None => rest.split_whitespace().next().unwrap_or(""),
+            };
+            if let Some(dir) = lp_game_subpath(target, shortcode, lang_dir, lp_game_dir) {
+                let Some(dir) = resolve_ignoring_case(&dir) else {
+                    log::info!(
+                        "LP launch: mount target '{}' missing under LP layout",
+                        target
+                    );
+                    return false;
+                };
+                mount_root = Some(dir);
             }
             cwd = None;
             continue;
@@ -821,28 +888,21 @@ fn lp_autoexec_compatible(
             continue;
         }
 
-        // First real command is the launch line. Forms this cannot check
-        // (boot images, drive-letter paths) are trusted.
+        // Forms this cannot check (boot images, drive-letter paths) are trusted.
         if lower == "boot" || lower.starts_with("boot ") {
             return true;
         }
-        let base = t
-            .strip_prefix("call ")
-            .or_else(|| t.strip_prefix("CALL "))
-            .or_else(|| t.strip_prefix("loadfix "))
-            .unwrap_or(t);
-        // Skip option tokens ("loadfix -32 game.exe") before picking the program.
-        let base = base
-            .split_whitespace()
-            .find(|tok| !tok.starts_with('-'))
-            .unwrap_or(base);
+        let base = launch_program(t);
         if base.contains(':') || base.contains('\\') || base.contains('/') {
             return true;
         }
         let dir = match (&cwd, &mount_root) {
             (Some(d), _) => d.clone(),
             (None, Some(root)) => root.clone(),
-            (None, None) => return true, // command at mount root - rare, trust it
+            // Nothing mounted yet: a file reference cannot be checked and is
+            // trusted; a bare token (`ASPECT TRUE` ahead of the mount) proves nothing.
+            (None, None) if names_a_file(t) => return true,
+            (None, None) => continue,
         };
         let base_lower = base.to_ascii_lowercase();
         if let Ok(entries) = std::fs::read_dir(&dir) {
@@ -854,6 +914,15 @@ fn lp_autoexec_compatible(
                 }
             }
         }
+        if names_a_file(t) {
+            unresolved = Some((base.to_string(), dir));
+            break;
+        }
+        if unresolved.is_none() {
+            unresolved = Some((base.to_string(), dir));
+        }
+    }
+    if let Some((base, dir)) = unresolved {
         log::info!(
             "LP launch: EN launch command '{}' not present in {} - falling back",
             base,
@@ -1005,10 +1074,9 @@ pub(crate) fn patch_dosbox_conf(
             return ".\\".to_string();
         }
         let resolved = format!("{}{}", abs_prefix, body.replace('\\', "/"));
-        if std::path::Path::new(&resolved).exists() {
-            trim_trailing_sep(&resolved)
-        } else {
-            format!(".\\{}", body)
+        match resolve_ignoring_case(std::path::Path::new(&resolved)) {
+            Some(p) => trim_trailing_sep(&p.to_string_lossy()),
+            None => format!(".\\{}", body),
         }
     };
 
@@ -1017,7 +1085,7 @@ pub(crate) fn patch_dosbox_conf(
         // WHERE the files live changes. The link shadows an installed EN copy.
         let real_root = working_dir.join(game_folder);
         let overlay = if game_dir.exists()
-            && lp_autoexec_compatible(&content, shortcode, game_dir, &real_root)
+            && lp_autoexec_compatible(&content, shortcode, lang_dir, game_dir, &real_root)
         {
             build_lp_overlay(working_dir, game_folder, shortcode, lang_dir, game_dir, &content)
                 .map_err(|e| log::warn!("LP overlay build failed for {}: {}", shortcode, e))
@@ -1039,8 +1107,8 @@ pub(crate) fn patch_dosbox_conf(
             let mut result = rewrite_host_paths(&content, &|body| {
                 if let Some(tail) = body.replace('\\', "/").strip_prefix(game_folder) {
                     let staged = format!("{}{}", staging_fwd, tail);
-                    if std::path::Path::new(&staged).exists() {
-                        return trim_trailing_sep(&staged);
+                    if let Some(p) = resolve_ignoring_case(std::path::Path::new(&staged)) {
+                        return trim_trailing_sep(&p.to_string_lossy());
                     }
                 }
                 to_working_dir(body)
@@ -1083,6 +1151,31 @@ pub(crate) fn patch_dosbox_conf(
             patched.push_str("[autoexec]\n");
             patched.push_str(&format!("@mount c \"{}\"\n", game_dir_abs));
             patched.push_str("c:\n");
+
+            // The CD and floppy mounts come along as authored, after `c:` so
+            // that a guest-relative image path (`.\cd\disc1.cue`, 11th Hour)
+            // resolves on C: as eXo wrote it. A CD game launched without its
+            // image exits at once.
+            let to_lp_dir = |body: &str| {
+                if let Some(p) = lp_game_subpath(body, shortcode, lang_dir, game_dir)
+                    .and_then(|p| resolve_ignoring_case(&p))
+                {
+                    return trim_trailing_sep(&p.to_string_lossy().replace('\\', "/"));
+                }
+                to_working_dir(body)
+            };
+            let autoexec = content.split("[autoexec]").nth(1).unwrap_or("");
+            for line in autoexec.lines() {
+                let t = line.trim();
+                let t = t.strip_prefix('@').unwrap_or(t).trim();
+                let lower = t.to_ascii_lowercase();
+                let is_drive_mount = lower.starts_with("imgmount ")
+                    || (lower.starts_with("mount ") && !lower.starts_with("mount c "));
+                if is_drive_mount {
+                    patched.push_str(&rewrite_host_paths(t, &to_lp_dir));
+                    patched.push('\n');
+                }
+            }
 
             // Find the game subdirectory and launch command
             if let Some((subdir, cmd)) = find_lp_launch(game_dir, Some(&content)) {
@@ -1290,6 +1383,7 @@ fn find_lp_launch(game_dir: &std::path::Path, en_conf: Option<&str>) -> Option<(
         for line in autoexec.lines() {
             let t = line.trim();
             let t = t.strip_prefix('@').unwrap_or(t).trim();
+            let cmd = t;
             let t = t
                 .strip_prefix("call ")
                 .or_else(|| t.strip_prefix("CALL "))
@@ -1312,8 +1406,7 @@ fn find_lp_launch(game_dir: &std::path::Path, en_conf: Option<&str>) -> Option<(
             if is_housekeeping {
                 continue;
             }
-            let base = t.split_whitespace().next().unwrap_or(t);
-            let base_lower = base.to_ascii_lowercase();
+            let base_lower = launch_program(t).to_ascii_lowercase();
             if let Ok(entries) = std::fs::read_dir(game_dir) {
                 for entry in entries.filter_map(|e| e.ok()) {
                     let name_lower = entry.file_name().to_string_lossy().to_ascii_lowercase();
@@ -1331,9 +1424,12 @@ fn find_lp_launch(game_dir: &std::path::Path, en_conf: Option<&str>) -> Option<(
                     }
                 }
             }
-            // Only the FIRST real command is the launch line; later lines
-            // (cleanup, exit chains) must not be mistaken for it.
-            break;
+            // The first file reference is the launch line; later lines
+            // (cleanup, exit chains) must not be mistaken for it. A bare
+            // token may be emulator-internal and is skipped.
+            if names_a_file(cmd) {
+                break;
+            }
         }
     }
 
@@ -2135,7 +2231,74 @@ mod tests {
         std::fs::create_dir_all(lp.join("ODYSSEY")).unwrap();
         std::fs::write(lp.join("ODYSSEY/run.bat"), b"").unwrap();
         let conf = "[autoexec]\ncd ..\ncd ..\nmount c .\\eXoDOS\\AlienOdy\nc:\n@cd odyssey\n@call run\nexit\n";
-        assert!(lp_autoexec_compatible(conf, "AlienOdy", &lp, tmp.path()));
+        assert!(lp_autoexec_compatible(conf, "AlienOdy", "!german", &lp, tmp.path()));
+    }
+
+    /// `mount c <dir> -freesize 1024` (Fallout DE and 17 more): the option
+    /// is not part of the target.
+    #[test]
+    fn lp_autoexec_compatible_ignores_mount_options() {
+        let tmp = tempfile::tempdir().unwrap();
+        let lp = tmp.path().join("!german/fallout1");
+        std::fs::create_dir_all(lp.join("FALLOUT")).unwrap();
+        std::fs::write(lp.join("FALLOUT/run.bat"), b"").unwrap();
+        let conf = "[autoexec]\n@mount c .\\eXoDOS\\!german\\fallout1 -freesize 1024\nc:\ncd fallout\n@call run\nexit\n";
+        assert!(lp_autoexec_compatible(conf, "fallout1", "!german", &lp, tmp.path()));
+    }
+
+    /// HARVEST (ES): `ASPECT TRUE` and `slowread` stand before the mount and
+    /// the launch; neither resolves, neither decides.
+    #[test]
+    fn lp_autoexec_compatible_skips_internal_commands_around_mount() {
+        let tmp = tempfile::tempdir().unwrap();
+        let lp = tmp.path().join("!spanish/HARVEST");
+        std::fs::create_dir_all(lp.join("harvest")).unwrap();
+        std::fs::write(lp.join("harvest/HARVEST.EXE"), b"").unwrap();
+        let conf = "[autoexec]\n@echo off\nASPECT TRUE\nmount c .\\eXoDOS\\!spanish\\HARVEST\\\n\
+                    c:\ncd harvest\nslowread\ncls\n@harvest\nexit\n";
+        assert!(lp_autoexec_compatible(conf, "HARVEST", "!spanish", &lp, tmp.path()));
+    }
+
+    /// A missing `call run` is final even when a later bat exists: the later
+    /// line is cleanup, not the launcher.
+    #[test]
+    fn lp_autoexec_compatible_missing_called_bat_is_final() {
+        let tmp = tempfile::tempdir().unwrap();
+        let lp = tmp.path().join("!german/game");
+        std::fs::create_dir_all(&lp).unwrap();
+        std::fs::write(lp.join("cleanup.bat"), b"").unwrap();
+        let conf = "[autoexec]\nmount c .\\eXoDOS\\!german\\game\nc:\n@call run\n@call cleanup\nexit\n";
+        assert!(!lp_autoexec_compatible(conf, "game", "!german", &lp, tmp.path()));
+    }
+
+    /// The image name's case may differ between conf and archive (`SF.cue`
+    /// vs `SF.CUE`); the rewrite resolves it like the emulator's guest would.
+    #[test]
+    fn patch_dosbox_conf_lp_overlay_resolves_image_case() {
+        let tmp = tempfile::tempdir().unwrap();
+        let working_dir = tmp.path();
+        let lp_dir = working_dir.join("eXoDOS/!german/Archimed");
+        fs::create_dir_all(lp_dir.join("CD")).unwrap();
+        fs::write(lp_dir.join("run.bat"), b"").unwrap();
+        fs::write(lp_dir.join("CD/SF.CUE"), b"").unwrap();
+
+        let conf_content = "[autoexec]\nmount c .\\eXoDOS\\!german\\Archimed\n\
+             imgmount d \".\\eXoDOS\\!german\\Archimed\\CD\\SF.cue\" -t cdrom\nc:\n@call run\nexit\n";
+        let conf_path = write_conf(working_dir, "dosbox.conf", conf_content);
+        let patched_path = patch_dosbox_conf(
+            &conf_path,
+            working_dir,
+            Some(("Archimed", "!german", "eXoDOS", &lp_dir)),
+            true,
+        )
+        .unwrap();
+        let patched = fs::read_to_string(&patched_path).unwrap();
+        assert!(
+            patched.to_ascii_lowercase().contains("/cd/sf.cue\" -t cdrom"),
+            "image path must be resolved: {}",
+            patched
+        );
+        assert!(!patched.contains(".\\eXoDOS"), "{}", patched);
     }
 
     /// The launch command still has to exist: a variant whose files were
@@ -2146,7 +2309,7 @@ mod tests {
         let lp = tmp.path().join("!german/AlienOdy");
         std::fs::create_dir_all(lp.join("ODYSSEY")).unwrap();
         let conf = "[autoexec]\nmount c .\\eXoDOS\\AlienOdy\nc:\n@cd odyssey\n@call run\nexit\n";
-        assert!(!lp_autoexec_compatible(conf, "AlienOdy", &lp, tmp.path()));
+        assert!(!lp_autoexec_compatible(conf, "AlienOdy", "!german", &lp, tmp.path()));
     }
 
 
@@ -2630,6 +2793,131 @@ mod tests {
         );
     }
 
+    /// Archimedean Dynasty (DE): `ASPECT FALSE` precedes `@call run`. An
+    /// emulator-internal command resolves to no file and must not push the
+    /// conf into the generated autoexec, which would lose the CD mount.
+    #[test]
+    fn patch_dosbox_conf_lp_skips_internal_command_before_launch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let working_dir = tmp.path();
+        let lp_dir = working_dir.join("eXoDOS/!german/Archimed");
+        fs::create_dir_all(lp_dir.join("CD")).unwrap();
+        fs::write(lp_dir.join("run.bat"), b"").unwrap();
+        fs::write(lp_dir.join("CD/SF.cue"), b"").unwrap();
+
+        let conf_content = "[autoexec]\nmount c .\\eXoDOS\\!german\\Archimed\n\
+             imgmount d \".\\eXoDOS\\!german\\Archimed\\CD\\SF.cue\" -t cdrom\n\
+             ASPECT FALSE\nc:\ncls\n@call run\nexit\n";
+        let conf_path = write_conf(working_dir, "dosbox.conf", conf_content);
+
+        let patched_path = patch_dosbox_conf(
+            &conf_path,
+            working_dir,
+            Some(("Archimed", "!german", "eXoDOS", &lp_dir)),
+            true,
+        )
+        .unwrap();
+        let patched = fs::read_to_string(&patched_path).unwrap();
+
+        assert!(
+            patched.contains(".exodium_lp/german_Archimed"),
+            "conf must run verbatim through the overlay: {}",
+            patched
+        );
+        assert!(patched.contains("ASPECT FALSE"), "{}", patched);
+        assert!(patched.contains("@call run"), "{}", patched);
+        assert!(patched.contains("/CD/SF.cue"), "CD mount must survive: {}", patched);
+    }
+
+    /// Day of the Tentacle (DE): `mount c .\eXoDOS\!german\dott\DOTT\` names
+    /// a subdirectory spelled like the shortcode. The mount root is that
+    /// subdirectory, where `run.bat` lives - not the game dir above it.
+    #[test]
+    fn patch_dosbox_conf_lp_mount_root_subdir_named_like_shortcode() {
+        let tmp = tempfile::tempdir().unwrap();
+        let working_dir = tmp.path();
+        let lp_dir = working_dir.join("eXoDOS/!german/dott");
+        fs::create_dir_all(lp_dir.join("DOTT/CD")).unwrap();
+        fs::write(lp_dir.join("DOTT/run.bat"), b"").unwrap();
+        fs::write(lp_dir.join("DOTT/CD/DOTT.ISO"), b"").unwrap();
+
+        let conf_content = "[autoexec]\nmount c .\\eXoDOS\\!german\\dott\\DOTT\\\n\
+             imgmount d \".\\eXoDOS\\!german\\dott\\DOTT\\CD\\DOTT.ISO\" -t cdrom\n\
+             c:\ncls\n@call run\nexit\n";
+        let conf_path = write_conf(working_dir, "dosbox.conf", conf_content);
+
+        let patched_path = patch_dosbox_conf(
+            &conf_path,
+            working_dir,
+            Some(("dott", "!german", "eXoDOS", &lp_dir)),
+            true,
+        )
+        .unwrap();
+        let patched = fs::read_to_string(&patched_path).unwrap();
+
+        assert!(
+            patched.contains(".exodium_lp/german_dott"),
+            "conf must run verbatim through the overlay: {}",
+            patched
+        );
+        assert!(patched.contains("@call run"), "{}", patched);
+        assert!(patched.contains("/DOTT/CD/DOTT.ISO"), "{}", patched);
+    }
+
+    /// The generated-autoexec fallback carries the CD/floppy mounts over,
+    /// resolved into the LP dir; only `mount c` is its own.
+    #[test]
+    fn patch_dosbox_conf_lp_fallback_keeps_drive_mounts() {
+        let tmp = tempfile::tempdir().unwrap();
+        let working_dir = tmp.path();
+        fs::create_dir_all(working_dir.join("eXoDOS")).unwrap();
+        let lp_dir = working_dir.join("eXoDOS/!spanish/cobmiss");
+        fs::create_dir_all(lp_dir.join("cd")).unwrap();
+        fs::write(lp_dir.join("JUEGO.EXE"), b"").unwrap();
+        fs::write(lp_dir.join("cd/game.cue"), b"").unwrap();
+
+        // EN conf: the EN game dir is not installed, so `.\eXoDOS\cobmiss\…`
+        // exists only under the LP dir; the launch exe was renamed.
+        let conf_content = "[autoexec]\n@mount c .\\eXoDOS\\cobmiss\n\
+             imgmount d \".\\eXoDOS\\cobmiss\\cd\\game.cue\" -t cdrom\n\
+             #imgmount e \".\\eXoDOS\\cobmiss\\cd\\other.cue\" -t cdrom\n\
+             c:\nimgmount e \".\\cd\\disc2.cue\" -t iso\n@cm\nexit\n";
+        let conf_path = write_conf(working_dir, "dosbox.conf", conf_content);
+
+        let patched_path = patch_dosbox_conf(
+            &conf_path,
+            working_dir,
+            Some(("cobmiss", "!spanish", "eXoDOS", &lp_dir)),
+            true,
+        )
+        .unwrap();
+        let patched = fs::read_to_string(&patched_path).unwrap();
+
+        assert!(
+            patched.to_ascii_lowercase().contains("juego.exe"),
+            "fallback should launch the real executable: {}",
+            patched
+        );
+        let cue = lp_dir.join("cd/game.cue").to_string_lossy().replace('\\', "/");
+        assert!(
+            patched.contains(&format!("imgmount d \"{}\" -t cdrom", cue)),
+            "CD mount must be carried into the LP dir: {}",
+            patched
+        );
+        assert!(!patched.contains("other.cue"), "commented mounts stay out: {}", patched);
+        assert!(!patched.contains(".\\eXoDOS"), "no host path left unresolved: {}", patched);
+        // Drive mounts follow `c:` so a guest-relative image (`.\cd\…`) is
+        // read on C:, as authored.
+        let c_switch = patched.find("\nc:\n").expect("c: present");
+        let first_mount = patched.find("imgmount").expect("imgmount present");
+        assert!(c_switch < first_mount, "drive mounts must follow c:: {}", patched);
+        assert!(
+            patched.contains("imgmount e \".\\cd\\disc2.cue\" -t iso"),
+            "guest-relative image path stays as authored: {}",
+            patched
+        );
+    }
+
     // ── find_lp_launch ───────────────────────────────────────────────────────
 
     #[test]
@@ -2685,6 +2973,18 @@ mod tests {
         let (subdir, cmd) = find_lp_launch(game_dir, Some(en_conf)).unwrap();
         assert_eq!(subdir, "");
         assert_eq!(cmd, "cm");
+    }
+
+    /// `ASPECT FALSE` ahead of the launcher is not the EN hint; the hint
+    /// is the first line that names a file.
+    #[test]
+    fn find_lp_launch_en_hint_skips_internal_command() {
+        let tmp = tempfile::tempdir().unwrap();
+        let game_dir = tmp.path();
+        fs::write(game_dir.join("run.bat"), b"").unwrap();
+        let en_conf = "[autoexec]\nmount c .\\eXoDOS\\Archimed\nASPECT FALSE\nc:\n@call run\nexit\n";
+        let (_, cmd) = find_lp_launch(game_dir, Some(en_conf)).unwrap();
+        assert_eq!(cmd, "run");
     }
 
     #[test]

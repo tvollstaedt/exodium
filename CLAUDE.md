@@ -486,11 +486,22 @@ fallback (`find_lp_launch`, which itself prefers the EN autoexec's command)
 kick in. History: heuristics-first produced launch-and-exit bugs (Cobra
 Mission ES: bare root-level CM.EXE, no .bat - all heuristics missed it).
 
-`lp_autoexec_compatible` reads `mount c <target>` when the target names the
-game's own directory: eXo's confs mount it and then `cd` into a subdirectory
-of it, and treating that `cd` as relative to the staging root rejected every
-such conf and fell back to the generated autoexec. Every other mount target
-(the collection root, 1,570 confs) leaves the staging dir as the root.
+`lp_autoexec_compatible` reads `mount c <target>` when the target lies inside
+the game's own directory, a subdirectory included (`.\eXoDOS\!german\dott\DOTT\`
+- resolved as a path, never by comparing the leaf to the shortcode, which that
+very conf fools): eXo's confs mount it and then `cd` into a subdirectory of it,
+and treating that `cd` as relative to the staging root rejected every such
+conf and fell back to the generated autoexec. Every other mount target (the
+collection root, 1,570 confs) leaves the staging dir as the root. A BARE
+token that resolves to no file is skipped, a missing `call x` / `x.bat` is
+final (`names_a_file`, shared with `find_lp_launch`'s EN hint): eXo puts
+emulator-internal commands (`ASPECT`, `MIXER`, `KEYB`) and its own utilities
+(`kpush`, `mreset`) in front of the launcher in 60+ LP confs, and a check
+that judged the first unknown line sent every one of them into the fallback.
+The fallback itself carries the conf's `imgmount`/`mount <drive>` lines over,
+AFTER `c:` (a guest-relative `.\cd\…` image only resolves on C:) - a CD game
+started without its image exits at once, which is how a missed check looked
+like "DOSBox opens and closes" (#47).
 
 **A substituted host path must never keep a trailing separator, and must be
 quoted when it carries a space.** Both rules exist because the rewrite turns a
