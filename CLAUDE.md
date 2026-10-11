@@ -742,6 +742,23 @@ Lesesaal showed it as "Preparing…" with nothing in the log (measured with
 releases the state lock before the walk. Keep it until upstream carries the
 same reorder; an upgrade that drops the patch section brings the hang back.
 
+**The fork also opens torrent files lazily, and that one will not come from
+upstream.** Stock `FilesystemStorage::init` opens every file of a torrent
+read/write and keeps the handle: 14,011 fds for eXoDOS before the first byte,
+which `raise_fd_limit` cannot buy on a Mac whose `kern.maxfilesperproc` is
+10240 (#48, measured in the field - the add failed with "error opening … in
+read/write mode" on a different zip each time). The maintainer calls one fd
+per file "by design" (rqbit issue 520), so the fork's `FilePool` is ours to
+keep: files are still CREATED in `init` (placeholders and
+`cleanup_placeholder_files` depend on that), the handle is opened on first
+access, and one process-wide pool closes the oldest idle handles at a quarter
+of the soft limit (64..2048). A quarter, not half: when the torrents go live
+the peer sockets burst to ~250 within a second, and under a 512 hard limit
+the eXoDOS initial check ran out of fds at the `.bitv` with half (measured
+2026-10-11, `docs/DECISIONS.md`). `raise_fd_limit` stays as headroom and
+logs its result from `setup`, after the logger exists - before, the warning
+it wrote went nowhere.
+
 **Offline means no network at all, not "no torrent".** Everything that reaches
 out has to check `is_offline` / `isOffline()`: game downloads, preview videos,
 content packs (including HTTP-sourced ones), the first-run pack offer, and both

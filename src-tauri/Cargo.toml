@@ -116,10 +116,8 @@ pretty_assertions = "1"
 tokio = { version = "1", features = ["fs", "sync", "macros", "rt", "test-util", "time"] }
 
 
-# librqbit 9.0.0-rc.0 deadlocks the whole tokio runtime when a peer dies while
-# `update_only_files` runs (state lock vs. peer-table shard, taken in opposite
-# orders). The patch releases the state lock before the peer walk - one
-# commit on top of the commit the rc.0 crate was published from (§11);
-# branch fix/update-only-files-lock-order on the fork, PR pending upstream.
+# Fork of librqbit 9.0.0-rc.0 (§11, §21): the lock-order fix for the peer-death
+# deadlock, Windows sparse marking, and the lazy file open with a process-wide
+# handle pool (#48, not taken upstream). Branch feat/lazy-file-open on the fork.
 [patch.crates-io]
-librqbit = { git = "https://github.com/tvollstaedt/rqbit.git", rev = "ad57d887715c35c39de1dafc0d27b0a0b6f8740d" }
+librqbit = { git = "https://github.com/tvollstaedt/rqbit.git", rev = "0055fa6cb861ea1a943d0ba4e379418457dad6fa" }

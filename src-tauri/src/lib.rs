@@ -43,17 +43,19 @@ use commands::{
     ContentPackState, DbState, TorrentState,
 };
 
-/// Raise the fd soft limit as far as allowed: librqbit keeps every torrent
-/// file open (14,011 for eXoDOS), and the default 1024 fails the first add.
+/// Raise the fd soft limit as far as allowed. The forked librqbit opens
+/// torrent files lazily behind one process-wide pool sized from this limit
+/// (#48, §11), so this is headroom, not a hard requirement. Runs before the
+/// logger exists; the returned line is logged from `setup`.
 #[cfg(unix)]
-fn raise_fd_limit() {
+fn raise_fd_limit() -> Option<String> {
     unsafe {
         let mut lim = libc::rlimit {
             rlim_cur: 0,
             rlim_max: 0,
         };
         if libc::getrlimit(libc::RLIMIT_NOFILE, &mut lim) != 0 {
-            return;
+            return None;
         }
         // Try the hard limit first; macOS reports RLIM_INFINITY but caps
         // setrlimit at kern.maxfilesperproc, so fall back through sane values.
@@ -82,42 +84,39 @@ fn raise_fd_limit() {
         candidates.sort_unstable_by(|a, b| b.cmp(a));
         candidates.dedup();
 
-        // The eXoDOS torrent has 14 011 files and librqbit holds an fd for
-        // each; anything below this leaves the main collection un-addable.
-        const COMFORTABLE: libc::rlim_t = 15_000;
+        // A quarter of this is the pool cap (1024 handles); below it the pool
+        // still works, with more reopen churn.
+        const COMFORTABLE: libc::rlim_t = 4096;
 
         for target in candidates {
             if target <= lim.rlim_cur {
-                break; // already high enough
+                return Some(format!("Open-file limit already {}", lim.rlim_cur));
             }
             let new = libc::rlimit {
                 rlim_cur: target,
                 rlim_max: lim.rlim_max,
             };
             if libc::setrlimit(libc::RLIMIT_NOFILE, &new) == 0 {
-                log::info!("Raised open-file limit: {} -> {}", lim.rlim_cur, target);
+                let mut line = format!("Raised open-file limit: {} -> {}", lim.rlim_cur, target);
                 if target < COMFORTABLE {
-                    log::warn!(
-                        "Open-file limit {} is below the ~{} needed for the main eXoDOS \
-                         torrent - downloads from it will fail with 'error opening ... in \
-                         read/write mode'. Raise kern.maxfilesperproc / ulimit -n.",
-                        target, COMFORTABLE
-                    );
+                    line.push_str(&format!(
+                        " (below the ~{COMFORTABLE} that keeps the torrent file pools churn-free)"
+                    ));
                 }
-                return;
+                return Some(line);
             }
         }
-        if lim.rlim_cur < COMFORTABLE {
-            log::warn!(
-                "Could not raise open-file limit above {} - large torrents may fail to add",
-                lim.rlim_cur
-            );
-        }
+        Some(format!(
+            "Could not raise open-file limit above {}",
+            lim.rlim_cur
+        ))
     }
 }
 
 #[cfg(not(unix))]
-fn raise_fd_limit() {}
+fn raise_fd_limit() -> Option<String> {
+    None
+}
 
 /// Copy the bundled pre-built DB to the target path.
 pub fn install_bundled_db(target: &Path) -> Result<(), String> {
@@ -576,7 +575,7 @@ fn disarm_accel_sentinel() {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    raise_fd_limit();
+    let fd_limit_report = raise_fd_limit();
 
     #[cfg(target_os = "linux")]
     apply_render_path();
@@ -595,7 +594,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .setup(|app| {
+        .setup(move |app| {
             // Logger first, so the rest of setup is captured.
             let log_dir = app.path().app_log_dir().ok();
             // Cache the log directory so the `get_log_dir` Tauri command can
@@ -607,6 +606,9 @@ pub fn run() {
             let log_path = log_dir.as_deref().and_then(init_logger);
             if let Some(ref p) = log_path {
                 log::info!("Log file: {}", p.display());
+            }
+            if let Some(ref line) = fd_limit_report {
+                log::info!("{line}");
             }
 
             // Cache the resource_dir BEFORE any code tries to read bundled metadata,
