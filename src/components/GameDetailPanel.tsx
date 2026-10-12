@@ -428,17 +428,15 @@ export function GameDetailPanel(props: Props) {
   });
 
   // Reset only when the displayed game changes: library refreshes replace
-  // the object for the same id.
-  let lastGameId: number | null | undefined = undefined;
+  // the object for the same id, and the memo's equality swallows those.
+  const shownGameId = createMemo(() => props.game?.id ?? null);
   let lastMetaKey: string | null = null;
   /** The CARD the last metadata load belonged to. Two variants of one card
    *  differ in `torrent_source`, so the load key cannot answer "same game". */
   let lastMetaCard: number | null = null;
-  createEffect(() => {
+  createEffect(on(shownGameId, () => {
     const g = props.game;
-    if (!g) { lastGameId = null; return; }
-    if (g.id === lastGameId) { return; }
-    lastGameId = g.id;
+    if (!g) { return; }
     // Restart-resume: extras may still be downloading for this installed
     // game with no live tracker (app restarted mid-extras).
     if (g.installed && g.id != null && g.gamedata_torrent_index != null) {
@@ -485,7 +483,7 @@ export function GameDetailPanel(props: Props) {
         setSelectedId(defaultVariant(v)?.id ?? g.id ?? null);
       }).catch(() => {});
     }
-  });
+  }));
 
   // eXo's magazine index: which issues covered THIS game, and on what page
   // (§19). Keyed on the selected variant's id - an LP row shares the English
