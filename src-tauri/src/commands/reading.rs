@@ -682,8 +682,23 @@ pub async fn launch_issue(
     let patched = super::games::patch_dosbox_conf(&conf, &working_dir, None, true)?;
     super::games::ensure_dosbox_resources(&app);
 
+    // Settings → Game defaults apply here as they do to a game; an issue has
+    // no per-issue settings, so this is the last fragment.
+    let (crt_auto, fullscreen, keyboard_layout) = {
+        let conn = db_state.lock()?;
+        super::games::global_launch_prefs(&conn)?
+    };
+    let frag = super::games::global_override_frag(false, crt_auto, fullscreen, keyboard_layout.as_deref());
+    let frag_path = super::paths::launch_conf_dir(&app)?
+        .join(format!("global_overrides_issue_{}.conf", issue_run_id(&issue.key)));
+    std::fs::write(&frag_path, &frag).map_err(|e| format!("Failed to write global override conf: {e}"))?;
+
     let mut cmd = std::process::Command::new(&bin);
-    cmd.current_dir(&working_dir).arg("-conf").arg(&patched);
+    cmd.current_dir(&working_dir)
+        .arg("-conf")
+        .arg(&patched)
+        .arg("-conf")
+        .arg(&frag_path);
     log::info!("Lesesaal: launching {} with {}", issue.title, conf.display());
     super::games::spawn_emulator_and_track(
         &app,

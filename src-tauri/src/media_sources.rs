@@ -50,6 +50,18 @@ impl MediaTorrentState {
     }
 }
 
+/// Every file the bundled media torrents declare. A media torrent persisted
+/// in an earlier session is restored with the session - placeholders and all -
+/// long before its manager exists, so the keep-list cannot wait for one.
+fn bundled_media_file_paths() -> Vec<String> {
+    MEDIA_SOURCES
+        .iter()
+        .filter_map(|s| bundled_torrent_path(s.torrent_file).ok())
+        .filter_map(|p| crate::torrent::TorrentIndex::from_file(&p).ok())
+        .flat_map(|index| index.files.into_iter().map(|f| f.path))
+        .collect()
+}
+
 /// Give every torrent in the session the union of all their file lists as its
 /// placeholder-cleanup keep-list. They all write into one root and cleanup
 /// deletes whatever no torrent claims, so this is re-unioned the moment a
@@ -62,6 +74,7 @@ where
         managers
             .clone()
             .flat_map(|m| m.index().files.iter().map(|f| f.path.clone()))
+            .chain(bundled_media_file_paths())
             .collect(),
     );
     for mgr in managers {

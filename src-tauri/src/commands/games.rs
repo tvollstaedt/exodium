@@ -880,7 +880,7 @@ fn lp_autoexec_compatible(
             && lower.as_bytes()[1] == b':'
             && lower.as_bytes()[0].is_ascii_alphabetic();
         if is_drive_switch
-            || ["mount ", "imgmount ", "echo ", "rem ", "set ", "config "]
+            || ["mount ", "imgmount ", "echo ", "rem ", "set ", "config ", "path=", "path "]
                 .iter()
                 .any(|p| lower.starts_with(p))
             || ["cls", "exit", "pause", "echo", "echo."].contains(&lower.as_str())
@@ -1171,7 +1171,10 @@ pub(crate) fn patch_dosbox_conf(
                 let lower = t.to_ascii_lowercase();
                 let is_drive_mount = lower.starts_with("imgmount ")
                     || (lower.starts_with("mount ") && !lower.starts_with("mount c "));
-                if is_drive_mount {
+                // An unmount (`imgmount d -u`) is eXo's post-game cleanup; carried
+                // over it would sit in front of the launch and take the CD away.
+                let is_unmount = lower.split_whitespace().any(|w| w == "-u");
+                if is_drive_mount && !is_unmount {
                     patched.push_str(&rewrite_host_paths(t, &to_lp_dir));
                     patched.push('\n');
                 }
@@ -1845,7 +1848,24 @@ pub async fn get_recently_played(state: State<'_, DbState>, limit: Option<usize>
 /// spelled per engine: Staging renamed it to `keyboard_layout` and IGNORES
 /// the old spelling (logs "renamed", keeps `auto`), ECE knows only the old
 /// one (§9). A layout that is not a plain code is dropped, not passed on.
-fn global_override_frag(
+/// The Settings → Game defaults trio as `global_override_frag` takes it:
+/// CRT on, fullscreen on, keyboard layout (unset when empty).
+pub(super) fn global_launch_prefs(
+    conn: &rusqlite::Connection,
+) -> Result<(bool, bool, Option<String>), String> {
+    let glshader = queries::get_config(conn, "global_glshader")
+        .map_err(|e| e.to_string())?
+        .unwrap_or_else(|| "crt-auto".to_string());
+    let fullscreen = queries::get_config(conn, "default_fullscreen")
+        .map_err(|e| e.to_string())?
+        .unwrap_or_else(|| "window".to_string());
+    let keyboard_layout = queries::get_config(conn, "keyboard_layout")
+        .map_err(|e| e.to_string())?
+        .filter(|v| !v.is_empty());
+    Ok((glshader == "crt-auto", fullscreen == "fullscreen", keyboard_layout))
+}
+
+pub(super) fn global_override_frag(
     use_ece: bool,
     crt_auto: bool,
     fullscreen: bool,
@@ -1884,28 +1904,13 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("Game with id {} not found", id))?;
         let data_dir = configured_data_dir(&conn)?;
-        let global_glshader = queries::get_config(&conn, "global_glshader")
-            .map_err(|e| e.to_string())?
-            .unwrap_or_else(|| "crt-auto".to_string());
-        let default_fullscreen = queries::get_config(&conn, "default_fullscreen")
-            .map_err(|e| e.to_string())?
-            .unwrap_or_else(|| "window".to_string());
-        let keyboard_layout = queries::get_config(&conn, "keyboard_layout")
-            .map_err(|e| e.to_string())?
-            .filter(|v| !v.is_empty());
+        let (crt_auto, fullscreen, keyboard_layout) = global_launch_prefs(&conn)?;
         let per_game_config = queries::get_all_game_config(&conn, id).map_err(|e| e.to_string())?;
         // Record the launch timestamp for "Recently Played" shelf.
         if let Err(e) = queries::set_last_played(&conn, id) {
             log::warn!("Failed to update last_played for {}: {}", game.title, e);
         }
-        (
-            game,
-            data_dir,
-            global_glshader == "crt-auto",
-            default_fullscreen == "fullscreen",
-            keyboard_layout,
-            per_game_config,
-        )
+        (game, data_dir, crt_auto, fullscreen, keyboard_layout, per_game_config)
     }; // lock dropped here - before path resolution + DOSBox spawning
 
     if !game.installed {
@@ -2953,7 +2958,7 @@ mod tests {
         let conf_content = "[autoexec]\n@mount c .\\eXoDOS\\cobmiss\n\
              imgmount d \".\\eXoDOS\\cobmiss\\cd\\game.cue\" -t cdrom\n\
              #imgmount e \".\\eXoDOS\\cobmiss\\cd\\other.cue\" -t cdrom\n\
-             c:\nimgmount e \".\\cd\\disc2.cue\" -t iso\n@cm\nexit\n";
+             c:\nimgmount e \".\\cd\\disc2.cue\" -t iso\n@cm\n@imgmount d -u\nexit\n";
         let conf_path = write_conf(working_dir, "dosbox.conf", conf_content);
 
         let patched_path = patch_dosbox_conf(
@@ -2977,6 +2982,7 @@ mod tests {
             patched
         );
         assert!(!patched.contains("other.cue"), "commented mounts stay out: {}", patched);
+        assert!(!patched.contains("imgmount d -u"), "the post-game unmount stays out: {}", patched);
         assert!(!patched.contains(".\\eXoDOS"), "no host path left unresolved: {}", patched);
         // Drive mounts follow `c:` so a guest-relative image (`.\cd\…`) is
         // read on C:, as authored.
