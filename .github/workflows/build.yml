@@ -95,6 +95,11 @@ jobs:
             echo "::error::keyboard layout staging is missing or placeholder-only - every game would run on the US layout"
             exit 1
           fi
+          # get-dosbox.sh only warns when the upstream zip's folder name changes.
+          if [[ "$RUNNER_OS" == "Windows" && ! -f src-tauri/resources/dosbox-bin/dosbox-staging.exe ]]; then
+            echo "::error::dosbox-bin staging is missing - the Windows bundle would ship Staging without its DLLs"
+            exit 1
+          fi
 
       # The Win9x emulators (DOSBox-X, 86Box) are NOT bundled anymore: they
       # ship as content packs (content-packs.yml builds them), saving 344 MB

@@ -450,8 +450,8 @@ switches between, and without it every adaptive CRT mode logs "Cannot locate
 shader preset" and drops to a plain shader. `get-dosbox.sh` stages both from
 the release archive (`resources/shaders`, `resources/shader-presets`; inside
 the macOS `.app` they sit under `Contents/Resources/`), `tauri.conf.json`
-bundles them, and `ensure_dosbox_shaders` copies each into DOSBox's own config
-dir gated on a sentinel FILE. 0.83.0 renamed `glshaders` to `shaders` and split
+bundles them, and `ensure_dosbox_resources` copies each into DOSBox's own
+config dir gated on a sentinel FILE. 0.83.0 renamed `glshaders` to `shaders` and split
 the presets out; the config KEY `glshader` is still accepted as a deprecated
 alias, so the launcher's fragments did not change.
 
@@ -465,7 +465,7 @@ and ECE has them compiled in. The config key was renamed to
 `keyboard_layout`, and unlike `glshader` the OLD spelling is logged as
 "renamed" and then DROPPED: `keyboardlayout = gr` under Staging runs on
 `auto` (host detection), so eXo's 337 `keyboardlayout=none` and the GLP's
-161 `=gr` never reached Staging. The user's global `keyboard_layout`
+167 `=gr` never reached Staging. The user's global `keyboard_layout`
 (Settings → Game defaults, #49) is therefore written per engine by
 `global_override_frag`: `keyboard_layout` for Staging, `keyboardlayout` for
 ECE, with the classic two-letter codes both accept (`gr`, `sp`, `su`).
@@ -745,17 +745,19 @@ a 15,000-entry file-progress vector plus a path String per selected file, and a
 peer serving two collections would be counted twice. Per-manager `status()` is
 only asked whether its torrent is live.
 
-**librqbit is patched (`[patch.crates-io]` in `Cargo.toml`), and the patch
-is one lock order.** 9.0.0-rc.0 (and 9.0.1, and `main`) has
-`update_only_files` hold the torrent's state write lock while it walks the
+**librqbit is a fork (`[patch.crates-io]` in `Cargo.toml`, four commits on
+`feat/lazy-file-open`), and the fork is permanent.** The first two commits
+are fixes upstream has since merged: a lock order (9.0.0-rc.0 had
+`update_only_files` hold the torrent's state write lock while it walked the
 peer DashMap, whereas every peer task holds its DashMap shard and then takes
-the state lock - `on_peer_died`, the chunk requester. A peer dying during a
-game download therefore deadlocks both, and since those are parking_lot locks
-taken on tokio workers, every worker parks and EVERY async command hangs: the
-Lesesaal showed it as "Preparing…" with nothing in the log (measured with
-`sample` on the wedged process, `docs/DECISIONS.md` 2026-09-20). The patch
-releases the state lock before the walk. Keep it until upstream carries the
-same reorder; an upgrade that drops the patch section brings the hang back.
+the state lock - a peer dying during a game download deadlocked both, and
+since those are parking_lot locks taken on tokio workers, EVERY async command
+hung: the Lesesaal showed it as "Preparing…" with nothing in the log, measured
+with `sample`, `docs/DECISIONS.md` 2026-09-20) and the Windows sparse marking
+(§21). The other two are the lazy file open below, which upstream will not
+take - so the pin can never drop to a plain crates.io version, and a move to
+a newer upstream means rebasing the fork and re-measuring on all three
+platforms.
 
 **The fork also opens torrent files lazily, and that one will not come from
 upstream.** Stock `FilesystemStorage::init` opens every file of a torrent

@@ -87,14 +87,17 @@ fi
 # failure, CI stub) would otherwise satisfy the skip forever and ship
 # shaderless bundles that crash DOSBox on fresh installs (crt-auto default).
 MANDATORY_SHADER="$STAGED_SHADERS/interpolation/bilinear.glsl"
+MANDATORY_PRESET="$STAGED_PRESETS/crt/crt-hyllian/hercules.preset"
 MANDATORY_KEYBOARD="$STAGED_KEYBOARD/KEYBOARD.SYS"
+MANDATORY_CPI="$STAGED_CPI/EGA.CPI"
 
 # Version stamp: a VERSION bump must re-download instead of silently keeping
 # the previously installed binary (dev/CI version drift).
 VERSION_STAMP="$BINARIES_DIR/.dosbox-version"
 STAMPED_VERSION="$(cat "$VERSION_STAMP" 2>/dev/null || true)"
 
-if [[ -f "$OUT_BIN" && -f "$MANDATORY_SHADER" && -f "$MANDATORY_KEYBOARD" \
+if [[ -f "$OUT_BIN" && -f "$MANDATORY_SHADER" && -f "$MANDATORY_PRESET" \
+      && -f "$MANDATORY_KEYBOARD" && -f "$MANDATORY_CPI" \
       && "$STAMPED_VERSION" == "$VERSION" \
       && "$NEEDS_DBS_BIN_STAGE" -eq 0 && "$FORCE" -eq 0 ]]; then
   echo "dosbox-staging-$TRIPLE $VERSION already present, skipping download."
