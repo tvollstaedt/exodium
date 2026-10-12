@@ -53,12 +53,16 @@ esac
 OUT_BIN="$BINARIES_DIR/dosbox-staging-$TRIPLE"
 [[ "$OS" == MINGW* || "$OS" == MSYS* || "$OS" == CYGWIN* ]] && OUT_BIN="${OUT_BIN}.exe"
 
-# Tauri bundles shaders from here via bundle.resources. Must exist before
+# Tauri bundles these from here via bundle.resources. Must exist before
 # `tauri build` runs, otherwise the build script errors with
 # "resource path doesn't exist". Declared early so the outer skip-check
-# can require both binary AND staged shaders before bailing out.
+# can require both binary AND staged resources before bailing out.
 STAGED_SHADERS="$REPO_ROOT/src-tauri/resources/dosbox-shaders"
 STAGED_PRESETS="$REPO_ROOT/src-tauri/resources/dosbox-shader-presets"
+# Keyboard layouts and the code-page fonts they need: without BOTH, Staging
+# silently runs every game on the US layout.
+STAGED_KEYBOARD="$REPO_ROOT/src-tauri/resources/dosbox-freedos-keyboard"
+STAGED_CPI="$REPO_ROOT/src-tauri/resources/dosbox-freedos-cpi"
 
 # Same trick for the dosbox-bin folder. On Windows we populate it below
 # with the entire DOSBox Staging folder (dosbox-staging.exe + 9 DLLs +
@@ -83,13 +87,15 @@ fi
 # failure, CI stub) would otherwise satisfy the skip forever and ship
 # shaderless bundles that crash DOSBox on fresh installs (crt-auto default).
 MANDATORY_SHADER="$STAGED_SHADERS/interpolation/bilinear.glsl"
+MANDATORY_KEYBOARD="$STAGED_KEYBOARD/KEYBOARD.SYS"
 
 # Version stamp: a VERSION bump must re-download instead of silently keeping
 # the previously installed binary (dev/CI version drift).
 VERSION_STAMP="$BINARIES_DIR/.dosbox-version"
 STAMPED_VERSION="$(cat "$VERSION_STAMP" 2>/dev/null || true)"
 
-if [[ -f "$OUT_BIN" && -f "$MANDATORY_SHADER" && "$STAMPED_VERSION" == "$VERSION" \
+if [[ -f "$OUT_BIN" && -f "$MANDATORY_SHADER" && -f "$MANDATORY_KEYBOARD" \
+      && "$STAMPED_VERSION" == "$VERSION" \
       && "$NEEDS_DBS_BIN_STAGE" -eq 0 && "$FORCE" -eq 0 ]]; then
   echo "dosbox-staging-$TRIPLE $VERSION already present, skipping download."
 else
@@ -146,14 +152,17 @@ stage_dir_from() {
   fi
 }
 
-# Shaders live in two sibling dirs: `shaders` holds the shader files (the
-# fallback among them, without which Staging aborts at startup), while
-# `shader-presets` holds the variants crt-auto switches between - missing
-# presets are not fatal but degrade every adaptive CRT mode.
-stage_shaders_from() {
-  local shaders="$1" presets="$2"
+# Four resource dirs from the upstream `resources/` folder: `shaders` (the
+# fallback among them, without which Staging aborts at startup),
+# `shader-presets` (the variants crt-auto switches between - missing ones
+# degrade every adaptive CRT mode), `freedos-keyboard` and `freedos-cpi`
+# (a layout only loads when its code page font is there too).
+stage_resources_from() {
+  local shaders="$1" presets="$2" keyboard="$3" cpi="$4"
   stage_dir_from "$shaders" "$STAGED_SHADERS"
   stage_dir_from "$presets" "$STAGED_PRESETS"
+  stage_dir_from "$keyboard" "$STAGED_KEYBOARD"
+  stage_dir_from "$cpi" "$STAGED_CPI"
   if [[ -n "$shaders" && -d "$shaders" ]]; then
     echo "Staged shaders for bundling: $STAGED_SHADERS"
   else
@@ -164,21 +173,24 @@ stage_shaders_from() {
   if [[ -z "$presets" || ! -d "$presets" ]]; then
     echo "WARNING: No upstream shader presets found; crt-auto will fall back to a plain shader."
   fi
+  if [[ -z "$keyboard" || ! -d "$keyboard" || -z "$cpi" || ! -d "$cpi" ]]; then
+    echo "WARNING: No upstream keyboard layouts / code pages found; every game runs on the US layout."
+  fi
 }
 
-# Install both dirs into DOSBox's own config dir so local dev runs work.
-install_dev_shaders() {
-  local dir="$1" shaders="$2" presets="$3"
+# Install the same dirs into DOSBox's own config dir so local dev runs work.
+install_dev_resources() {
+  local dir="$1"; shift
   mkdir -p "$dir"
-  if [[ -n "$shaders" && -d "$shaders" ]]; then
-    rm -rf "$dir/shaders"
-    cp -r "$shaders" "$dir/shaders"
-  fi
-  if [[ -n "$presets" && -d "$presets" ]]; then
-    rm -rf "$dir/shader-presets"
-    cp -r "$presets" "$dir/shader-presets"
-  fi
-  echo "Installed dev shaders to $dir"
+  local src leaf
+  for src in "$@"; do
+    if [[ -n "$src" && -d "$src" ]]; then
+      leaf="$(basename "$src")"
+      rm -rf "$dir/$leaf"
+      cp -r "$src" "$dir/$leaf"
+    fi
+  done
+  echo "Installed dev resources to $dir"
 }
 
 if [[ "$ARCHIVE" == *.dmg ]]; then
@@ -191,22 +203,21 @@ if [[ "$ARCHIVE" == *.dmg ]]; then
   # Stage + install GLSL shaders. macOS runtime uses `output = texture` in
   # launch_game, so shaders aren't strictly needed, but staging keeps the
   # bundle consistent across platforms.
-  SHADER_SRC="$APP/Contents/Resources/shaders"
-  PRESET_SRC="$APP/Contents/Resources/shader-presets"
   # Copy sources out of the mount before detaching.
-  SHADER_TMP="$TMP_DIR/shaders"
-  PRESET_TMP="$TMP_DIR/shader-presets"
-  if [[ -d "$SHADER_SRC" ]]; then
-    cp -r "$SHADER_SRC" "$SHADER_TMP"
-  fi
-  if [[ -d "$PRESET_SRC" ]]; then
-    cp -r "$PRESET_SRC" "$PRESET_TMP"
-  fi
+  for leaf in shaders shader-presets freedos-keyboard freedos-cpi; do
+    if [[ -d "$APP/Contents/Resources/$leaf" ]]; then
+      cp -r "$APP/Contents/Resources/$leaf" "$TMP_DIR/$leaf"
+    fi
+  done
   hdiutil detach -quiet "$MOUNT_POINT"
   rm -rf "$MOUNT_POINT"
-  stage_shaders_from "$SHADER_TMP" "$PRESET_TMP"
+  SHADER_TMP="$TMP_DIR/shaders"
+  PRESET_TMP="$TMP_DIR/shader-presets"
+  KEYBOARD_TMP="$TMP_DIR/freedos-keyboard"
+  CPI_TMP="$TMP_DIR/freedos-cpi"
+  stage_resources_from "$SHADER_TMP" "$PRESET_TMP" "$KEYBOARD_TMP" "$CPI_TMP"
   if [[ -d "$SHADER_TMP" ]]; then
-    install_dev_shaders "$HOME/Library/Preferences/DOSBox" "$SHADER_TMP" "$PRESET_TMP"
+    install_dev_resources "$HOME/Library/Preferences/DOSBox" "$SHADER_TMP" "$PRESET_TMP" "$KEYBOARD_TMP" "$CPI_TMP"
   fi
 elif [[ "$ARCHIVE" == *.tar.xz ]]; then
   tar -xJf "$TMP_DIR/$ARCHIVE" -C "$TMP_DIR"
@@ -219,9 +230,11 @@ elif [[ "$ARCHIVE" == *.tar.xz ]]; then
   # "Fallback shader 'interpolation/bilinear' not found".
   SHADER_SRC="$(find "$TMP_DIR" -type d -name "shaders" | head -1)"
   PRESET_SRC="$(find "$TMP_DIR" -type d -name "shader-presets" | head -1)"
-  stage_shaders_from "$SHADER_SRC" "$PRESET_SRC"
+  KEYBOARD_SRC="$(find "$TMP_DIR" -type d -name "freedos-keyboard" | head -1)"
+  CPI_SRC="$(find "$TMP_DIR" -type d -name "freedos-cpi" | head -1)"
+  stage_resources_from "$SHADER_SRC" "$PRESET_SRC" "$KEYBOARD_SRC" "$CPI_SRC"
   if [[ -n "$SHADER_SRC" ]]; then
-    install_dev_shaders "${XDG_CONFIG_HOME:-$HOME/.config}/dosbox" "$SHADER_SRC" "$PRESET_SRC"
+    install_dev_resources "${XDG_CONFIG_HOME:-$HOME/.config}/dosbox" "$SHADER_SRC" "$PRESET_SRC" "$KEYBOARD_SRC" "$CPI_SRC"
   fi
 elif [[ "$ARCHIVE" == *.zip ]]; then
   unzip -q "$TMP_DIR/$ARCHIVE" -d "$TMP_DIR/extracted"
@@ -234,9 +247,11 @@ elif [[ "$ARCHIVE" == *.zip ]]; then
   # it aborts with "Fallback shader 'interpolation/bilinear' not found".
   SHADER_SRC="$(find "$TMP_DIR/extracted" -type d -name "shaders" | head -1)"
   PRESET_SRC="$(find "$TMP_DIR/extracted" -type d -name "shader-presets" | head -1)"
-  stage_shaders_from "$SHADER_SRC" "$PRESET_SRC"
+  KEYBOARD_SRC="$(find "$TMP_DIR/extracted" -type d -name "freedos-keyboard" | head -1)"
+  CPI_SRC="$(find "$TMP_DIR/extracted" -type d -name "freedos-cpi" | head -1)"
+  stage_resources_from "$SHADER_SRC" "$PRESET_SRC" "$KEYBOARD_SRC" "$CPI_SRC"
   if [[ -n "$SHADER_SRC" ]]; then
-    install_dev_shaders "${LOCALAPPDATA:-$HOME/AppData/Local}/DOSBox" "$SHADER_SRC" "$PRESET_SRC"
+    install_dev_resources "${LOCALAPPDATA:-$HOME/AppData/Local}/DOSBox" "$SHADER_SRC" "$PRESET_SRC" "$KEYBOARD_SRC" "$CPI_SRC"
   fi
   # Stage the full DOSBox folder so we can ship its DLLs + resources/ next
   # to the .exe in our bundle. Without SDL2.dll, vcruntime140.dll, the

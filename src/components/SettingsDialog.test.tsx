@@ -66,3 +66,43 @@ describe("SettingsDialog preview sound", () => {
     dispose();
   });
 });
+
+const keyboardLayout = () => document.getElementById("keyboard-layout") as HTMLSelectElement;
+
+/** One global `keyboard_layout` key; empty means "leave the game's conf alone". */
+describe("SettingsDialog keyboard layout", () => {
+  beforeEach(() => {
+    mockInvoke.mockReset();
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("shows the stored layout and writes a new choice back", async () => {
+    mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "get_config" && (args as { key: string }).key === "keyboard_layout") { return "gr"; }
+      return null;
+    });
+    const dispose = mount();
+    await flush();
+
+    expect(keyboardLayout().value).toBe("gr");
+
+    keyboardLayout().value = "fr";
+    keyboardLayout().dispatchEvent(new Event("change"));
+    await flush();
+
+    expect(mockInvoke).toHaveBeenCalledWith("set_config", { key: "keyboard_layout", value: "fr" });
+    dispose();
+  });
+
+  it("defaults to the game's own setting when nothing is stored", async () => {
+    mockInvoke.mockImplementation(async () => null);
+    const dispose = mount();
+    await flush();
+
+    expect(keyboardLayout().value).toBe("");
+    dispose();
+  });
+});

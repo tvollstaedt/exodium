@@ -91,6 +91,10 @@ jobs:
             echo "::error::shader-presets staging is missing or placeholder-only - crt-auto would degrade to a plain shader"
             exit 1
           fi
+          if [[ ! -f src-tauri/resources/dosbox-freedos-keyboard/KEYBOARD.SYS || ! -f src-tauri/resources/dosbox-freedos-cpi/EGA.CPI ]]; then
+            echo "::error::keyboard layout staging is missing or placeholder-only - every game would run on the US layout"
+            exit 1
+          fi
 
       # The Win9x emulators (DOSBox-X, 86Box) are NOT bundled anymore: they
       # ship as content packs (content-packs.yml builds them), saving 344 MB

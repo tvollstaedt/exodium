@@ -680,7 +680,7 @@ pub async fn launch_issue(
     let bin = super::games::resolve_engine(None, &torrent_root, &Default::default())
         .unwrap_or_else(|| super::games::resolve_dosbox(&app));
     let patched = super::games::patch_dosbox_conf(&conf, &working_dir, None, true)?;
-    super::games::ensure_dosbox_shaders(&app);
+    super::games::ensure_dosbox_resources(&app);
 
     let mut cmd = std::process::Command::new(&bin);
     cmd.current_dir(&working_dir).arg("-conf").arg(&patched);

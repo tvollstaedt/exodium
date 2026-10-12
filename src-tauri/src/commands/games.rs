@@ -1708,20 +1708,22 @@ fn dosbox_user_config_dir() -> Option<PathBuf> {
     }
 }
 
-/// Copy the bundled shaders into DOSBox's user config dir. Without the shader
-/// set Staging aborts at startup ("Error setting fallback shaders"); without
-/// the presets every adaptive CRT mode degrades to a plain shader. Each is
-/// gated on a FILE, not the dir: an empty dir has been seen in the wild.
-pub(crate) fn ensure_dosbox_shaders(app: &AppHandle) {
+/// Copy the bundled Staging resources into DOSBox's user config dir. Without
+/// the shader set Staging aborts at startup ("Error setting fallback
+/// shaders"); without the presets every adaptive CRT mode degrades to a plain
+/// shader; without the keyboard layouts AND their code-page fonts every game
+/// runs on the US layout (§9). Each is gated on a FILE, not the dir: an empty
+/// dir has been seen in the wild.
+pub(crate) fn ensure_dosbox_resources(app: &AppHandle) {
     use tauri::Manager;
 
     let Some(config_dir) = dosbox_user_config_dir() else {
-        log::warn!("Could not determine DOSBox user config dir; shaders not installed");
+        log::warn!("Could not determine DOSBox user config dir; resources not installed");
         return;
     };
 
     // (user dir leaf, sentinel below it, bundle candidates newest layout first)
-    let sets: [(&str, &str, &[&str]); 2] = [
+    let sets: [(&str, &str, &[&str]); 4] = [
         (
             "shaders",
             "interpolation/bilinear.glsl",
@@ -1732,12 +1734,22 @@ pub(crate) fn ensure_dosbox_shaders(app: &AppHandle) {
             "crt/crt-hyllian/hercules.preset",
             &["shader-presets", "dosbox-shader-presets", "resources/dosbox-shader-presets"],
         ),
+        (
+            "freedos-keyboard",
+            "KEYBOARD.SYS",
+            &["freedos-keyboard", "dosbox-freedos-keyboard", "resources/dosbox-freedos-keyboard"],
+        ),
+        (
+            "freedos-cpi",
+            "EGA.CPI",
+            &["freedos-cpi", "dosbox-freedos-cpi", "resources/dosbox-freedos-cpi"],
+        ),
     ];
 
     let res_dir = match app.path().resource_dir() {
         Ok(d) => d,
         Err(e) => {
-            log::warn!("resource_dir() failed while installing DOSBox shaders: {}", e);
+            log::warn!("resource_dir() failed while installing DOSBox resources: {}", e);
             return;
         }
     };
@@ -1829,6 +1841,36 @@ pub async fn get_recently_played(state: State<'_, DbState>, limit: Option<usize>
 }
 
 
+/// The user's global defaults as a `-conf` fragment. The layout key is
+/// spelled per engine: Staging renamed it to `keyboard_layout` and IGNORES
+/// the old spelling (logs "renamed", keeps `auto`), ECE knows only the old
+/// one (§9). A layout that is not a plain code is dropped, not passed on.
+fn global_override_frag(
+    use_ece: bool,
+    crt_auto: bool,
+    fullscreen: bool,
+    keyboard_layout: Option<&str>,
+) -> String {
+    let fullscreen_val = if fullscreen { "true" } else { "false" };
+    let mut frag = format!("[sdl]\nfullscreen = {fullscreen_val}\n");
+    // glshader is Staging-specific; under ECE only fullscreen applies.
+    if !use_ece {
+        let glshader_val = if crt_auto { "crt-auto" } else { "sharp" };
+        frag.push_str(&format!("[render]\nglshader = {glshader_val}\n"));
+    }
+    if let Some(layout) = keyboard_layout {
+        let is_code = (2..=6).contains(&layout.len())
+            && layout.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit());
+        if is_code {
+            let key = if use_ece { "keyboardlayout" } else { "keyboard_layout" };
+            frag.push_str(&format!("[dos]\n{key} = {layout}\n"));
+        } else {
+            log::warn!("Ignoring keyboard_layout {layout:?}: not a layout code");
+        }
+    }
+    frag
+}
+
 #[tauri::command]
 pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) -> Result<String, String> {
     // Serialize against uninstall/download of the same game (see game_op_lock).
@@ -1836,7 +1878,7 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
     let _op_guard = op_lock.lock().await;
     // Read everything we need from the DB and drop the lock before the heavy
     // DOSBox path resolution + process spawning below.
-    let (game, data_dir, crt_auto_enabled, fullscreen_enabled, per_game_config) = {
+    let (game, data_dir, crt_auto_enabled, fullscreen_enabled, keyboard_layout, per_game_config) = {
         let conn = db_state.lock()?;
         let game = queries::fetch_game_by_id(&conn, id)
             .map_err(|e| e.to_string())?
@@ -1848,12 +1890,22 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
         let default_fullscreen = queries::get_config(&conn, "default_fullscreen")
             .map_err(|e| e.to_string())?
             .unwrap_or_else(|| "window".to_string());
+        let keyboard_layout = queries::get_config(&conn, "keyboard_layout")
+            .map_err(|e| e.to_string())?
+            .filter(|v| !v.is_empty());
         let per_game_config = queries::get_all_game_config(&conn, id).map_err(|e| e.to_string())?;
         // Record the launch timestamp for "Recently Played" shelf.
         if let Err(e) = queries::set_last_played(&conn, id) {
             log::warn!("Failed to update last_played for {}: {}", game.title, e);
         }
-        (game, data_dir, global_glshader == "crt-auto", default_fullscreen == "fullscreen", per_game_config)
+        (
+            game,
+            data_dir,
+            global_glshader == "crt-auto",
+            default_fullscreen == "fullscreen",
+            keyboard_layout,
+            per_game_config,
+        )
     }; // lock dropped here - before path resolution + DOSBox spawning
 
     if !game.installed {
@@ -1996,7 +2048,7 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
     );
 
     // Every launch: one stat once installed, and it repairs an empty dir.
-    ensure_dosbox_shaders(&app);
+    ensure_dosbox_resources(&app);
 
     let dosbox_bin = ece_bin.unwrap_or_else(|| resolve_dosbox(&app));
     let mut cmd = Command::new(&dosbox_bin);
@@ -2022,16 +2074,12 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
     // User preferences, applied LAST and written for both states: Staging
     // defaults glshader to crt-auto, so "off" has to be an explicit value.
     {
-        let glshader_val = if crt_auto_enabled { "crt-auto" } else { "sharp" };
-        let fullscreen_val = if fullscreen_enabled { "true" } else { "false" };
-        // glshader is Staging-specific; under ECE only fullscreen applies.
-        let frag = if use_ece {
-            format!("[sdl]\nfullscreen = {fullscreen_val}\n")
-        } else {
-            format!(
-                "[sdl]\nfullscreen = {fullscreen_val}\n[render]\nglshader = {glshader_val}\n"
-            )
-        };
+        let frag = global_override_frag(
+            use_ece,
+            crt_auto_enabled,
+            fullscreen_enabled,
+            keyboard_layout.as_deref(),
+        );
         let conf_path = launch_conf_dir(&app)?.join(format!("global_overrides_{}.conf", id));
         std::fs::write(&conf_path, &frag)
             .map_err(|e| format!("Failed to write global override conf: {e}"))?;
@@ -2206,6 +2254,30 @@ pub(crate) fn spawn_emulator_and_track(
 
 #[cfg(test)]
 mod tests {
+
+    /// Staging only honours the renamed key, ECE only the old one.
+    #[test]
+    fn keyboard_layout_key_is_spelled_per_engine() {
+        let staging = global_override_frag(false, true, false, Some("gr"));
+        assert!(staging.contains("[dos]\nkeyboard_layout = gr\n"), "{staging}");
+        assert!(!staging.contains("keyboardlayout ="), "{staging}");
+        let ece = global_override_frag(true, true, false, Some("gr"));
+        assert!(ece.contains("[dos]\nkeyboardlayout = gr\n"), "{ece}");
+        assert!(!ece.contains("keyboard_layout"), "{ece}");
+        assert!(!ece.contains("glshader"), "ECE has no shader pipeline: {ece}");
+    }
+
+    /// Unset leaves eXo's own value alone; a non-code never reaches the conf.
+    #[test]
+    fn keyboard_layout_is_omitted_when_unset_or_malformed() {
+        for layout in [None, Some("de\n[sdl]\nfullscreen = true"), Some("x"), Some("GR")] {
+            let frag = global_override_frag(false, true, false, layout);
+            assert!(!frag.contains("[dos]"), "{layout:?} -> {frag}");
+            assert_eq!(frag.matches("fullscreen").count(), 1, "{layout:?} -> {frag}");
+        }
+        assert!(global_override_frag(false, false, true, Some("auto")).contains("keyboard_layout = auto"));
+        assert!(global_override_frag(false, false, true, Some("uk168")).contains("keyboard_layout = uk168"));
+    }
 
     /// The emulator's view of a mounted host directory is case-insensitive,
     /// so the probe's must be too. Only Linux can fail this - which is where

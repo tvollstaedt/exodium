@@ -67,6 +67,8 @@
       "resources/previews/eXoMedia": "previews/eXoMedia",
       "resources/dosbox-shaders": "shaders",
       "resources/dosbox-shader-presets": "shader-presets",
+      "resources/dosbox-freedos-keyboard": "freedos-keyboard",
+      "resources/dosbox-freedos-cpi": "freedos-cpi",
       "resources/dosbox-bin": "dosbox-bin"
     },
     "icon": [

@@ -455,6 +455,21 @@ dir gated on a sentinel FILE. 0.83.0 renamed `glshaders` to `shaders` and split
 the presets out; the config KEY `glshader` is still accepted as a deprecated
 alias, so the launcher's fragments did not change.
 
+**Keyboard layouts are TWO more staged dirs, and Staging ignores the key
+eXo's confs spell.** `freedos-keyboard/` holds the layouts, `freedos-cpi/`
+the code-page fonts a non-US layout needs - with the first alone KEYB
+reports `us`, with neither "not loaded" (measured, 0.83.0, `keyb > file`
+from a mounted dir). Both are staged and installed next to the shaders by
+`ensure_dosbox_resources`; Windows gets them inside `dosbox-bin/resources/`
+and ECE has them compiled in. The config key was renamed to
+`keyboard_layout`, and unlike `glshader` the OLD spelling is logged as
+"renamed" and then DROPPED: `keyboardlayout = gr` under Staging runs on
+`auto` (host detection), so eXo's 337 `keyboardlayout=none` and the GLP's
+161 `=gr` never reached Staging. The user's global `keyboard_layout`
+(Settings → Game defaults, #49) is therefore written per engine by
+`global_override_frag`: `keyboard_layout` for Staging, `keyboardlayout` for
+ECE, with the classic two-letter codes both accept (`gr`, `sp`, `su`).
+
 **`resolve_engine` is the ONLY place that decides ECE vs Staging** - the
 launcher picks the binary from it, the detail panel labels the engine from it,
 and the printing and shader notes state their limitation from it. The answer

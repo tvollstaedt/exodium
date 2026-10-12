@@ -35,6 +35,35 @@ const SECTIONS: { id: SettingsSection; label: string; icon: Component<LucideProp
   { id: "about", label: "About", icon: Info },
 ];
 
+/** Layout codes both DOSBox Staging and DOSBox ECE accept (the classic
+ *  two-letter spellings: `gr`, not `de`). Empty = leave the game's conf alone. */
+const KEYBOARD_LAYOUTS: [string, string][] = [
+  ["", "Game default"],
+  ["auto", "Match the host"],
+  ["us", "US"],
+  ["uk", "UK"],
+  ["gr", "German"],
+  ["sg", "Swiss German"],
+  ["fr", "French"],
+  ["sf", "Swiss French"],
+  ["be", "Belgian"],
+  ["nl", "Dutch"],
+  ["sp", "Spanish"],
+  ["it", "Italian"],
+  ["po", "Portuguese"],
+  ["br", "Brazilian"],
+  ["pl", "Polish"],
+  ["cz", "Czech"],
+  ["hu", "Hungarian"],
+  ["hr", "Croatian"],
+  ["dk", "Danish"],
+  ["no", "Norwegian"],
+  ["sv", "Swedish"],
+  ["su", "Finnish"],
+  ["ru", "Russian"],
+  ["tr", "Turkish"],
+];
+
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -56,6 +85,7 @@ export function SettingsDialog(props: Props) {
   // Game defaults mirror launch_game's own defaults until the load lands.
   const [crtAuto, setCrtAuto] = createSignal(true);
   const [defaultFullscreen, setDefaultFullscreen] = createSignal(false);
+  const [keyboardLayout, setKeyboardLayout] = createSignal("");
   const [scanning, setScanning] = createSignal(false);
   const [scanResult, setScanResult] = createSignal("");
   const [logOpenError, setLogOpenError] = createSignal("");
@@ -79,14 +109,16 @@ export function SettingsDialog(props: Props) {
     loadSeeding();
     win9xNetworkStatus().then(setNetStatus).catch(() => {});
     try {
-      const [shader, fs, down, up] = await Promise.all([
+      const [shader, fs, layout, down, up] = await Promise.all([
         getConfig("global_glshader"),
         getConfig("default_fullscreen"),
+        getConfig("keyboard_layout"),
         getConfig("rate_limit_down_kbps"),
         getConfig("rate_limit_up_kbps"),
       ]);
       setCrtAuto(shader == null || shader === "crt-auto");
       setDefaultFullscreen(fs === "fullscreen");
+      setKeyboardLayout(layout ?? "");
       setLimitDown(down ?? "");
       setLimitUp(up ?? "");
     } catch (e) {
@@ -102,6 +134,17 @@ export function SettingsDialog(props: Props) {
     } catch (e) {
       console.error(`[settings] failed to save ${key}:`, e);
       set(!next);
+    }
+  };
+
+  const saveKeyboardLayout = async (next: string) => {
+    const prev = keyboardLayout();
+    setKeyboardLayout(next);
+    try {
+      await setConfig("keyboard_layout", next);
+    } catch (e) {
+      console.error("[settings] failed to save keyboard_layout:", e);
+      setKeyboardLayout(prev);
     }
   };
 
@@ -260,6 +303,16 @@ export function SettingsDialog(props: Props) {
                         <SettingRow htmlFor="fullscreen" label="Launch in fullscreen" hint="Alt+Enter still toggles at runtime.">
                           <SettingSwitch id="fullscreen" checked={defaultFullscreen()} label="Launch in fullscreen"
                             onChange={saveToggle("default_fullscreen", "fullscreen", "window", setDefaultFullscreen)} />
+                        </SettingRow>
+                        <SettingRow htmlFor="keyboard-layout" label="Keyboard layout" hint="The DOS keyboard layout inside every game. A game's own settings still win.">
+                          <select
+                            id="keyboard-layout"
+                            class="game-settings-select"
+                            value={keyboardLayout()}
+                            onChange={(e) => void saveKeyboardLayout(e.currentTarget.value)}
+                          >
+                            <For each={KEYBOARD_LAYOUTS}>{([code, label]) => <option value={code}>{label}</option>}</For>
+                          </select>
                         </SettingRow>
                       </section>
 
