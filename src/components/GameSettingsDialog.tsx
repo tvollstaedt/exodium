@@ -1,4 +1,4 @@
-import { createSignal, createEffect, Show, For } from "solid-js";
+import { createSignal, createEffect, createMemo, on, Show, For } from "solid-js";
 import { Portal } from "solid-js/web";
 import { Dialog } from "@ark-ui/solid/dialog";
 import { gameEngineInfo, getGameSettings, setGameSettings, scummvmVariants, setScummvmOptions, type ScummVmVariants } from "../api/tauri";
@@ -48,9 +48,13 @@ export function GameSettingsDialog(props: GameSettingsDialogProps) {
     return (sub?.has_subtitles ?? false) || v.has_subtitles;
   };
 
-  createEffect(() => {
-    if (!props.open || props.gameId == null) { return; }
-    const id = props.gameId;
+  // Memo, not a plain read: the id arrives through the panel's `selected()`
+  // getter, which notifies on every library refresh with the same number.
+  // An effect re-run on that resets `svm` below, and a ScummVM game then
+  // swaps between the two layouts for every refresh after a download (#40).
+  const loadKey = createMemo(() => (props.open && props.gameId != null ? props.gameId : null));
+  createEffect(on(loadKey, (id) => {
+    if (id == null) { return; }
     // Reset synchronously before the async load resolves - signals persist
     // across opens, so without this the previous game's values are visible
     // (and saveable onto the wrong game) until the fetch lands.
@@ -81,7 +85,7 @@ export function GameSettingsDialog(props: GameSettingsDialogProps) {
       setCycles(s.cycles ?? "");
       setCustomConf(s.custom_conf ?? "");
     }).catch(() => {});
-  });
+  }));
 
   const handleSave = async () => {
     if (props.gameId == null) { return; }

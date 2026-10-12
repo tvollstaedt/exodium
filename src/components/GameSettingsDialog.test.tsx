@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render } from "solid-js/web";
+import { createSignal } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { GameSettingsDialog } from "./GameSettingsDialog";
 
@@ -167,6 +168,47 @@ describe("GameSettingsDialog", () => {
       id: 1,
       options: { variant: "Maniac Mansion (DOS v1)", sub: "Maniac Mansion EGA", sound: "Sound Blaster", subtitles: false, aspect: true },
     });
+    dispose();
+  });
+
+  /** Regression (#40): the panel hands the id through `selected()`, a plain
+   *  getter that notifies on every library refresh with the same number. The
+   *  loader used to re-run on each, reset `svm` and swap a ScummVM game
+   *  between the two layouts until the fetch landed again. */
+  it("keeps the loaded layout when an upstream signal ticks with the same id", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_game_settings") { return NO_SETTINGS; }
+      if (cmd === "game_engine_info") { return { ece_available: false, uses_ece: false }; }
+      if (cmd === "scummvm_variants") {
+        return {
+          variants: [{ name: "DOS", subs: [], sounds: [], has_subtitles: false }],
+          selected: { variant: "DOS", sub: null, sound: null, subtitles: false, aspect: true },
+        };
+      }
+      return null;
+    });
+    const [tick, setTick] = createSignal(0);
+    const gameId = () => { tick(); return 1; };
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const dispose = render(
+      () => <GameSettingsDialog gameId={gameId()} gameTitle="King's Quest V" open onClose={() => {}} />,
+      host,
+    );
+    await flush();
+    const aspect = selectFor("Aspect ratio");
+    expect(aspect).toBeDefined();
+    const loads = () => mockInvoke.mock.calls.filter(([cmd]) => cmd === "scummvm_variants").length;
+    expect(loads()).toBe(1);
+
+    for (let i = 1; i <= 3; i++) {
+      setTick(i);
+      // Synchronously after the notify: the DOSBox rows must not appear.
+      expect(selectFor("CPU Cycles")).toBeUndefined();
+      await flush();
+    }
+    expect(loads()).toBe(1);
+    expect(selectFor("Aspect ratio")).toBe(aspect);
     dispose();
   });
 });
