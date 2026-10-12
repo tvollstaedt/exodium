@@ -477,8 +477,9 @@ export function GameDetailPanel(props: Props) {
     if (g.shortcode && isMultiLang()) {
       const shortcode = g.shortcode;
       loadVariants(g).then((v) => {
-        // Guard: game may have changed while the async call was in flight
-        if (props.game?.shortcode !== shortcode) { return; }
+        // Guard: game may have changed while the async call was in flight;
+        // the shortcode alone repeats across pack families (§1).
+        if (props.game?.id !== g.id || props.game?.shortcode !== shortcode) { return; }
         setVariants(v);
         setSelectedId(defaultVariant(v)?.id ?? g.id ?? null);
       }).catch(() => {});
@@ -494,12 +495,14 @@ export function GameDetailPanel(props: Props) {
   const [noticeFor, setNoticeFor] = createSignal<Issue | null>(null);
   const [readingPage, setReadingPage] = createSignal<number | null>(null);
 
-  createEffect(() => {
-    const id = selected()?.id;
+  const articlesFor = createMemo(() => selected()?.id ?? null);
+  createEffect(on(articlesFor, (id) => {
     setArticles([]);
     if (id == null) { return; }
-    void gameArticles(id).then(setArticles).catch(() => setArticles([]));
-  });
+    gameArticles(id)
+      .then((rows) => { if (articlesFor() === id) { setArticles(rows); } })
+      .catch(() => {});
+  }));
 
   // The selected variant's language leads; the rest keep eXo's order.
   const orderedArticles = createMemo(() => {

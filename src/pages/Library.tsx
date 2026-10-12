@@ -1,4 +1,4 @@
-import { onMount, onCleanup, For, Show, createSignal, createMemo, createEffect } from "solid-js";
+import { onMount, onCleanup, For, Show, createSignal, createMemo, createEffect, on } from "solid-js";
 import { Portal } from "solid-js/web";
 import {
   games, loading, error, hasMore, totalGames,
@@ -137,9 +137,10 @@ export function Library() {
   });
 
   // Library change: refresh the shelves (separate queries) and re-fetch
-  // the detail panel's row by id.
-  createEffect(() => {
-    const change = lastGameLibraryChange();
+  // the detail panel's row by id. `on`, so `detailGame` is read untracked:
+  // the `setDetailGame(fresh)` below would otherwise re-run this effect
+  // and every fetch round-trip became another refresh, forever (#40).
+  createEffect(on(lastGameLibraryChange, (change) => {
     if (!change) { return; }
     void refreshShelves();
     // Playlist shelf cards show installed/in_library state too.
@@ -152,7 +153,7 @@ export function Library() {
         }
       }).catch(() => {});
     }
-  });
+  }));
 
   // "Back to top" on upward scroll only, below the shelf; a delta filter
   // against trackpad jitter.

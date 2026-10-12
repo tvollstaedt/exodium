@@ -97,11 +97,12 @@ describe("SettingsDialog keyboard layout", () => {
     dispose();
   });
 
-  it("defaults to the game's own setting when nothing is stored", async () => {
+  it("reads the stored layout on open and shows the game default when none is stored", async () => {
     mockInvoke.mockImplementation(async () => null);
     const dispose = mount();
     await flush();
 
+    expect(mockInvoke).toHaveBeenCalledWith("get_config", { key: "keyboard_layout" });
     expect(keyboardLayout().value).toBe("");
     dispose();
   });
