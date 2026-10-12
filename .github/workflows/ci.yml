@@ -70,10 +70,10 @@ jobs:
           suffix=""
           if [[ "$triple" == *windows* ]]; then suffix=".exe"; fi
           touch "src-tauri/binaries/dosbox-staging-${triple}${suffix}"
-          mkdir -p src-tauri/resources/dosbox-bin src-tauri/resources/dosbox-shaders src-tauri/resources/dosbox-shader-presets
-          touch src-tauri/resources/dosbox-bin/.placeholder
-          touch src-tauri/resources/dosbox-shaders/.placeholder
-          touch src-tauri/resources/dosbox-shader-presets/.placeholder
+          for d in dosbox-bin dosbox-shaders dosbox-shader-presets dosbox-freedos-keyboard dosbox-freedos-cpi; do
+            mkdir -p "src-tauri/resources/$d"
+            touch "src-tauri/resources/$d/.placeholder"
+          done
 
       - name: Install frontend dependencies
         run: pnpm install
