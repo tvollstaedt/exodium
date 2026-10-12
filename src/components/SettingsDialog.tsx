@@ -304,7 +304,7 @@ export function SettingsDialog(props: Props) {
                           <SettingSwitch id="fullscreen" checked={defaultFullscreen()} label="Launch in fullscreen"
                             onChange={saveToggle("default_fullscreen", "fullscreen", "window", setDefaultFullscreen)} />
                         </SettingRow>
-                        <SettingRow htmlFor="keyboard-layout" label="Keyboard layout" hint="The DOS keyboard layout inside every game. A game's own settings still win.">
+                        <SettingRow htmlFor="keyboard-layout" label="Keyboard layout" hint="The default DOS keyboard layout. Can be overridden by a game's DOSBox config.">
                           <select
                             id="keyboard-layout"
                             class="game-settings-select"
