@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.15.4 - 2026-10-13
+
+### Added
+
+- Settings → General → Game defaults: a keyboard layout for all DOS games.
+  A game's own settings can still override it.
+
+### Changed
+
+- Reading Room: runnable disk magazines follow the game defaults (CRT
+  shader, fullscreen, keyboard layout) like a game does.
+
+### Fixed
+
+- macOS: downloads failed with "error opening ... in read/write mode" as
+  soon as the eXoDOS torrent was added. Torrent files are now opened on
+  demand instead of all at once.
+- Language packs: German CD games whose launch config Exodium rebuilt
+  started without their CD and closed right away.
+- Game settings: the dialog kept reloading itself after a download and, for
+  ScummVM games, flickered between two layouts. The reload loop also kept
+  the GPU busy while the panel stayed open.
+- macOS and Linux: Exodium did not ship DOSBox Staging's keyboard layout
+  files, so KEYB and per-game layouts never loaded.
+- Reading Room: a book or magazine fetched after certain game downloads
+  could fail with a torrent error until the next restart.
+
 ## 0.15.3 - 2026-10-08
 
 ### Fixed
