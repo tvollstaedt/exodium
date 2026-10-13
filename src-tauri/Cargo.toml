@@ -120,4 +120,4 @@ tokio = { version = "1", features = ["fs", "sync", "macros", "rt", "test-util", 
 # deadlock, Windows sparse marking, and the lazy file open with a process-wide
 # handle pool (#48, not taken upstream). Branch feat/lazy-file-open on the fork.
 [patch.crates-io]
-librqbit = { git = "https://github.com/tvollstaedt/rqbit.git", rev = "4108de622a6f8a5abef7ae177c4b09ef0a401e8e" }
+librqbit = { git = "https://github.com/tvollstaedt/rqbit.git", rev = "9ef80f2ad2c4f8ca5a71ecd9ae681508eac4c729" }
