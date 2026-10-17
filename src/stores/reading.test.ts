@@ -35,6 +35,7 @@ const DISK_MAGAZINE = {
   substitutions: '{"XXX":"004","ZZZ":"3000"}',
   language: "EN",
   extras_count: 0,
+  platform: "MS-DOS",
   favorited: false,
   installed: false,
   last_page: null,
@@ -355,7 +356,7 @@ describe("reading language filter", () => {
 
   const publication = (over: Partial<Publication>): Publication => ({
     id: 0, kind: "magazine", name: "", issue_count: 1, first_year: null, last_year: null,
-    cover_key: null, language: "EN", ...over,
+    cover_key: null, language: "EN", platform: "MS-DOS", ...over,
   });
   const pubs = [
     publication({ id: 1, name: "PC Gamer" }),

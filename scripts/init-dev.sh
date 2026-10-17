@@ -10,6 +10,7 @@
 #   pnpm run init-dev --win3x      # also download eXoWin3x box art (~2.3 GB)
 #   pnpm run init-dev --scummvm    # also download eXoScummVM box art + launch index (~4.8 GB)
 #   pnpm run init-dev --win9x      # also download eXoWin9x metadata (~13 GB)
+#   pnpm run init-dev --iigs       # also download eXoAppleIIGS metadata (~3.9 GB)
 #   pnpm run init-dev --all-packs  # download all language packs
 #
 # Environment:
@@ -28,6 +29,7 @@ WANT_PLP=0
 WANT_WIN3X=0
 WANT_WIN9X=0
 WANT_SCUMMVM=0
+WANT_IIGS=0
 PACKS_EXPLICIT=0   # set to 1 if any pack flag was passed (skip interactive prompt)
 
 for arg in "$@"; do
@@ -39,7 +41,8 @@ for arg in "$@"; do
     --win3x)     WANT_WIN3X=1; PACKS_EXPLICIT=1 ;;
     --win9x)     WANT_WIN9X=1; PACKS_EXPLICIT=1 ;;
     --scummvm)   WANT_SCUMMVM=1; PACKS_EXPLICIT=1 ;;
-    --all-packs) WANT_GLP=1; WANT_SLP=1; WANT_PLP=1; WANT_WIN3X=1; WANT_WIN9X=1; WANT_SCUMMVM=1; PACKS_EXPLICIT=1 ;;
+    --iigs)      WANT_IIGS=1; PACKS_EXPLICIT=1 ;;
+    --all-packs) WANT_GLP=1; WANT_SLP=1; WANT_PLP=1; WANT_WIN3X=1; WANT_WIN9X=1; WANT_SCUMMVM=1; WANT_IIGS=1; PACKS_EXPLICIT=1 ;;
   esac
 done
 
@@ -205,6 +208,9 @@ WIN9X_ZIP="$DATA_DIR/eXoWin9x/eXoWin9x/Content/XOWin9xMetadata.zip"
 WIN9X_CONFIGS_ZIP="$DATA_DIR/eXoWin9x/eXoWin9x/Content/!Win9Xmetadata.zip"
 SCUMMVM_ZIP="$DATA_DIR/eXoScummVM/eXoScummVM/Content/XOScummVMMetadata.zip"
 SCUMMVM_UTIL_ZIP="$DATA_DIR/eXoScummVM/eXoScummVM/eXo/util/utilSVM.zip"
+IIGS_ZIP="$DATA_DIR/eXoAppleIIGS/eXoAppleIIGS/Content/XOAppleIIGSMetadata.zip"
+IIGS_CONFIGS_ZIP="$DATA_DIR/eXoAppleIIGS/eXoAppleIIGS/Content/!AppleIIGSmetadata.zip"
+IIGS_UTIL_ZIP="$DATA_DIR/eXoAppleIIGS/eXoAppleIIGS/eXo/util/utilAppleIIGS.zip"
 
 if [[ "$WANT_GLP" -eq 1 ]]; then
   echo "── GLP (German) metadata ────────────────────────────────────────────────────"
@@ -308,6 +314,42 @@ if [[ "$WANT_SCUMMVM" -eq 1 ]]; then
   fi
 fi
 
+if [[ "$WANT_IIGS" -eq 1 ]]; then
+  echo "── eXoAppleIIGS metadata ────────────────────────────────────────────────────"
+  # XOAppleIIGSMetadata.zip carries covers + the catalogue XML,
+  # !AppleIIGSmetadata.zip eXo's per-game bats and configs, utilAppleIIGS.zip
+  # the emulator index - gen_iigs_assets.py reads all three.
+  IIGS_TORRENT="$REPO_ROOT/torrents/eXoAppleIIGS.torrent"
+  if ! validate_zip "$IIGS_ZIP"; then
+    echo "Downloading XOAppleIIGSMetadata.zip (~1.7 GB)..."
+    download_torrent_file "$IIGS_TORRENT" \
+      "$(torrent_file_index "$IIGS_TORRENT" "XOAppleIIGSMetadata.zip" 7)" \
+      "$DATA_DIR/eXoAppleIIGS" "$IIGS_ZIP"
+  else
+    echo "XOAppleIIGSMetadata.zip already present, skipping."
+  fi
+  if ! validate_zip "$IIGS_CONFIGS_ZIP"; then
+    echo "Downloading !AppleIIGSmetadata.zip (~2.1 GB)..."
+    download_torrent_file "$IIGS_TORRENT" \
+      "$(torrent_file_index "$IIGS_TORRENT" '!AppleIIGSmetadata.zip' 3)" \
+      "$DATA_DIR/eXoAppleIIGS" "$IIGS_CONFIGS_ZIP"
+  else
+    echo "!AppleIIGSmetadata.zip already present, skipping."
+  fi
+  if ! validate_zip "$IIGS_UTIL_ZIP"; then
+    echo "Downloading utilAppleIIGS.zip (~150 MB)..."
+    download_torrent_file "$IIGS_TORRENT" \
+      "$(torrent_file_index "$IIGS_TORRENT" "utilAppleIIGS.zip" 470)" \
+      "$DATA_DIR/eXoAppleIIGS" "$IIGS_UTIL_ZIP"
+  else
+    echo "utilAppleIIGS.zip already present, skipping."
+  fi
+  if [[ ! -s "$REPO_ROOT/metadata/AppleIIGS.xml.gz" || "$FORCE" -eq 1 ]]; then
+    echo "Regenerating bundled eXoAppleIIGS metadata (gen_iigs_assets.py)..."
+    $PYTHON "$SCRIPT_DIR/gen_iigs_assets.py"
+  fi
+fi
+
 # ── Generate thumbnails ───────────────────────────────────────────────────────
 
 FORCE_FLAG=""
@@ -404,6 +446,18 @@ if [[ "$WANT_SCUMMVM" -eq 1 && -s "$SCUMMVM_ZIP" ]]; then
       --db "$REPO_ROOT/metadata/exodium.db" \
       $FORCE_FLAG
   done
+fi
+
+if [[ "$WANT_IIGS" -eq 1 && -s "$IIGS_ZIP" ]]; then
+  echo "eXoAppleIIGS..."
+  $PYTHON "$SCRIPT_DIR/gen_thumbnails.py" \
+    "$IIGS_ZIP" \
+    "$REPO_ROOT/metadata/AppleIIGS.xml.gz" \
+    "$REPO_ROOT/thumbnails/eXoAppleIIGS" \
+    --preview-dir "$REPO_ROOT/src-tauri/resources/previews/eXoAppleIIGS" \
+    --platform "Apple IIGS" \
+    --db "$REPO_ROOT/metadata/exodium.db" \
+    $FORCE_FLAG
 fi
 
 echo ""

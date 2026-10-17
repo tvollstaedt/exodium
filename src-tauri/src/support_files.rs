@@ -111,7 +111,47 @@ pub(crate) static SCUMMVM_SUPPORT: SupportPack = SupportPack {
     failed: AtomicBool::new(false),
 };
 
-pub(crate) static PACKS: [&SupportPack; 3] = [&DOS_SUPPORT, &WIN9X_SUPPORT, &SCUMMVM_SUPPORT];
+/// MAME runs from `-inipath`/`-cfg_directory` inside its own folder, so only
+/// what that command line reads is taken - not the 245 MB of `mame.sym` and
+/// software lists beside it.
+#[cfg(windows)]
+const APPLEIIGS_PREFIXES: &[&str] = &[
+    "emulators/gsplus/",
+    "emulators/gsport/",
+    "emulators/mame/mame.exe",
+    "emulators/mame/mame.ini",
+    "emulators/mame/ui.ini",
+    "emulators/mame/plugin.ini",
+    "emulators/mame/default.cfg",
+    "emulators/mame/apple2gs.cfg",
+    "emulators/mame/apple2gsr1.cfg",
+    "emulators/mame/apple2gs/",
+    "emulators/mame/cfg/",
+    "emulators/mame/fast/",
+    "emulators/mame/nvram/",
+    "emulators/mame/roms/",
+    "emulators/mame/samples/",
+    "emulators/mame/bgfx/",
+];
+#[cfg(not(windows))]
+const APPLEIIGS_PREFIXES: &[&str] = &["emulators/gsplus/rom1", "emulators/gsplus/rom3"];
+
+/// The IIGS ROMs (GSplus 1.38 runs every game with them on macOS and
+/// Linux); on Windows also eXo's GSplus, GSport and MAME builds (§23).
+pub(crate) static APPLEIIGS_SUPPORT: SupportPack = SupportPack {
+    collection: "eXoAppleIIGS",
+    util_suffix: "util/utilAppleIIGS.zip",
+    inner_zip: "EXTIIGS.zip",
+    prefixes: APPLEIIGS_PREFIXES,
+    label: "Apple IIGS ROMs and emulators",
+    ready: crate::commands::appleiigs::support_ready,
+    post: None,
+    running: AtomicBool::new(false),
+    failed: AtomicBool::new(false),
+};
+
+pub(crate) static PACKS: [&SupportPack; 4] =
+    [&DOS_SUPPORT, &WIN9X_SUPPORT, &SCUMMVM_SUPPORT, &APPLEIIGS_SUPPORT];
 
 /// Where a pack's payload stands, for the detail panel.
 #[derive(Debug, Clone, serde::Serialize)]

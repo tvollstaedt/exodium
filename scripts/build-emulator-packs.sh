@@ -15,6 +15,11 @@
 #   --platform linux   scummvm-<v>-linux-<uname -m>-v<N>.tar.gz  (our self-built
 #                        AppImage, pass it via --scummvm-appimage <path>)
 #
+#   --emulator gsplus (GSPLUS_VERSION, default 1.38.0)
+#   --platform macos   gsplus-macos-universal-v<N>.tar.gz (upstream DMG)
+#   --platform linux   gsplus-linux-<uname -m>-v<N>.tar.gz  (our self-built
+#                        AppImage, pass it via --gsplus-appimage <path>)
+#
 # Tarball rules (each one guards a shipped incident - see CLAUDE.md §10/§16):
 #   - payload wrapped in a dir named EXACTLY like the pack id ("dosbox-x/",
 #     "86box/") so unwrapped_source strips it by name
@@ -34,6 +39,7 @@ PLATFORM=""
 EMULATOR="win9x"
 DBX_APPIMAGE=""
 SVM_APPIMAGE=""
+GSP_APPIMAGE=""
 SCUMMVM_VERSION=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -41,11 +47,12 @@ while [[ $# -gt 0 ]]; do
     --emulator) EMULATOR="$2"; shift 2 ;;
     --dosbox-x-appimage) DBX_APPIMAGE="$2"; shift 2 ;;
     --scummvm-appimage) SVM_APPIMAGE="$2"; shift 2 ;;
+    --gsplus-appimage) GSP_APPIMAGE="$2"; shift 2 ;;
     --scummvm-version) SCUMMVM_VERSION="$2"; shift 2 ;;
     *) echo "Unknown argument: $1"; exit 1 ;;
   esac
 done
-[[ -z "$PLATFORM" ]] && { echo "Usage: $0 --platform macos|linux [--emulator win9x|scummvm]"; exit 1; }
+[[ -z "$PLATFORM" ]] && { echo "Usage: $0 --platform macos|linux [--emulator win9x|scummvm|gsplus]"; exit 1; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -54,6 +61,7 @@ mkdir -p "$OUT_DIR"
 
 DOSBOX_X_VERSION="${DOSBOX_X_VERSION:-2025.02.01}"
 E86BOX_VERSION="${E86BOX_VERSION:-6.0}"
+GSPLUS_VERSION="${GSPLUS_VERSION:-1.38.0}"
 PACK_VERSION="${PACK_VERSION:-1}"
 
 TMP_DIR="$(mktemp -d)"
@@ -90,7 +98,45 @@ roll_tar() { # roll_tar <staging-parent> <wrapper-name> <out.tar.gz>
   echo "Packed: $3"
 }
 
-if [[ "$EMULATOR" == "scummvm" ]]; then
+if [[ "$EMULATOR" == "gsplus" ]]; then
+  # One version for every game: eXo pins nothing on macOS/Linux, it never ran
+  # there (§23). The wrapper repeats install_path's last segment.
+  STAGE="$TMP_DIR/stage-gsp/gsplus"
+  mkdir -p "$STAGE"
+  case "$PLATFORM" in
+    macos)
+      [[ "$(uname -s)" == "Darwin" ]] || { echo "--platform macos must run on macOS (codesign)"; exit 1; }
+      fetch "https://github.com/digarok/gsplus/releases/download/v${GSPLUS_VERSION}/GSplus-${GSPLUS_VERSION}-macOS-universal.dmg" \
+        "$TMP_DIR/gsp.dmg"
+      MNT="$TMP_DIR/mnt-gsp"
+      mkdir -p "$MNT"
+      hdiutil attach -nobrowse -quiet -readonly "$TMP_DIR/gsp.dmg" -mountpoint "$MNT"
+      trap 'hdiutil detach "'"$MNT"'" -quiet 2>/dev/null || true; rm -rf "$TMP_DIR"' EXIT
+      [[ -d "$MNT/GSplus.app" ]] || { echo "ERROR: GSplus.app not in the DMG"; exit 1; }
+      cp -R "$MNT/GSplus.app" "$STAGE/GSplus.app"
+      cp "$MNT/LICENSE" "$STAGE/LICENSE" 2>/dev/null || true
+      hdiutil detach "$MNT" -quiet
+      trap 'rm -rf "$TMP_DIR"' EXIT
+      lipo -info "$STAGE/GSplus.app/Contents/MacOS/GSplus" | grep -q "x86_64 arm64\|arm64 x86_64" \
+        || { echo "ERROR: GSplus.app is not universal"; exit 1; }
+      xattr -cr "$STAGE/GSplus.app" 2>/dev/null || true
+      codesign --force --deep --sign - "$STAGE/GSplus.app"
+      chmod +x "$STAGE/GSplus.app/Contents/MacOS/GSplus"
+      roll_tar "$TMP_DIR/stage-gsp" "gsplus" "$OUT_DIR/gsplus-macos-universal-v${PACK_VERSION}.tar.gz"
+      ;;
+    linux)
+      [[ -z "$GSP_APPIMAGE" ]] && { echo "ERROR: --gsplus-appimage <path> is required for linux"; exit 1; }
+      [[ -f "$GSP_APPIMAGE" ]] || { echo "ERROR: $GSP_APPIMAGE not found"; exit 1; }
+      cp "$GSP_APPIMAGE" "$STAGE/GSplus.AppImage"
+      chmod +x "$STAGE/GSplus.AppImage"
+      fetch_license "https://raw.githubusercontent.com/digarok/gsplus/v${GSPLUS_VERSION}/LICENSE" "$STAGE/LICENSE"
+      roll_tar "$TMP_DIR/stage-gsp" "gsplus" "$OUT_DIR/gsplus-linux-$(uname -m)-v${PACK_VERSION}.tar.gz"
+      ;;
+    *)
+      echo "Unknown platform: $PLATFORM (expected macos or linux)"; exit 1 ;;
+  esac
+
+elif [[ "$EMULATOR" == "scummvm" ]]; then
   [[ -z "$SCUMMVM_VERSION" ]] && { echo "ERROR: --scummvm-version <v> is required"; exit 1; }
   # The wrapper repeats install_path's last segment (content/emulators/
   # scummvm-<v>), which is what unwrapped_source strips by name.

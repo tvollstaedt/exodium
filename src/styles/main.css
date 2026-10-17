@@ -3314,6 +3314,8 @@ body {
 
 .game-detail-note-text {
   margin: 0;
+  /* eXo's Apple IIGS notes are paragraphs. */
+  white-space: pre-line;
 }
 
 /* A note's remedy button (e.g. "Download emulator") goes on its own row,
@@ -5708,6 +5710,46 @@ body.has-player {
   padding: 40px;
   color: var(--text-muted);
   font-size: 13px;
+}
+
+/* Apple IIGS controls and extras (§23): sections like the theme row. */
+.game-detail-controls,
+.game-detail-extras {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.game-detail-controls-text {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.game-detail-extra {
+  display: flex;
+  gap: 4px;
+}
+
+.game-detail-extra .game-detail-article {
+  flex: 1;
+  min-width: 0;
+  grid-template-columns: 1fr auto;
+}
+
+.game-detail-extra-remove {
+  padding: 0 8px;
+  background: var(--bg-card);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--border-radius);
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.game-detail-extra-remove:hover {
+  background: var(--bg-hover);
+  color: var(--danger);
 }
 
 /* Magazine mentions in the game panel (§19). */

@@ -193,6 +193,7 @@ export function IssueReader(props: IssueReaderProps) {
           title={issue().title}
           subtitle={<>
             {issue().publication}
+            <Show when={issue().platform !== "MS-DOS"}> · {issue().platform}</Show>
             <Show when={issue().year}>{(year) => <> · {year()}</>}</Show>
             {" · "}{kindLabel(issue())}{" · "}{formatBytes(issue().size_bytes)}
           </>}

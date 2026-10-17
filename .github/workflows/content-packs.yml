@@ -1,5 +1,5 @@
 # Builds the emulator content-pack tarballs (manual dispatch only): the two
-# Win9x emulators, or one ScummVM build per eXo pin.
+# Win9x emulators, one ScummVM build per eXo pin, or GSplus for the Apple IIGS.
 #
 # Produces workflow ARTIFACTS, never a release: publishing stays the manual
 # `gh release create content-vN ... --latest=false` flow (CLAUDE.md §10 - a
@@ -15,7 +15,7 @@ on:
       packs:
         description: "Which set to build"
         type: choice
-        options: [win9x, scummvm]
+        options: [win9x, scummvm, gsplus]
         default: win9x
         required: true
       scummvm_arches:
@@ -29,6 +29,10 @@ on:
       dosbox_x_version:
         description: "DOSBox-X tag to build (keep near eXo's x98 build)"
         default: "2025.02.01"
+        required: true
+      gsplus_version:
+        description: "GSplus release to package (eXoAppleIIGS, macOS/Linux)"
+        default: "1.38.0"
         required: true
       e86box_version:
         description: "86Box release to package"
@@ -314,5 +318,109 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: scummvm-packs
+          path: packs/
+          if-no-files-found: error
+
+  # ── GSplus: every eXoAppleIIGS game on macOS and Linux (§23) ───────────────
+  # Upstream ships a universal macOS DMG; its Linux tarball needs a system
+  # SDL3, so Linux builds an AppImage that carries it.
+  gsplus-linux:
+    if: inputs.packs == 'gsplus'
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: ["x86_64", "aarch64"]
+    runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    container: ghcr.io/pkgforge-dev/archlinux:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare container (quick-sharun toolchain)
+        uses: pkgforge-dev/anylinux-setup-action@v2
+      - name: Build GSplus ${{ inputs.gsplus_version }} AppImage from source
+        env:
+          GSPLUS_VERSION: ${{ inputs.gsplus_version }}
+        run: sh scripts/build-gsplus-appimage.sh
+      - name: Assemble the Linux pack tarball
+        env:
+          GSPLUS_VERSION: ${{ inputs.gsplus_version }}
+          PACK_VERSION: ${{ inputs.pack_version }}
+        run: |
+          bash scripts/build-emulator-packs.sh --platform linux --emulator gsplus \
+            --gsplus-appimage dist/GSplus.AppImage
+          cp dist/gsplus-*-source.tar.gz dist/packs/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gsplus-linux-${{ matrix.arch }}
+          path: dist/packs/*
+          if-no-files-found: error
+
+  gsplus-macos:
+    if: inputs.packs == 'gsplus'
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble the macOS pack tarball
+        env:
+          GSPLUS_VERSION: ${{ inputs.gsplus_version }}
+          PACK_VERSION: ${{ inputs.pack_version }}
+        run: bash scripts/build-emulator-packs.sh --platform macos --emulator gsplus
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gsplus-macos
+          path: dist/packs/*.tar.gz
+          if-no-files-found: error
+
+  gsplus-assemble:
+    if: inputs.packs == 'gsplus'
+    needs: [gsplus-linux, gsplus-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: gsplus-*
+          merge-multiple: true
+          path: packs
+      - name: Verification gate
+        run: |
+          set -euo pipefail
+          cd packs
+          check() { # check <tarball> <binary-path>
+            local tb="$1" bin="$2"
+            local dir; dir="$(mktemp -d)"
+            tar xzf "$tb" -C "$dir"
+            [ -f "$dir/$bin" ] || { echo "::error::$tb: expected binary $bin missing"; exit 1; }
+            [ -x "$dir/$bin" ] || { echo "::error::$tb: $bin is not executable"; exit 1; }
+            if find "$dir" -name '._*' | grep -q .; then
+              echo "::error::$tb: AppleDouble ._* entries present"; exit 1
+            fi
+            rm -rf "$dir"
+            echo "OK: $tb"
+          }
+          V="${{ inputs.pack_version }}"
+          check "gsplus-macos-universal-v$V.tar.gz" "gsplus/GSplus.app/Contents/MacOS/GSplus"
+          check "gsplus-linux-x86_64-v$V.tar.gz" "gsplus/GSplus.AppImage"
+          check "gsplus-linux-aarch64-v$V.tar.gz" "gsplus/GSplus.AppImage"
+      - name: Emit manifest snippet + checksums
+        run: |
+          set -euo pipefail
+          cd packs
+          sha256sum *.tar.gz > SHA256SUMS
+          BASE="https://github.com/${{ github.repository }}/releases/download/content-vN"
+          V="${{ inputs.pack_version }}"
+          src() { # src <file> -> {url,sha256,size_bytes}
+            jq -n --arg url "$BASE/$1" --arg h "$(sha256sum "$1" | cut -d' ' -f1)" \
+              --argjson s "$(wc -c < "$1" | tr -d ' ')" '{url: $url, sha256: $h, size_bytes: $s}'
+          }
+          mac="$(src "gsplus-macos-universal-v$V.tar.gz")"
+          jq -n --argjson m "$mac" \
+            --argjson x "$(src "gsplus-linux-x86_64-v$V.tar.gz")" \
+            --argjson a "$(src "gsplus-linux-aarch64-v$V.tar.gz")" \
+            '{ gsplus: { platforms: {
+                "darwin-aarch64": $m, "darwin-x86_64": $m,
+                "linux-x86_64": $x, "linux-aarch64": $a } } }' > manifest-snippet.json
+          cat manifest-snippet.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gsplus-packs
           path: packs/
           if-no-files-found: error

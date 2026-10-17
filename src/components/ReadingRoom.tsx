@@ -41,6 +41,9 @@ import { IconEmptyReading } from "./icons";
 import { MediaNoticeDialog, loadMediaNotice, needsMediaNotice } from "./MediaNotice";
 import { PackHintBanner } from "./PackHintBanner";
 
+/** The badge a non-DOS series carries; the full name is in the reader. */
+const platformLabel = (platform: string) => (platform === "Apple IIGS" ? "IIGS" : platform);
+
 /** Browse the Media Pack: magazines, books and catalogs (§19). The catalogue
  *  is bundled, so this list is complete offline - only opening an issue needs
  *  the torrent. Same grid, list, toolbar and jump bar as Browse. */
@@ -180,6 +183,9 @@ function IssueCard(p: ItemProps) {
           </div>
           <div class="game-card-footer">
             <Show when={p.issue.runnable}><span class="badge badge-disk">Disk mag</span></Show>
+            <Show when={p.issue.platform !== "MS-DOS"}>
+              <span class="badge badge-platform" data-testid="issue-platform">{platformLabel(p.issue.platform)}</span>
+            </Show>
             <Show when={p.showLanguage && p.issue.language === "DE"}>
               <span class="badge badge-lang">DE</span>
             </Show>
@@ -251,6 +257,9 @@ function IssueRow(p: ItemProps) {
       <span class="row-title" title={p.issue.title}>
         <span class="row-title-text">{displayTitle(p.issue, p.publicationInView)}</span>
         <Show when={p.issue.runnable}><span class="badge badge-disk">Disk</span></Show>
+        <Show when={p.issue.platform !== "MS-DOS"}>
+          <span class="badge badge-platform">{platformLabel(p.issue.platform)}</span>
+        </Show>
         <Show when={p.showLanguage && p.issue.language === "DE"}>
           <span class="badge badge-lang">DE</span>
         </Show>

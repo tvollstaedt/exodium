@@ -76,6 +76,7 @@ pub async fn download_game(
     let launcher = crate::commands::collections::collection_def(source).map(|c| c.launcher);
     let is_win9x_collection = launcher == Some(crate::commands::collections::Launcher::Win9x);
     let is_scummvm_collection = launcher == Some(crate::commands::collections::Launcher::ScummVm);
+    let is_iigs_collection = launcher == Some(crate::commands::collections::Launcher::AppleIigs);
 
     // The Win9x support payload is queued below; the disk preflight has to
     // budget it here (zip + inner temp + extracted, ~7.5 GB).
@@ -89,6 +90,9 @@ pub async fn download_game(
     // shape as Win9x's; the preflight budgets it below.
     let scummvm_support_missing =
         is_scummvm_collection && !crate::support_files::scummvm_ready(&manager.torrent_root());
+    // The IIGS ROMs (and eXo's emulators on Windows), same shape again.
+    let iigs_support_missing =
+        is_iigs_collection && !crate::commands::appleiigs::support_ready(&manager.torrent_root());
 
     let data_dir = {
         let conn = db_state.lock()?;
@@ -105,7 +109,8 @@ pub async fn download_game(
 
     // macOS/Linux: the emulator pack rides along. Win9x is resolver-gated so
     // a system install never pays for it; ScummVM queues unless eXo's build
-    // or the pack itself is present - a system ScummVM ignores the pin.
+    // or the pack itself is present - a system ScummVM ignores the pin. The
+    // Apple IIGS queues GSplus unless one already resolves.
     let emulator_pack: Option<(String, crate::commands::updates::ContentPackInfo)> = if cfg!(windows) {
         None
     } else if is_win9x_collection {
@@ -123,6 +128,15 @@ pub async fn download_game(
                 crate::commands::content_packs::installable_pack(source, pack_id)
                     .map(|info| (pack_id.to_string(), info))
             })
+    } else if is_iigs_collection {
+        use crate::commands::appleiigs::{resolve, IigsEngine, PACK_ID};
+        let dd = data_dir.clone().unwrap_or_default();
+        if resolve(&manager.torrent_root(), &dd, IigsEngine::Gsplus).is_some() {
+            None
+        } else {
+            crate::commands::content_packs::installable_pack(source, PACK_ID)
+                .map(|info| (PACK_ID.to_string(), info))
+        }
     } else if is_scummvm_collection {
         use crate::commands::scummvm::{pack_id, resolve_scummvm, EngineSource};
         let dd = data_dir.clone().unwrap_or_default();
@@ -157,6 +171,9 @@ pub async fn download_game(
             }
             if scummvm_support_missing {
                 needed += 3 * 1024 * 1024 * 1024;
+            }
+            if iigs_support_missing {
+                needed += 1024 * 1024 * 1024;
             }
             // Only what this download will actually fetch. An installed base
             // is not downloaded again, and its GameData is already inside the
@@ -204,6 +221,9 @@ pub async fn download_game(
     }
     if scummvm_support_missing {
         crate::support_files::ensure_queued(&crate::support_files::SCUMMVM_SUPPORT, &manager).await;
+    }
+    if iigs_support_missing {
+        crate::support_files::ensure_queued(&crate::support_files::APPLEIIGS_SUPPORT, &manager).await;
     }
 
     // Queue the emulator pack alongside (see emulator_pack above). "Install

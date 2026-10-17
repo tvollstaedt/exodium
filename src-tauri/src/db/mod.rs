@@ -21,7 +21,7 @@ pub type DbResult<T> = Result<T, DbError>;
 /// Version of the bundled catalog. Raise BEFORE `pnpm run gen-db` (the
 /// artefact stamps itself); an installed DB behind it is refreshed at
 /// startup by `refresh_catalog`, user state preserved. History in git.
-pub const CATALOG_VERSION: i64 = 15;
+pub const CATALOG_VERSION: i64 = 16;
 
 /// Open (or create) the Exodium database at the given path.
 pub fn open(path: &Path) -> DbResult<Connection> {
@@ -411,10 +411,15 @@ fn migrate(conn: &Connection) -> DbResult<()> {
         }
     }
     let publication_cols = table_columns(conn, "publications")?;
-    if !publication_cols.is_empty() && !publication_cols.iter().any(|c| c == "language") {
-        conn.execute_batch(
-            "ALTER TABLE publications ADD COLUMN language TEXT NOT NULL DEFAULT 'EN'",
-        )?;
+    if !publication_cols.is_empty() {
+        for (name, ddl) in [
+            ("language", "language TEXT NOT NULL DEFAULT 'EN'"),
+            ("platform", "platform TEXT NOT NULL DEFAULT 'MS-DOS'"),
+        ] {
+            if !publication_cols.iter().any(|c| c == name) {
+                conn.execute_batch(&format!("ALTER TABLE publications ADD COLUMN {ddl}"))?;
+            }
+        }
     }
 
     // `game_articles` gained `kind` in its primary key. Pure catalog, refilled
@@ -1116,12 +1121,13 @@ mod tests {
         assert_eq!(inner, "Content/eXoDOS_GLP_Addonpack_MagazinesGLP_1.0.zip");
         assert_eq!(language, "DE");
         assert_eq!(extras, 2);
-        let publication_language: String = installed
-            .query_row("SELECT language FROM publications WHERE name = 'ASM (DE)'", [], |r| {
-                r.get(0)
+        let (publication_language, platform): (String, String) = installed
+            .query_row("SELECT language, platform FROM publications WHERE name = 'ASM (DE)'", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
             })
             .unwrap();
         assert_eq!(publication_language, "DE");
+        assert_eq!(platform, "MS-DOS", "the column the IIGS magazines need arrives with its default");
     }
 
     #[test]

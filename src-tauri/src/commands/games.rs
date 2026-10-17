@@ -1926,8 +1926,8 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
         return Err(format!("'{}' is already running.", game.title));
     }
 
-    // Win9x and ScummVM have their own pipelines; the conf machinery below
-    // is DOSBox Staging/ECE only.
+    // Win9x, ScummVM and the Apple IIGS have their own pipelines; the conf
+    // machinery below is DOSBox Staging/ECE only.
     let launcher = crate::commands::collections::collection_def(
         game.torrent_source.as_deref().unwrap_or("eXoDOS"),
     )
@@ -1952,6 +1952,18 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
                 id,
                 &data_dir,
                 fullscreen_enabled,
+                &per_game_config,
+            )
+            .await;
+        }
+        crate::commands::collections::Launcher::AppleIigs => {
+            return crate::commands::appleiigs::launch_appleiigs_game(
+                &app,
+                game,
+                id,
+                &data_dir,
+                fullscreen_enabled,
+                crt_auto_enabled,
                 &per_game_config,
             )
             .await;

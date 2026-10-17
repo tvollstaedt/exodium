@@ -249,6 +249,8 @@ struct MediaIssue {
     language: String,
     #[serde(default)]
     extras_count: i64,
+    #[serde(default = "default_platform")]
+    platform: String,
 }
 
 /// The index predates the second source; a record without these fields is a
@@ -259,6 +261,10 @@ fn default_source() -> String {
 
 fn default_language() -> String {
     "EN".to_string()
+}
+
+fn default_platform() -> String {
+    "MS-DOS".to_string()
 }
 
 #[derive(serde::Deserialize)]
@@ -288,8 +294,8 @@ fn import_media(conn: &rusqlite::Connection, metadata_dir: &Path) {
     let tx = conn.unchecked_transaction().unwrap();
     for issue in &index.issues {
         tx.execute(
-            "INSERT OR IGNORE INTO publications (kind, name, language) VALUES (?1, ?2, ?3)",
-            params![issue.kind, issue.publication, issue.language],
+            "INSERT OR IGNORE INTO publications (kind, name, language, platform) VALUES (?1, ?2, ?3, ?4)",
+            params![issue.kind, issue.publication, issue.language, issue.platform],
         )
         .unwrap_or_else(|e| panic!("media: publication {}/{}: {e}", issue.kind, issue.publication));
         let publication_id: i64 = tx

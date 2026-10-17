@@ -211,4 +211,34 @@ describe("GameSettingsDialog", () => {
     expect(selectFor("Aspect ratio")).toBe(aspect);
     dispose();
   });
+  /** eXo fixes speed, ROM and disks per Apple IIGS game; the dialog offers
+   *  only the program and fullscreen, and saves the program choice. */
+  it("offers program and fullscreen for an Apple IIGS game", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_game_settings") { return NO_SETTINGS; }
+      if (cmd === "game_engine_info") { return { ece_available: false, uses_ece: false }; }
+      if (cmd === "appleiigs_info") {
+        return {
+          exo_engine: "gsplus", engine: "gsplus", source: "pack", pack_id: "gsplus", note: null,
+          options: ["Walk a Dinosaur", "Build a Dinosaur"], selected: "Walk a Dinosaur",
+          substitute: null, substitute_note: null, printing_unavailable: false, capslock: false, extras: [],
+        };
+      }
+      return null;
+    });
+    const { dispose } = mount();
+    await flush();
+    expect(selectFor("Program")?.value).toBe("Walk a Dinosaur");
+    expect(selectFor("Fullscreen")).toBeDefined();
+    expect(selectFor("CPU Cycles")).toBeUndefined();
+    expect(selectFor("CRT Shader")).toBeUndefined();
+    const program = selectFor("Program")!;
+    program.value = "Build a Dinosaur";
+    program.dispatchEvent(new Event("change"));
+    const save = [...document.querySelectorAll("button")].find((b) => b.textContent?.includes("Save"))!;
+    save.click();
+    await flush();
+    expect(mockInvoke).toHaveBeenCalledWith("set_appleiigs_option", { id: 1, option: "Build a Dinosaur" });
+    dispose();
+  });
 });

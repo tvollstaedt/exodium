@@ -17,6 +17,7 @@ pub(crate) mod setup;
 pub(crate) mod shell_open;
 pub(crate) mod updates;
 pub(crate) mod scummvm;
+pub(crate) mod appleiigs;
 pub(crate) mod win9x;
 
 pub use content_packs::{

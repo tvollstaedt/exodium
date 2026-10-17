@@ -278,6 +278,68 @@ export async function setScummvmOptions(id: number, options: SvmOptions): Promis
   return invoke("set_scummvm_options", { id, options });
 }
 
+export type IigsEngine = "gsplus" | "gsport" | "mame";
+
+export interface IigsExtra {
+  name: string;
+  size: number;
+  /** Already fetched into the extras cache. */
+  cached: boolean;
+  /** Already in the game tree, as in an imported eXo install. */
+  on_disk: boolean;
+}
+
+/** What the panel shows for an eXoAppleIIGS game, from the launcher's own
+ *  resolver. */
+export interface AppleIigsInfo {
+  /** The emulator eXo runs the game with. */
+  exo_engine: IigsEngine;
+  /** The emulator that runs it here; null when nothing resolves. */
+  engine: IigsEngine | null;
+  source: "exo" | "pack" | "path" | null;
+  /** The pack that supplies GSplus here; null on Windows. */
+  pack_id: string | null;
+  /** eXo's notes for the game and the selected program. */
+  note: string | null;
+  /** The programs of a multi-program disk; Play starts `selected`. */
+  options: string[];
+  selected: string | null;
+  /** Set when the game runs under another emulator than eXo's:
+   *  "untested" | "ok" | "issues" | "broken". */
+  substitute: string | null;
+  substitute_note: string | null;
+  /** The game prints through GSplus 0.14's virtual printer... */
+  printing: boolean;
+  /** ...which only Windows runs. */
+  printing_unavailable: boolean;
+  capslock: boolean;
+  extras: IigsExtra[];
+}
+
+export async function appleiigsInfo(id: number): Promise<AppleIigsInfo | null> {
+  return invoke("appleiigs_info", { id });
+}
+
+export async function setAppleiigsOption(id: number, option: string | null): Promise<void> {
+  return invoke("set_appleiigs_option", { id, option });
+}
+
+export async function getAppleiigsSupportStatus(): Promise<SupportStatus> {
+  return invoke("get_appleiigs_support_status");
+}
+
+/** Fetch one of a game's extras; poll `getIssueStatus(extraJobKey(id, name))`
+ *  until the path is set. */
+export async function openGameExtra(id: number, name: string): Promise<ReadingStatus> {
+  return invoke("open_game_extra", { id, name });
+}
+
+export const extraJobKey = (id: number, name: string) => `extra:${id}:${name}`;
+
+export async function removeGameExtra(id: number, name: string): Promise<void> {
+  return invoke("remove_game_extra", { id, name });
+}
+
 /** Whether the emulator a Win9x game needs (DOSBox-X / 86Box) is resolvable
  *  on this machine. Backend answers with the launcher's own resolver, so the
  *  panel note can never disagree with an actual launch. */
@@ -808,6 +870,8 @@ export interface Publication {
   cover_key: string | null;
   /** "EN" | "DE" */
   language: string;
+  /** The system the series covers: "MS-DOS" | "Apple IIGS". */
+  platform: string;
 }
 
 export interface Issue {
@@ -846,6 +910,8 @@ export interface Issue {
   language: string;
   /** Cover-disc videos filed with the issue; counted, not shown. */
   extras_count: number;
+  /** The publication's platform: "MS-DOS" | "Apple IIGS". */
+  platform: string;
   favorited: boolean;
   installed: boolean;
   last_page: number | null;

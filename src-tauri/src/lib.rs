@@ -14,6 +14,8 @@ pub use commands::paths::game_root;
 pub use commands::{collection_base_id, CollectionDef, COLLECTION_MAP};
 #[doc(hidden)]
 pub use commands::{bundled_metadata_dir, extract_bundled_configs, load_root_folder, scan_installed_games_with_db, set_root_folder};
+#[doc(hidden)]
+pub use commands::appleiigs::sweep_config as appleiigs_sweep_config;
 
 use std::path::Path;
 use std::sync::Mutex;
@@ -825,6 +827,11 @@ pub fn run() {
             commands::install::list_active_downloads,
             commands::scummvm::scummvm_variants,
             commands::scummvm::set_scummvm_options,
+            commands::appleiigs::appleiigs_info,
+            commands::appleiigs::set_appleiigs_option,
+            commands::appleiigs::get_appleiigs_support_status,
+            commands::reading::open_game_extra,
+            commands::reading::remove_game_extra,
             commands::win9x::win9x_network_status,
             commands::win9x::enable_win9x_network,
             commands::win9x::disable_win9x_network,

@@ -1,0 +1,2686 @@
+{
+ "default_bram": [
+  "bram1[00] = 00 00 00 01 00 00 0d 06 02 01 01 00 01 00 00 00",
+  "bram1[10] = 00 00 07 06 02 01 01 00 00 00 0f 06 06 00 05 06",
+  "bram1[20] = 01 00 00 00 00 00 00 01 00 00 00 00 03 02 02 02",
+  "bram1[30] = 00 00 00 00 00 00 00 00 08 00 01 02 03 04 05 06",
+  "bram1[40] = 07 0a 00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d",
+  "bram1[50] = 0e 0f ff ff ff ff ff ff ff 00 ff ff ff ff ff 81",
+  "bram1[60] = ff ff ff ff ff 00 00 ff ff ff ff ff ff ff ff ff",
+  "bram1[70] = ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff",
+  "bram1[80] = ff 01 ff ff ff ff ff ff ff ff ff ff ff ff ff ff",
+  "bram1[90] = ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff",
+  "bram1[a0] = ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff",
+  "bram1[b0] = ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff",
+  "bram1[c0] = ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff",
+  "bram1[d0] = ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff",
+  "bram1[e0] = ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff",
+  "bram1[f0] = ff ff ff ff ff ff ff ff ff ff ff ff b1 96 1b 3c",
+  "bram3[00] = 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+  "bram3[10] = 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+  "bram3[20] = 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+  "bram3[30] = 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+  "bram3[40] = 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+  "bram3[50] = 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+  "bram3[60] = 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+  "bram3[70] = 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+  "bram3[80] = 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+  "bram3[90] = 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+  "bram3[a0] = 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+  "bram3[b0] = 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+  "bram3[c0] = 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+  "bram3[d0] = 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+  "bram3[e0] = 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+  "bram3[f0] = 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+ ],
+ "games": {
+  "3D-Triss (1993)": {
+   "engine": "gsplus"
+  },
+  "4th and Inches (1988)": {
+   "engine": "gsplus"
+  },
+  "A-maze-ing (1988)": {
+   "engine": "gsplus"
+  },
+  "Aaargh! (1988)": {
+   "engine": "gsplus"
+  },
+  "Adventure Alive (1993)": {
+   "engine": "gsplus"
+  },
+  "Adventures of Sinbad, The (1988)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "Question Creator Template.pdf",
+     "size": 1384455
+    },
+    {
+     "name": "Story Template.pdf",
+     "size": 1479730
+    }
+   ]
+  },
+  "Aesop's Fables (1988)": {
+   "engine": "gsplus"
+  },
+  "Airball (1989)": {
+   "engine": "gsplus"
+  },
+  "Alien Mind (1988)": {
+   "disks": [
+    "Game.hdv"
+   ],
+   "engine": "mame",
+   "note": "To access the save\\load menu when in game you need to use the key combination LeftCtrl+LeftAlt+F3."
+  },
+  "All About America (1988)": {
+   "engine": "gsplus"
+  },
+  "Ancient Glory (1993)": {
+   "engine": "gsplus"
+  },
+  "Ancient Land of Ys (1989)": {
+   "engine": "gsplus"
+  },
+  "Animal Kingdom (1988)": {
+   "engine": "gsplus"
+  },
+  "Animal Tracker (1989)": {
+   "engine": "gsplus",
+   "note": "To start the game, double click \"AnimalTracker\".\nIf during play you are asked to insert another disk, select \"ok\"."
+  },
+  "Ant Wars (1992)": {
+   "engine": "gsplus"
+  },
+  "Antetris (1990)": {
+   "engine": "gsplus"
+  },
+  "Arkanoid (1988)": {
+   "engine": "gsplus"
+  },
+  "Arkanoid II - Revenge of Doh (1989)": {
+   "engine": "gsplus"
+  },
+  "As the Link Turns (1988)": {
+   "engine": "gsplus"
+  },
+  "As the Link Turns II - Return of Woz (1989)": {
+   "engine": "gsplus"
+  },
+  "Astronomer GS (1992)": {
+   "engine": "gsplus"
+  },
+  "Audubon Wildlife Adventures - Grizzly Bears (1989)": {
+   "engine": "gsplus",
+   "note": "When asked to insert disk 2, just press enter."
+  },
+  "Audubon Wildlife Adventures - Whales (1989)": {
+   "engine": "gsplus"
+  },
+  "Balance of Power - The 1990 Edition (1989)": {
+   "engine": "gsplus"
+  },
+  "Bard's Tale - Tales of the Unknown, The (1987)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "Command_Sheet.pdf",
+     "size": 1268042
+    }
+   ],
+   "note": "When asked for the slot that your character disk is in select \"Slot 5, Drive 1\""
+  },
+  "Bard's Tale II - The Destiny Knight, The (1988)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "Command_Sheet.pdf",
+     "size": 1280178
+    }
+   ],
+   "note": "When asked for the slot that your character disk is in select \"Slot 5, Drive 1\".\nIf you wish to transfer a save from Bard's Tale I, make sure BT1 is installed, select the transfer option in BT2, when asked for a source disk select \"Slot 5, Drive 2\" and for destination select \"Slot 5, Drive 1\"."
+  },
+  "Baseball Trivia (1992)": {
+   "engine": "gsplus"
+  },
+  "Battle Chess (1989)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "Battle Chess - Reference Card.pdf",
+     "size": 1372664
+    }
+   ]
+  },
+  "Battleship (1993)": {
+   "engine": "gsplus"
+  },
+  "Battleship GS (1989)": {
+   "engine": "gsplus"
+  },
+  "Beast (1989)": {
+   "engine": "gsplus"
+  },
+  "Beyond Zork (1988)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "Beyond_Zork-Map.jpg",
+     "size": 525507
+    }
+   ]
+  },
+  "Beyond the Tesseract (1989)": {
+   "engine": "gsplus"
+  },
+  "Bill Palmer (2021)": {
+   "engine": "gsplus"
+  },
+  "Billie Art (1992)": {
+   "engine": "gsplus"
+  },
+  "Black Cauldron, The (1987)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "The_Black_Cauldron-Map.pdf",
+     "size": 252943
+    },
+    {
+     "name": "The_Black_Cauldron-Reference_Card.pdf",
+     "size": 236726
+    }
+   ]
+  },
+  "Blackjack Academy (1988)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "Blackjack_Academy-Optimal_Play.pdf",
+     "size": 220797
+    }
+   ]
+  },
+  "Blackjack Tutor (1992)": {
+   "engine": "gsplus"
+  },
+  "Block Out (1989)": {
+   "engine": "gsplus"
+  },
+  "BlockBuster (1991)": {
+   "engine": "gsplus"
+  },
+  "Blockade (1994)": {
+   "engine": "gsplus"
+  },
+  "Boggled (1992)": {
+   "engine": "gsplus"
+  },
+  "Bomb (1992)": {
+   "engine": "gsplus"
+  },
+  "Bounce It (1988)": {
+   "engine": "gsplus"
+  },
+  "Bouncin' Ferno (1991)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame"
+  },
+  "Bouncin' Ferno II (1992)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame"
+  },
+  "Bouncing Bluster (1989)": {
+   "engine": "gsplus"
+  },
+  "Bouncing Bluster II (1990)": {
+   "engine": "gsplus",
+   "note": "After you get past the title screen you will get a message to \"Insert Data Disk\". Select \"Abort\" and then double click the \"Level\" folder. Select the script you wish to play.\nThere is also a sound issue. In order to fix it press \"Cancel\" when you can choose 1 or 2 players. Press Alt+s, and then drag the volume slider up and press ok. Then press Alt+n to get back to the player number choice."
+  },
+  "Bowl (1993)": {
+   "engine": "gsplus"
+  },
+  "Brain Teaser (1989)": {
+   "engine": "gsplus"
+  },
+  "Bridge 6.0 - Your Bid For Entertainment (1989)": {
+   "engine": "gsplus"
+  },
+  "BuGS (2021)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame"
+  },
+  "Bubble Ghost (1988)": {
+   "engine": "gsplus"
+  },
+  "California Games (1988)": {
+   "engine": "gsplus"
+  },
+  "Captain Blood (1989)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "Reference.pdf",
+     "size": 759272
+    }
+   ]
+  },
+  "Carte Primus (1989)": {
+   "engine": "gsplus"
+  },
+  "Castle Arms (1992)": {
+   "engine": "gsplus"
+  },
+  "Castle Metacus (1989)": {
+   "engine": "gsplus",
+   "note": "To start the game double click \"Castle.Metacus\". If you read \"About.Metacus\", to exit the document select \"Quit\" under the \"File\" menu."
+  },
+  "Castle Metacus GS (1990)": {
+   "engine": "gsplus"
+  },
+  "Catacombs (1991)": {
+   "engine": "gsplus"
+  },
+  "Cave Adventure (1989)": {
+   "engine": "gsplus"
+  },
+  "Cavern Cobra (1987)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame",
+   "note": "has started, you need to press Ctrl+r to start player control of the helicopter."
+  },
+  "Charlie Brown ABCs (1989)": {
+   "engine": "gsplus"
+  },
+  "Chip Runner (1997)": {
+   "engine": "gsplus"
+  },
+  "Chips N Dips (1989)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame"
+  },
+  "Cingo (1991)": {
+   "engine": "gsplus",
+   "note": "Double click \"Startup\" to play the game."
+  },
+  "Club Backgammon (1988)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "Addendum.pdf",
+     "size": 111437
+    }
+   ]
+  },
+  "Cogito (1992)": {
+   "engine": "gsplus"
+  },
+  "Collocation (1993)": {
+   "engine": "gsplus"
+  },
+  "Color Mind (1987)": {
+   "engine": "gsplus"
+  },
+  "Color n Canvas (1990)": {
+   "engine": "gsplus"
+  },
+  "Colouring for the IIGS (2009)": {
+   "engine": "gsplus"
+  },
+  "Columns (1991)": {
+   "engine": "gsplus"
+  },
+  "Comet Finder GS (1992)": {
+   "engine": "gsplus"
+  },
+  "Concentration (1989)": {
+   "engine": "gsplus"
+  },
+  "Conjurers Square, The (1990)": {
+   "engine": "gsplus"
+  },
+  "Copy Killers (1989)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame"
+  },
+  "Cosmocade - The Arcade of Tomorrow (1990)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame"
+  },
+  "Cribbage (1991)": {
+   "engine": "gsplus"
+  },
+  "Cribbage King and Gin King (1990)": {
+   "engine": "gsplus",
+   "options": [
+    {
+     "config": "crib.txt",
+     "label": "Cribbage King"
+    },
+    {
+     "config": "gin.txt",
+     "label": "Gin King"
+    }
+   ]
+  },
+  "Cross Purpose (1990)": {
+   "engine": "gsplus"
+  },
+  "Crown and Anchor (1989)": {
+   "engine": "gsplus"
+  },
+  "Cryllan Mission 2088 (1989)": {
+   "engine": "gsplus",
+   "note": "Double click \"Space.Academy\" to enter the Kinnar Space Academy where you create and edit characters or teams. To play the game choose \"Cryllan.Mission\". Press Alt+Q to exit either of these programs."
+  },
+  "Cryllan Mission 2088 - The Second Scenario, The (1990)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "Cryllan Mission 2088 (1989).pdf",
+     "size": 2343734
+    }
+   ],
+   "note": "To start the game double click \"Start\".\nWhen asked, choose \"Kinnar Space Academy\" to create and edit characters or teams. To play the game choose \"Crylla\". Press Alt+Q to exit either of these programs."
+  },
+  "Crystal Quest (1989)": {
+   "engine": "gsplus"
+  },
+  "Cube (1990)": {
+   "engine": "gsplus"
+  },
+  "Cyber War (1992)": {
+   "engine": "gsplus"
+  },
+  "Daleks (1991)": {
+   "engine": "gsplus"
+  },
+  "Dark Castle (1989)": {
+   "engine": "gsplus"
+  },
+  "Dark Designs I (1990)": {
+   "engine": "gsplus",
+   "note": "To start the game double click \"Dark1.GS.System\"\nYou can reset the game maps and clear the characters by pressing \"Ctrl+r\" while on the title screen if desired."
+  },
+  "Dark Designs II - Closing the Gate (1990)": {
+   "engine": "gsplus",
+   "note": "To start the game double click \"Dark2.GS.System\"\nYou can reset the game maps and clear the characters by pressing \"Ctrl+r\" while on the title screen if desired."
+  },
+  "Dark Designs III - Retribution! (1990)": {
+   "engine": "gsplus",
+   "note": "To start the game double click \"Dark3.GS.System\"\nYou can reset the game maps and clear the characters by pressing \"Ctrl+r\" while on the title screen if desired."
+  },
+  "DazzlerGS (1988)": {
+   "engine": "gsplus"
+  },
+  "Defender of The Crown (1989)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame",
+   "extras": [
+    {
+     "name": "Reference Card.pdf",
+     "size": 1424587
+    }
+   ]
+  },
+  "Defender of the World (1995)": {
+   "engine": "gsplus",
+   "note": "To start the game double click the \"DOTW\" icon.\nFire guns with F1 and use powerups with F2."
+  },
+  "Deja Vu (1988)": {
+   "engine": "gsplus"
+  },
+  "Deja Vu II (1989)": {
+   "engine": "gsplus"
+  },
+  "Designasaurus (1988)": {
+   "engine": "gsplus",
+   "options": [
+    {
+     "config": "config1.txt",
+     "label": "Walk a Dinosaur",
+     "note": "Double click \"Dino.Walk\" to start the program"
+    },
+    {
+     "config": "config2.txt",
+     "label": "Build a Dinosaur",
+     "note": "Double click \"Dino.sys16\" to start the program"
+    }
+   ]
+  },
+  "Destroyer (1987)": {
+   "engine": "gsport"
+  },
+  "Diamonds (2000)": {
+   "engine": "gsplus"
+  },
+  "Downhill Challenge (1989)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "IIGS_Addendum.pdf",
+     "size": 49238
+    }
+   ]
+  },
+  "Dr. Mario (1992)": {
+   "engine": "gsplus"
+  },
+  "Dragon Wars (1990)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "Dragon_Wars-Cluebook.pdf",
+     "size": 10954384
+    },
+    {
+     "name": "dragonwars-refcard-IIGS.pdf",
+     "size": 1740293
+    }
+   ],
+   "note": "The game starts with an inbuilt default party. Some utility commands inlcluding delete and create characters are:\nd = Delete character z = Create new character alt+a = Save game alt+q = Quit alt+o = Restore game alt+n = New game"
+  },
+  "Dragon's Lair (1983)": {
+   "engine": "gsplus"
+  },
+  "Dragon's Lair - Escape from Singe's Castle (1987)": {
+   "engine": "gsplus"
+  },
+  "Dragon's Lair II - Time Warp (1990)": {
+   "engine": "gsplus"
+  },
+  "Dragon's Lair III - The Curse of Mordread (1993)": {
+   "engine": "gsplus"
+  },
+  "Dream Zone (1988)": {
+   "disks": [
+    "Game1.2mg",
+    "Game2.2mg"
+   ],
+   "engine": "mame"
+  },
+  "Dueling Questions (1988)": {
+   "disks": [
+    "Game.2mg"
+   ],
+   "engine": "mame",
+   "note": "To start the game double click \"Dueling.Quest\""
+  },
+  "Dueltris (1992)": {
+   "engine": "gsplus"
+  },
+  "Dungeon Master (1989)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "IIGS_Reference.pdf",
+     "size": 101177
+    },
+    {
+     "name": "Kid_Dungeon_Info.pdf",
+     "size": 63125
+    }
+   ]
+  },
+  "DungeonGS (1991)": {
+   "engine": "gsplus"
+  },
+  "Eclipse GS (1992)": {
+   "engine": "gsplus"
+  },
+  "Electric Crayon, The (1986)": {
+   "disks": [
+    "disk1.2mg"
+   ],
+   "engine": "mame"
+  },
+  "Elevators (1991)": {
+   "engine": "gsplus"
+  },
+  "Euchre (1990)": {
+   "engine": "gsplus"
+  },
+  "ExplorerGS (1991)": {
+   "engine": "gsplus",
+   "note": "If you wish to read the authors notes double click \"Explorer.Docs\", otherwise to play the modules created by the author of ExplorerGS double click \"ExplorerGS\". Under \"File\", \"Load Game\" you can then select \"Islands\", \"Lyle.Valley\", or \"Nor.Forest\". You then need to \"Load Character\" and will need to double click the \"Characters\" folder to then select one. Now you can select \"Game\" and \"Play\".\nTo play other user created adventures you can load ExplorerGS as above and this time double click to \"Adventures\" folder when selecting \"Load Game\". Select a module and then follow the other instructions above re loading a character (click the little down arrow above the folder selection to navigate back up the folder tree to get to the \"Characters\" folder) and starting the game.\nThe other option is to play a user created total conversion adventure. To do this instead of running \"ExplorerGS\", open one of the folders on the right under the heading \"Adventures2\". Each of these will have a file with \"GS\" in the name and, if the module author wrote some notes, a document file next to it you can open to read. Run the \"GS\" file and then follow the other instructions as above to open the module found in the same folder and load a character.\nLastly, you can create your own characters or modules by using \"GameMakerGS\" which has some documentation in the file next to the executable."
+  },
+  "F1 Race (1988)": {
+   "engine": "gsplus"
+  },
+  "Fast Break (1989)": {
+   "disks": [
+    "Game.2mg"
+   ],
+   "engine": "mame"
+  },
+  "Fidelity - Chessmaster 2100, The (1988)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "IIGS_Reference.pdf",
+     "size": 689868
+    }
+   ]
+  },
+  "Final Assault (1988)": {
+   "engine": "gsport"
+  },
+  "Firepower (1989)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame"
+  },
+  "First Letters and Words (1987)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "Start Up Card.pdf",
+     "size": 317387
+    }
+   ]
+  },
+  "First Shapes (1987)": {
+   "engine": "gsplus",
+   "note": "Double click \"First.Shapes\" to start the game."
+  },
+  "Floor Tiles (1993)": {
+   "engine": "gsplus"
+  },
+  "Follower (1989)": {
+   "engine": "gsplus"
+  },
+  "Four in a Row (1988)": {
+   "engine": "gsplus"
+  },
+  "Fourplay (1990)": {
+   "engine": "gsplus"
+  },
+  "Fractal Explorer (1988)": {
+   "engine": "gsplus"
+  },
+  "FreeCell (1997)": {
+   "engine": "gsplus"
+  },
+  "Froggin (1992)": {
+   "engine": "gsplus"
+  },
+  "Full Metal Planete (1993)": {
+   "engine": "gsplus"
+  },
+  "Fun Columns (1991)": {
+   "capslock": true,
+   "engine": "gsplus"
+  },
+  "Future Shock 3D (1989)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame",
+   "note": "This game was made for a peripheral called the \"Future Pad\". The game used the device to make the in game ball jump. A hacked version that bypasses the \"Future Pad\" interface has been made, and this is the version included.\nTo control the ball use the mouse to move and \"2\" on the numpad to jump."
+  },
+  "GBA Championship Basketball - Two-On-Two (1987)": {
+   "engine": "gsport"
+  },
+  "GS Adventure (2021)": {
+   "engine": "gsplus"
+  },
+  "GS Asteroids (2021)": {
+   "engine": "gsplus",
+   "note": "Rotate Left\\Right with F1 and F2."
+  },
+  "GS Backgammon (1988)": {
+   "engine": "gsplus"
+  },
+  "GS Invaders (1994)": {
+   "engine": "gsplus"
+  },
+  "GS Pac-Man (2021)": {
+   "engine": "gsplus"
+  },
+  "GS Tanks (1990)": {
+   "engine": "gsport"
+  },
+  "GSNumerics (1990)": {
+   "engine": "gsplus"
+  },
+  "GShisen (1998)": {
+   "engine": "gsplus"
+  },
+  "Galactic Conquest (1991)": {
+   "engine": "gsplus"
+  },
+  "Gate (1992)": {
+   "engine": "gsplus",
+   "note": "When you are asked to insert Disk 2, press \"F4\". From this menu select \"Disk Configuration\". Select \"s5d2\", then select \"Disk2.2mg\"."
+  },
+  "Gauntlet (1988)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame"
+  },
+  "Geo Puzzle USA (1990)": {
+   "disks": [
+    "disk1.2mg"
+   ],
+   "engine": "mame"
+  },
+  "Geo Quiz (1990)": {
+   "engine": "gsplus"
+  },
+  "Geographic Jigsaw (1990)": {
+   "engine": "gsplus"
+  },
+  "Geometry (1988)": {
+   "engine": "gsplus",
+   "options": [
+    {
+     "config": "config2.txt",
+     "label": "Geometry Part 1"
+    },
+    {
+     "config": "config1.txt",
+     "label": "Geometry Part 2"
+    }
+   ]
+  },
+  "Geometry Tutor (1989)": {
+   "engine": "gsplus"
+  },
+  "Get the Points (1989)": {
+   "engine": "gsplus"
+  },
+  "Global Express Atlas (1988)": {
+   "engine": "gsplus"
+  },
+  "Gnarly Golf (1989)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame"
+  },
+  "Gold Of The Americas (1991)": {
+   "engine": "gsplus"
+  },
+  "Gold Rush (1989)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "GoldRush-Book.pdf",
+     "size": 44681509
+    },
+    {
+     "name": "GoldRush-Map.pdf",
+     "size": 17818953
+    },
+    {
+     "name": "GoldRush-ReferenceCard.pdf",
+     "size": 953007
+    }
+   ]
+  },
+  "Golden Bug (1990)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame"
+  },
+  "GolemGS (1990)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame"
+  },
+  "Golf Solitaire (1992)": {
+   "engine": "gsplus"
+  },
+  "Grackle (1989)": {
+   "engine": "gsplus"
+  },
+  "Grand Prix Circuit (1989)": {
+   "engine": "gsplus"
+  },
+  "Great Western Shootout (1989)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame"
+  },
+  "Greek Mythology (1991)": {
+   "engine": "gsplus"
+  },
+  "Hacker II (1987)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "HackerII-Actisource.pdf",
+     "size": 2084199
+    }
+   ]
+  },
+  "Halls of Montezuma (1990)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "Map.pdf",
+     "size": 1574234
+    }
+   ]
+  },
+  "Hammurabi (2000)": {
+   "engine": "gsplus"
+  },
+  "Hangman (1993)": {
+   "engine": "gsplus"
+  },
+  "Hanoi (1988)": {
+   "engine": "gsplus"
+  },
+  "Hardball! (1987)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame"
+  },
+  "Hearts (1990)": {
+   "engine": "gsplus"
+  },
+  "Hostage (1990)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame"
+  },
+  "Hover Blade (1991)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame"
+  },
+  "Hunt For Red October (1989)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "TheHuntforRedOctober-MissionDocuments.pdf",
+     "size": 970229
+    },
+    {
+     "name": "TheHuntforRedOctober-ShipRecognitionChart.pdf",
+     "size": 1240393
+    }
+   ]
+  },
+  "Immortal, The (1990)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame",
+   "note": "Whenever you are asked to enter a different disk just press enter. Press numpad \"enter\" to enter inventory. Press numpad \"0\" to select an item or use items in game."
+  },
+  "Impossible Mission II (1989)": {
+   "engine": "gsplus"
+  },
+  "Infolab Chemistry (1988)": {
+   "engine": "gsplus",
+   "note": "To start the program, double click \"Chemistry\"."
+  },
+  "Infolab Life Science (1988)": {
+   "engine": "gsplus"
+  },
+  "Invaders (1988)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame",
+   "fast": true
+  },
+  "Invaders from Space (1992)": {
+   "engine": "gsplus"
+  },
+  "Jack Nicklaus Greatest 18 Holes of Major Championship Golf (1989)": {
+   "engine": "mame",
+   "extras": [
+    {
+     "name": "Jack_Nicklaus_Courses_of_1989-Course_Sheet.pdf",
+     "size": 1216878
+    },
+    {
+     "name": "Jack_Nicklaus_Courses_of_1989-Instructions.pdf",
+     "size": 1041220
+    },
+    {
+     "name": "Jack_Nicklaus_Courses_of_1990-Course_Sheet.pdf",
+     "size": 1182519
+    },
+    {
+     "name": "Jack_Nicklaus_Courses_of_1990-Instructions.pdf",
+     "size": 867660
+    },
+    {
+     "name": "Jack_Nicklaus_Greatest_18_Holes_Golf_Course_Sheet.pdf",
+     "size": 1309329
+    },
+    {
+     "name": "Jack_Nicklaus_The_International_Course_Disk-Course_Sheet.pdf",
+     "size": 7562588
+    },
+    {
+     "name": "Jack_Nicklaus_The_International_Course_Disk-Reference.pdf",
+     "size": 1815478
+    },
+    {
+     "name": "Jack_Nicklaus_The_International_Course_Disk-The_Bear_Essentials.pdf",
+     "size": 3561488
+    },
+    {
+     "name": "Jack_Nicklaus_US_Open_Course_Disk-Course_Sheet.pdf",
+     "size": 3022370
+    },
+    {
+     "name": "Jack_Nicklaus_US_Open_Course_Disk-Instructions.pdf",
+     "size": 281059
+    }
+   ],
+   "note": "Add-On 1 is Jack Nicklaus presents The Major Championship Courses of 1989\nAdd-On 2 is Jack Nicklaus presents The International Course Disk\nAdd-On 3 is Jack Nicklaus presents The Major Championship Courses of 1990\nAdd-On 4 is Jack Nicklaus presents The Great Courses of The U.S. Open",
+   "options": [
+    {
+     "disks": [
+      "Game.po"
+     ],
+     "fast": true,
+     "label": "Jack Nicklaus Greatest 18 Holes with Add-Ons 1 and 2"
+    },
+    {
+     "disks": [
+      "Game2.po"
+     ],
+     "fast": true,
+     "label": "Jack Nicklaus Greatest 18 Holes with Add-Ons 3 and 4"
+    }
+   ]
+  },
+  "Jigsaw (1988)": {
+   "engine": "gsplus"
+  },
+  "John Elway's Quarterback (1989)": {
+   "engine": "gsplus",
+   "note": "The game will ask you to press Y/N for a joystick. It is important to make your response a capital Y or N by holding shift or the game will not accept the choice."
+  },
+  "Jungle Safari (1991)": {
+   "engine": "gsplus"
+  },
+  "KABOOM! (2015)": {
+   "engine": "gsport"
+  },
+  "Kaleidokubes (1989)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "Kaleiodokubes-Addenda_For_v2.pdf",
+     "size": 77830
+    }
+   ]
+  },
+  "Katies Farm (1990)": {
+   "disks": [
+    "Katie's Farm Dk1.2mg",
+    "Katie's Farm Dk2.2mg"
+   ],
+   "engine": "mame"
+  },
+  "Keef The Thief (1989)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "Cluebook.pdf",
+     "size": 26194964
+    },
+    {
+     "name": "CommandCard.pdf",
+     "size": 1325641
+    }
+   ]
+  },
+  "Kid Talk (1987)": {
+   "engine": "gsplus",
+   "note": "Double click \"Kid\" to start the program."
+  },
+  "Kid Writer - Golden Edition (1989)": {
+   "engine": "gsplus"
+  },
+  "Kids Time II (1987)": {
+   "engine": "gsplus",
+   "options": [
+    {
+     "config": "config2.txt",
+     "label": "ABKey"
+    },
+    {
+     "config": "config1.txt",
+     "label": "KidsNotes"
+    }
+   ]
+  },
+  "Kinderama (1989)": {
+   "engine": "gsplus",
+   "options": [
+    {
+     "config": "config1.txt",
+     "label": "Kinderama Part 1"
+    },
+    {
+     "config": "config2.txt",
+     "label": "Kinderama Part 2"
+    }
+   ]
+  },
+  "King of Chicago, The (1989)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "King of Chicago-IIGS_Reference.pdf",
+     "size": 274390
+    }
+   ]
+  },
+  "King's Quest (1987)": {
+   "engine": "gsplus"
+  },
+  "King's Quest II (1988)": {
+   "engine": "gsplus"
+  },
+  "King's Quest III (1988)": {
+   "engine": "gsplus"
+  },
+  "King's Quest IV (1989)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "Reference_Card.pdf",
+     "size": 354705
+    }
+   ]
+  },
+  "Knockout (1992)": {
+   "engine": "gsplus"
+  },
+  "Land of the Unicorn (1990)": {
+   "engine": "gsplus",
+   "options": [
+    {
+     "config": "config1.txt",
+     "label": "Synonym Review"
+    },
+    {
+     "config": "config2.txt",
+     "label": "Antonym Review"
+    },
+    {
+     "config": "config3.txt",
+     "label": "The Quest of the Silver Unicorn"
+    }
+   ]
+  },
+  "Lander Rescue (1993)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame"
+  },
+  "Laser Force (1989)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame"
+  },
+  "Last Ninja, The (1988)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame",
+   "extras": [
+    {
+     "name": "TheLastNinja-CommandCard.pdf",
+     "size": 2198086
+    }
+   ]
+  },
+  "Learning Spoken English (1987)": {
+   "engine": "gsplus",
+   "note": "Doubleclick \"Convow\" to start the program."
+  },
+  "Leisure Suit Larry In The Land of The Lounge Lizards (1987)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "Reference_Card.pdf",
+     "size": 206036
+    }
+   ]
+  },
+  "Lemmings (1996)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame",
+   "fast": true
+  },
+  "Lemonade (2000)": {
+   "engine": "gsplus"
+  },
+  "LetterSlide (1992)": {
+   "engine": "gsplus"
+  },
+  "Life and Death (1989)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "Additional-Memo.pdf",
+     "size": 974539
+    },
+    {
+     "name": "IIGS_Reference.pdf",
+     "size": 1441938
+    },
+    {
+     "name": "Memos.pdf",
+     "size": 202409
+    }
+   ]
+  },
+  "Logic Master, The (1990)": {
+   "engine": "gsplus"
+  },
+  "Lost Treasures of Infocom, The (1993)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "Lost_Treasures_of_Infocom-Hintbook.pdf",
+     "size": 18680993
+    },
+    {
+     "name": "Lost_Treasures_of_Infocom-Map_Ballyhoo.pdf",
+     "size": 444436
+    },
+    {
+     "name": "Lost_Treasures_of_Infocom-Map_Beyond_Zork.pdf",
+     "size": 348166
+    },
+    {
+     "name": "Lost_Treasures_of_Infocom-Map_Deadline.pdf",
+     "size": 582271
+    },
+    {
+     "name": "Lost_Treasures_of_Infocom-Map_Enchanter.pdf",
+     "size": 223873
+    },
+    {
+     "name": "Lost_Treasures_of_Infocom-Map_Infidel.pdf",
+     "size": 397393
+    },
+    {
+     "name": "Lost_Treasures_of_Infocom-Map_Lurking_Horror.pdf",
+     "size": 215534
+    },
+    {
+     "name": "Lost_Treasures_of_Infocom-Map_Moonmist.pdf",
+     "size": 532146
+    },
+    {
+     "name": "Lost_Treasures_of_Infocom-Map_Planetfall.pdf",
+     "size": 4018882
+    },
+    {
+     "name": "Lost_Treasures_of_Infocom-Map_Quit_Claim_Deed.pdf",
+     "size": 386710
+    },
+    {
+     "name": "Lost_Treasures_of_Infocom-Map_Sorcerer.pdf",
+     "size": 664056
+    },
+    {
+     "name": "Lost_Treasures_of_Infocom-Map_South_Land_of_Quendor.pdf",
+     "size": 4585588
+    },
+    {
+     "name": "Lost_Treasures_of_Infocom-Map_Spellbreaker.pdf",
+     "size": 656667
+    },
+    {
+     "name": "Lost_Treasures_of_Infocom-Map_Starcross.pdf",
+     "size": 283107
+    },
+    {
+     "name": "Lost_Treasures_of_Infocom-Map_Stationfall.pdf",
+     "size": 233973
+    },
+    {
+     "name": "Lost_Treasures_of_Infocom-Map_Suspended.pdf",
+     "size": 156938
+    },
+    {
+     "name": "Lost_Treasures_of_Infocom-Map_The_Witness.pdf",
+     "size": 458847
+    },
+    {
+     "name": "Lost_Treasures_of_Infocom-Map_Zork_I.pdf",
+     "size": 1323366
+    },
+    {
+     "name": "Lost_Treasures_of_Infocom-Map_Zork_II.pdf",
+     "size": 535507
+    },
+    {
+     "name": "Lost_Treasures_of_Infocom-Map_Zork_III.pdf",
+     "size": 1426982
+    },
+    {
+     "name": "Lost_Treasures_of_Infocom-Reference_Card.pdf",
+     "size": 348291
+    }
+   ],
+   "note": "Infocom provided two ways to launch the games. The Standard Interpreter provides more font options like style and size, but will not launch Hitchhikers Guide to the Galaxy or Beyond Zork. The Advanced Interpreter will play those games but does not have font options.",
+   "options": [
+    {
+     "config": "standard.txt",
+     "label": "Standard Interpreter"
+    },
+    {
+     "config": "advanced.txt",
+     "label": "Advanced Interpreter"
+    }
+   ]
+  },
+  "Lost Tribe, The (1992)": {
+   "engine": "gsplus"
+  },
+  "Lunar Lander (1989)": {
+   "engine": "gsplus",
+   "note": "To start the game double click \"Lunar.Lander\""
+  },
+  "Mad Libs (1987)": {
+   "engine": "gsplus",
+   "note": "Doubleclick \"Madlibs\" to start the program."
+  },
+  "Mad Match (1989)": {
+   "engine": "gsplus"
+  },
+  "Mage Maze (1990)": {
+   "engine": "gsplus",
+   "note": "Double click MageMaze.sys to start."
+  },
+  "Magical Myths (1988)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "Question Creator Template.pdf",
+     "size": 1384455
+    },
+    {
+     "name": "Story Template.pdf",
+     "size": 1479730
+    }
+   ]
+  },
+  "Mah Jongg (1992)": {
+   "engine": "gsplus"
+  },
+  "Mancala (1988)": {
+   "engine": "gsplus"
+  },
+  "Manhunter - New York (1988)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "Manhunter_-_New_York_-_Map_-_PC.pdf",
+     "size": 1334735
+    },
+    {
+     "name": "Manhunter_1_New_York_Hint_Book.pdf",
+     "size": 8112839
+    },
+    {
+     "name": "ManhunterNewYork-QuickReferenceCard.pdf",
+     "size": 449495
+    },
+    {
+     "name": "ManhunterNewYork-ReferenceCard.pdf",
+     "size": 976572
+    },
+    {
+     "name": "VGMap.pdf",
+     "size": 7436540
+    }
+   ]
+  },
+  "Marble Madness (1988)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame"
+  },
+  "Mastermind Plus (1994)": {
+   "engine": "gsplus"
+  },
+  "Matches (1990)": {
+   "engine": "gsplus"
+  },
+  "Math Blaster Plus (1989)": {
+   "engine": "gsplus"
+  },
+  "Math Story Problems (1989)": {
+   "engine": "gsplus",
+   "options": [
+    {
+     "config": "config1.txt",
+     "label": "Addition and Subtraction"
+    },
+    {
+     "config": "config2.txt",
+     "label": "Mixed"
+    }
+   ]
+  },
+  "Math Wizard (1988)": {
+   "engine": "gsplus"
+  },
+  "Math and Me (1988)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "Math and Me_addendum.pdf",
+     "size": 437867
+    }
+   ]
+  },
+  "MathTalk (1987)": {
+   "engine": "gsplus",
+   "note": "Double click \"MathTalk\" to start the game\nWhen saving a score file for a New User you will need to select the \"Disk\" button to switch to the save disk before typing the name of your file. Similarly, when opening a score file for a previous user via the \"Scores\" dropdown you will need to select \"Disk\" before your files will show."
+  },
+  "MathTalk Fractions (1987)": {
+   "engine": "gsplus",
+   "note": "Double click \"Fractions\" to start the game"
+  },
+  "Mavis Beacon Teaches Typing (1987)": {
+   "engine": "gsplus",
+   "note": "Double click \"Mavis\" to start the program."
+  },
+  "Maze Launcher (1989)": {
+   "engine": "gsplus",
+   "note": "Double click \"Make.Character\" to create a new character.\nDouble click \"Maze.Launcher\" to start the game."
+  },
+  "Mazer II (1992)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame"
+  },
+  "McGee (1989)": {
+   "disks": [
+    "McGee Dk1.2mg",
+    "McGee Dk2.2mg"
+   ],
+   "engine": "mame"
+  },
+  "McGee at the Funfair (1990)": {
+   "disks": [
+    "McGee Funfair Dk1.2mg",
+    "McGee Funfair Dk2.2mg"
+   ],
+   "engine": "mame"
+  },
+  "Mean 18 (1987)": {
+   "engine": "gsplus",
+   "note": "When asked to insert a disk click the mouse, then select \"Next Disk\" until some courses appear.\nI've setup for the \"Famous Course\" disks to be available by default over two selection pages. If you wish to play some of the homebrew courses then press \"F4\", select \"Disk Config\", select \"s5d2\", and select one of the \"Homebrew X.2mg\" disks. Press \"F4\" again to return to the game and press \"Next Disk\" until the new courses show for selection."
+  },
+  "Mega Mac Munch (1991)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame"
+  },
+  "MemTone 2300 (2004)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame",
+   "note": "Double click \"Memtone\" to play the game."
+  },
+  "Memo Cards (1992)": {
+   "engine": "gsplus"
+  },
+  "Metric Primer (1990)": {
+   "engine": "gsplus"
+  },
+  "MicroType - The Wonderful World of PAWS (1989)": {
+   "engine": "gsplus"
+  },
+  "Mighty Marvel Vs The Forces of Evil (1988)": {
+   "engine": "gsplus",
+   "note": "To create or edit a Hero launch \"HeroMaker\".\nTo play the game launch \"Superhero\"."
+  },
+  "Milestones 2000 (1990)": {
+   "engine": "gsplus"
+  },
+  "Milliken Story Teller - Aladdin and the Magic Lamp (1990)": {
+   "engine": "gsplus"
+  },
+  "Milliken Story Teller - Henny Penny (1990)": {
+   "engine": "gsplus"
+  },
+  "Milliken Story Teller - Jack and the Bean Stalk (1990)": {
+   "engine": "gsplus"
+  },
+  "Milliken Story Teller - Little Red Riding Hood (1990)": {
+   "engine": "gsplus"
+  },
+  "Milliken Story Teller - Peter Rabbit (1990)": {
+   "engine": "gsplus"
+  },
+  "Milliken Story Teller - The Ugly Duckling (1990)": {
+   "engine": "gsplus"
+  },
+  "MineSweeper (1990)": {
+   "engine": "gsplus"
+  },
+  "Minefield (1991)": {
+   "engine": "gsplus"
+  },
+  "Mini Putt - The Ultimate Challenge (1988)": {
+   "engine": "gsplus"
+  },
+  "Missile Attack (1992)": {
+   "engine": "gsplus"
+  },
+  "Mitosis (2011)": {
+   "engine": "gsplus"
+  },
+  "Mixed Up - Mother Goose (1988)": {
+   "engine": "gsplus"
+  },
+  "Monte Carlo (1988)": {
+   "engine": "gsplus"
+  },
+  "Monte Carlo Solitaire (1989)": {
+   "engine": "gsplus"
+  },
+  "Moonstriker (1992)": {
+   "engine": "gsplus"
+  },
+  "Mr Py and I (1989)": {
+   "engine": "gsplus"
+  },
+  "Musicgame (1989)": {
+   "engine": "gsplus"
+  },
+  "My Paint (1990)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame"
+  },
+  "Mystery Colors (1988)": {
+   "engine": "gsplus"
+  },
+  "Neuromancer (1989)": {
+   "disks": [
+    "Neuromancer.2mg"
+   ],
+   "engine": "mame",
+   "extras": [
+    {
+     "name": "Neuromancer (1988, Interplay) - PAX Verification Code Wheel - Embedded.HTM",
+     "size": 3462005
+    },
+    {
+     "name": "Neuromancer-ReferenceCard.pdf",
+     "size": 1092855
+    }
+   ]
+  },
+  "Noughts and Crosses (1990)": {
+   "engine": "gsplus"
+  },
+  "NumBlox (1990)": {
+   "engine": "gsplus"
+  },
+  "Numbergame (1990)": {
+   "engine": "gsplus"
+  },
+  "Omega (1990)": {
+   "engine": "gsplus"
+  },
+  "Omega (1996)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame",
+   "note": "This game can take awhile to load."
+  },
+  "Once Upon a Time (1988)": {
+   "engine": "gsplus",
+   "note": "Whenever the game asks for \"Disk 2\" just press ok.\nTo load a sample book select the \"File\" dropdown, select \"Load\", select the \"Disk\" button, then double click \"Tony\"."
+  },
+  "Once Upon a Time II (1989)": {
+   "engine": "gsplus",
+   "note": "Whenever the game asks for \"Disk 2\" just press ok.\nTo load a sample book select the \"File\" dropdown, select \"Load\", then double click \"Sample\"."
+  },
+  "Once Upon a Time III (1990)": {
+   "engine": "gsplus",
+   "note": "When you are asked to insert Disk 3, press \"F4\". From this menu select \"Disk Configuration\". Highlight \"s5d2\", then press \"e\" to simulate ejecting the disk. You will need to press \"F4\" again to process the eject.\nNow press \"Ok\". This will fail, but seems to be necessary. Then press \"F4\" again and go back to the disk config. Select \"s5d2\" and then select \"Disk3.2mg\". Finally press \"F4\" to exit back to the game, click \"ok\", and continue play.\nDo this as required for disk swaps.\nTo load a sample book select the \"File\" dropdown, select \"Load\", then use the \"Disk\" button to navigate to Disk 1. Double click \"Dragon.Tale\"."
+  },
+  "One Arm Battle (1990)": {
+   "engine": "gsplus"
+  },
+  "Operation Lambda (1996)": {
+   "engine": "gsplus"
+  },
+  "Orbizone (1989)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame"
+  },
+  "Othello (1988)": {
+   "engine": "gsplus"
+  },
+  "Out of This World (1992)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "Reference Card.pdf",
+     "size": 418749
+    }
+   ]
+  },
+  "Pack Man (1993)": {
+   "engine": "gsplus"
+  },
+  "Panzer Battles (1991)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "Panzer_Battles-Scenarios.pdf",
+     "size": 2549722
+    }
+   ]
+  },
+  "Paranoia (1989)": {
+   "engine": "gsplus"
+  },
+  "Pede (1993)": {
+   "engine": "gsplus"
+  },
+  "Pente (1993)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame"
+  },
+  "Pick'n Pile (1990)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame"
+  },
+  "Pipe Dream (1990)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame",
+   "extras": [
+    {
+     "name": "Pipe_Dream-Reference.pdf",
+     "size": 98373
+    }
+   ]
+  },
+  "Pirates! (1988)": {
+   "disks": [
+    "Game.2mg"
+   ],
+   "engine": "mame",
+   "extras": [
+    {
+     "name": "Pirates-Captain'sBroadsheet.pdf",
+     "size": 1436089
+    },
+    {
+     "name": "Pirates-Map.pdf",
+     "size": 3504370
+    }
+   ]
+  },
+  "PixMix (1989)": {
+   "engine": "gsplus",
+   "note": "To start the game double click \"PixMix\""
+  },
+  "Playwrite - Talking Puppets (1990)": {
+   "engine": "gsplus"
+  },
+  "Plotting (1991)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame"
+  },
+  "Plumb Crazy (1994)": {
+   "engine": "gsplus"
+  },
+  "Plunder! (1990)": {
+   "engine": "gsplus"
+  },
+  "Poker Challenge (1989)": {
+   "engine": "gsplus"
+  },
+  "Police Quest (1987)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "pq-refcard.jpg",
+     "size": 99107
+    }
+   ]
+  },
+  "Powerplay (1993)": {
+   "engine": "gsplus"
+  },
+  "Print Shop Companion IIGS, The (1990)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "The_Print_Shop_Companion-Reference.pdf",
+     "size": 2250797
+    }
+   ],
+   "note": "To start the game double click \"PSC.SYSTEM\".",
+   "printing": true
+  },
+  "Print Shop IIGS, The (1987)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "The_Print_Shop-Reference.pdf",
+     "size": 2290671
+    },
+    {
+     "name": "The_Print_Shop_IIGS_v1.1_Addendum.pdf",
+     "size": 216593
+    },
+    {
+     "name": "The_Print_Shop_Special_Ed_Graphic_Library.pdf",
+     "size": 4621275
+    }
+   ],
+   "note": "To start the game double click \"PS.SYSTEM\".",
+   "printing": true
+  },
+  "Puyo Puyo (1995)": {
+   "engine": "gsplus"
+  },
+  "Puzzle (1990)": {
+   "engine": "gsplus"
+  },
+  "Puzzle Bucket (1991)": {
+   "engine": "gsplus"
+  },
+  "Pyramid Solitaire (1989)": {
+   "engine": "gsplus"
+  },
+  "Qburt (1990)": {
+   "engine": "gsplus"
+  },
+  "Qix (1990)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame"
+  },
+  "Quadronome (1989)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame"
+  },
+  "Quest for the Hoard (1991)": {
+   "engine": "gsplus"
+  },
+  "Quest for the Hoard II - Treasures from Heaven (1993)": {
+   "engine": "gsplus"
+  },
+  "Questmaster I - The Prism of Heheutotol (1990)": {
+   "engine": "gsplus"
+  },
+  "Questron II (1988)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "QuestronII-CommandCard.pdf",
+     "size": 1735703
+    }
+   ]
+  },
+  "Quintette (1990)": {
+   "engine": "gsplus"
+  },
+  "Rastan (1990)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame"
+  },
+  "Reach For The Stars (1988)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "Reference Card.pdf",
+     "size": 362333
+    }
+   ]
+  },
+  "Read and Rhyme (1987)": {
+   "engine": "gsplus"
+  },
+  "Read-a-Rama (1989)": {
+   "engine": "gsplus"
+  },
+  "Readable Classic Tales (1990)": {
+   "engine": "gsplus"
+  },
+  "Reader Rabbit (1987)": {
+   "disks": [
+    "Game.2mg"
+   ],
+   "engine": "mame"
+  },
+  "Reading About Fish (1988)": {
+   "engine": "gsplus"
+  },
+  "Reading About Reptiles (1988)": {
+   "engine": "gsplus"
+  },
+  "Reading Magic Library - Flodd the Bad Guy (1989)": {
+   "engine": "gsplus"
+  },
+  "Reading Magic Library - Jack and the Beanstalk (1989)": {
+   "engine": "gsplus"
+  },
+  "Reading and Me (1989)": {
+   "engine": "gsplus"
+  },
+  "Rescue Rover (1992)": {
+   "engine": "gsplus"
+  },
+  "Revolution '76 (1989)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "Historical Perspective.pdf",
+     "size": 15938688
+    }
+   ]
+  },
+  "Roadwar 2000 (1987)": {
+   "engine": "gsplus"
+  },
+  "Rocket Ranger (1989)": {
+   "disks": [
+    "disk1.2mg",
+    "disk2.2mg"
+   ],
+   "engine": "mame",
+   "extras": [
+    {
+     "name": "RocketRanger-OperatingManual.pdf",
+     "size": 2605338
+    },
+    {
+     "name": "RocketRanger-SecretDecoderWheel.pdf",
+     "size": 11415
+    }
+   ],
+   "fast": true
+  },
+  "Rogue (1989)": {
+   "engine": "gsplus"
+  },
+  "Romulans (1989)": {
+   "engine": "gsplus"
+  },
+  "Rush Hour (1990)": {
+   "engine": "gsplus"
+  },
+  "SameGame GS (1997)": {
+   "engine": "gsplus"
+  },
+  "Sea Strike (1987)": {
+   "engine": "gsplus"
+  },
+  "Secrets of Bahras, The (1991)": {
+   "engine": "gsplus",
+   "note": "To start the game double click \"Start\""
+  },
+  "Sensei (1991)": {
+   "engine": "gsport",
+   "note": "Keyboard controls are not very responsive so the game has been set up to use joystick mapped to the numpad."
+  },
+  "Senseless Violence 1 - Survival of the Fetus (1989)": {
+   "engine": "gsplus"
+  },
+  "Senseless Violence 2 - You Use, You Die (1989)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame"
+  },
+  "Serve and Volley (1988)": {
+   "engine": "gsplus"
+  },
+  "Sewage (1995)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame"
+  },
+  "Shadowgate (1988)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "Shadowgate-HintBook.pdf",
+     "size": 10891426
+    },
+    {
+     "name": "Shadowgate-IIgsReferenceCard.pdf",
+     "size": 702916
+    }
+   ]
+  },
+  "Shanghai (1987)": {
+   "engine": "gsplus"
+  },
+  "Shanghai II - Dragon's Eye (1993)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "ShangaiII-ReferenceCard.pdf",
+     "size": 990464
+    },
+    {
+     "name": "ShangaiII-UpdateandEditorReferenceCard.pdf",
+     "size": 543561
+    }
+   ]
+  },
+  "Shape Teacher GS (1989)": {
+   "engine": "gsplus"
+  },
+  "Sheepshead (1991)": {
+   "engine": "gsplus"
+  },
+  "Shoveit (1992)": {
+   "engine": "gsplus"
+  },
+  "Shuffle Mouse (1991)": {
+   "engine": "gsplus"
+  },
+  "Silpheed (1988)": {
+   "engine": "gsplus"
+  },
+  "Simon Sez (1988)": {
+   "engine": "gsplus"
+  },
+  "Sinbad And The Throne of The Falcon (1990)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame",
+   "extras": [
+    {
+     "name": "Sinbad-IIGS_Reference.pdf",
+     "size": 525868
+    }
+   ]
+  },
+  "Skate or Die (1988)": {
+   "engine": "gsport"
+  },
+  "Snoopy Reading Machine (1989)": {
+   "engine": "gsplus"
+  },
+  "SolarianGS (1992)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame"
+  },
+  "Solitaire (1992)": {
+   "engine": "gsplus"
+  },
+  "Solitaire Royale (1990)": {
+   "engine": "gsplus"
+  },
+  "Solitaire and Cribbage (1990)": {
+   "disks": [
+    "Game.2mg"
+   ],
+   "engine": "mame"
+  },
+  "Son of Star Axe (1992)": {
+   "engine": "gsplus"
+  },
+  "Sound Discoveries (1991)": {
+   "engine": "mame",
+   "options": [
+    {
+     "disks": [
+      "disk1.2mg"
+     ],
+     "label": "Beginner Disk"
+    },
+    {
+     "disks": [
+      "disk2.2mg"
+     ],
+     "label": "Pitch Disk - Pitches in Bottles"
+    },
+    {
+     "disks": [
+      "disk3.2mg"
+     ],
+     "label": "Pitch Disk - Pitch Names"
+    },
+    {
+     "disks": [
+      "disk4.2mg"
+     ],
+     "label": "Pitch Disk - Keys to Success"
+    },
+    {
+     "disks": [
+      "disk5.2mg"
+     ],
+     "label": "Rhythm Disk - Rhythm Basics"
+    },
+    {
+     "disks": [
+      "disk6.2mg"
+     ],
+     "label": "Rhythm Disk - Music Calculator"
+    },
+    {
+     "disks": [
+      "disk7.2mg"
+     ],
+     "label": "Rhythm Disk - Rhythm Wrap-Up"
+    }
+   ]
+  },
+  "Space Ace (1990)": {
+   "engine": "gsplus"
+  },
+  "Space Arrow (1992)": {
+   "engine": "gsplus"
+  },
+  "Space Cluster (1990)": {
+   "engine": "gsport"
+  },
+  "Space Fox (1992)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame"
+  },
+  "Space Quest I - The Sarien Encounter (1987)": {
+   "engine": "gsplus"
+  },
+  "Space Quest II - Vohaul's Revenge (1988)": {
+   "engine": "gsplus"
+  },
+  "Space Shark (1990)": {
+   "engine": "gsport",
+   "note": "Mouse is not emulated well for this game, and when joystick is mapped to the keyboard the game keeps centering the ship. To get around this ive mapped the joystick to the mouse which seems to work better. Use the games \"joystick\" option for play."
+  },
+  "Space Shuttle Word Problems (1991)": {
+   "engine": "gsplus"
+  },
+  "Space Warrior (1992)": {
+   "engine": "gsplus"
+  },
+  "Space Whiskey (1996)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame"
+  },
+  "Spellbinder (1991)": {
+   "engine": "gsplus"
+  },
+  "Speller Bee (1988)": {
+   "engine": "gsplus",
+   "note": "Double click \"Spell\" to start the game."
+  },
+  "Spirit of Excalibur (1991)": {
+   "disks": [
+    "disk1.2mg",
+    "disk3.2mg",
+    "disk2.2mg"
+   ],
+   "engine": "mame",
+   "extras": [
+    {
+     "name": "Spirit of Excalibur - Map-ENG.jpg",
+     "size": 2516692
+    }
+   ]
+  },
+  "Spy Hunter (1993)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame"
+  },
+  "Stalactites (1994)": {
+   "engine": "gsplus"
+  },
+  "Star Axe (1990)": {
+   "engine": "gsplus"
+  },
+  "Star Saga One - Beyond the Boundary (1988)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame",
+   "extras": [
+    {
+     "name": "Instructions for the Apple IIGS.pdf",
+     "size": 500123
+    },
+    {
+     "name": "Player Pieces for Board/Player Pieces.pdf",
+     "size": 213262
+    },
+    {
+     "name": "Star-Saga-One-Map-1.jpg",
+     "size": 2070127
+    },
+    {
+     "name": "Star-Saga-One-Map-2.jpg",
+     "size": 3956585
+    },
+    {
+     "name": "StarSagaOne-Book A (Text 001-073).pdf",
+     "size": 3732847
+    },
+    {
+     "name": "StarSagaOne-Book B (Text 074-147).pdf",
+     "size": 3863291
+    },
+    {
+     "name": "StarSagaOne-Book C (Text 148-223).pdf",
+     "size": 3942824
+    },
+    {
+     "name": "StarSagaOne-Book D (Text 224-296).pdf",
+     "size": 4088234
+    },
+    {
+     "name": "StarSagaOne-Book E (Text 297-367).pdf",
+     "size": 4097982
+    },
+    {
+     "name": "StarSagaOne-Book F (Text 368-432).pdf",
+     "size": 3908029
+    },
+    {
+     "name": "StarSagaOne-Book G (Text 433-508).pdf",
+     "size": 4029377
+    },
+    {
+     "name": "StarSagaOne-Book H (Text 509-568).pdf",
+     "size": 4244691
+    },
+    {
+     "name": "StarSagaOne-Book I (Text 569-639).pdf",
+     "size": 3838251
+    },
+    {
+     "name": "StarSagaOne-Book J (Text 640-697).pdf",
+     "size": 4133832
+    },
+    {
+     "name": "StarSagaOne-Book K (Text 698-755).pdf",
+     "size": 4099530
+    },
+    {
+     "name": "StarSagaOne-Book L (Text 756-820).pdf",
+     "size": 4119275
+    },
+    {
+     "name": "StarSagaOne-Book M (Text 821-888).pdf",
+     "size": 3814119
+    },
+    {
+     "name": "StarSagaOne-Character Booklet-Corin Stoneseeker.pdf",
+     "size": 1736103
+    },
+    {
+     "name": "StarSagaOne-Character Booklet-Jean G Clerc.pdf",
+     "size": 1458507
+    },
+    {
+     "name": "StarSagaOne-Character Booklet-Laran Darkwatch.pdf",
+     "size": 3926706
+    },
+    {
+     "name": "StarSagaOne-Character Booklet-MJ Turner.pdf",
+     "size": 1954505
+    },
+    {
+     "name": "StarSagaOne-Character Booklet-Prof Lee Drambroke.pdf",
+     "size": 1884542
+    },
+    {
+     "name": "StarSagaOne-Character Booklet-Valentine Stewart.pdf",
+     "size": 4632632
+    }
+   ]
+  },
+  "Star Saga Two - The Clathran Menance v1.0 (1988)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame",
+   "extras": [
+    {
+     "name": "bookA.pdf",
+     "size": 118392234
+    },
+    {
+     "name": "bookB.pdf",
+     "size": 112519656
+    },
+    {
+     "name": "bookC.pdf",
+     "size": 108538230
+    },
+    {
+     "name": "bookD.pdf",
+     "size": 108801221
+    },
+    {
+     "name": "bookE.pdf",
+     "size": 109288174
+    },
+    {
+     "name": "bookF.pdf",
+     "size": 107075078
+    },
+    {
+     "name": "bookG.pdf",
+     "size": 113698599
+    },
+    {
+     "name": "bookH.pdf",
+     "size": 105237892
+    },
+    {
+     "name": "bookI.pdf",
+     "size": 114252245
+    },
+    {
+     "name": "bookJ.pdf",
+     "size": 112107113
+    },
+    {
+     "name": "bookK.pdf",
+     "size": 109966949
+    },
+    {
+     "name": "bookL.pdf",
+     "size": 114343254
+    },
+    {
+     "name": "bookM.pdf",
+     "size": 110422012
+    },
+    {
+     "name": "bookN.pdf",
+     "size": 112519976
+    },
+    {
+     "name": "Character_Booklet_Corin_Stoneseeker.pdf",
+     "size": 36883672
+    },
+    {
+     "name": "Character_Booklet_Jean_G_Clerc.pdf",
+     "size": 33719990
+    },
+    {
+     "name": "Character_Booklet_Laran_Darkwatch.pdf",
+     "size": 39508543
+    },
+    {
+     "name": "Character_Booklet_M_J_Turner.pdf",
+     "size": 38354563
+    },
+    {
+     "name": "Character_Booklet_Professor_Lee_Dambroke.pdf",
+     "size": 36326019
+    },
+    {
+     "name": "Character_Booklet_Valentine_Stewart.pdf",
+     "size": 38138069
+    },
+    {
+     "name": "Instructions for the Apple IIGS.pdf",
+     "size": 8414565
+    },
+    {
+     "name": "starsaga2-map.jpg",
+     "size": 2491164
+    }
+   ]
+  },
+  "Stars and Planets (1989)": {
+   "engine": "gsplus"
+  },
+  "Stickybear ABC (1988)": {
+   "engine": "gsplus"
+  },
+  "Stickybear Opposites (1989)": {
+   "engine": "gsplus"
+  },
+  "Stickybear Shapes (1989)": {
+   "engine": "gsplus"
+  },
+  "Storybook Weaver (1990)": {
+   "engine": "gsplus"
+  },
+  "Storybook Weaver - World of Adventure (1991)": {
+   "engine": "gsplus"
+  },
+  "Storybook Weaver - World of Make Believe (1991)": {
+   "engine": "gsplus"
+  },
+  "Street Sports Soccer (1988)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "Command_Card.pdf",
+     "size": 453342
+    }
+   ]
+  },
+  "Strip Poker II (1987)": {
+   "engine": "gsplus",
+   "note": "If you wish to change to data disk girls, press \"F4\" when the choice is given. From this menu select \"Disk Configuration\". Select \"s5d1\", then select a data disk. Press \"F4\" to exit back to the game and then select \"Data Disk\" and click until the new girls show."
+  },
+  "Sub Battle Simulator (1987)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "CommandCard.pdf",
+     "size": 1440494
+    },
+    {
+     "name": "USSPampanitoSS383.pdf",
+     "size": 2753308
+    }
+   ]
+  },
+  "Subversion (1992)": {
+   "engine": "gsplus"
+  },
+  "Super Mario GS (1999)": {
+   "engine": "gsplus"
+  },
+  "Superstar Ice Hockey (1988)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "Reference_Booklet.pdf",
+     "size": 11675342
+    }
+   ]
+  },
+  "Sylvan Idyll (1992)": {
+   "engine": "gsplus",
+   "note": "Double click \"Sylvan\" to start the game."
+  },
+  "Symbolix (1994)": {
+   "engine": "gsplus"
+  },
+  "Tales From the Arabian Knights (1988)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "Question Creator Template.pdf",
+     "size": 1384455
+    },
+    {
+     "name": "Story Template.pdf",
+     "size": 1479730
+    }
+   ]
+  },
+  "Talking ABC's - Letters (1989)": {
+   "engine": "gsplus"
+  },
+  "Talking ABC's - Words (1989)": {
+   "engine": "gsplus"
+  },
+  "Talking Addition and Subtraction (1989)": {
+   "engine": "gsplus"
+  },
+  "Talking Alpha Chimp (1989)": {
+   "engine": "gsplus"
+  },
+  "Talking Animals (1989)": {
+   "engine": "gsplus"
+  },
+  "Talking Classroom (1989)": {
+   "engine": "gsplus"
+  },
+  "Talking Clock (1988)": {
+   "engine": "gsplus"
+  },
+  "Talking Colors (1988)": {
+   "engine": "gsplus"
+  },
+  "Talking Dinosaurs (1989)": {
+   "engine": "gsplus"
+  },
+  "Talking First Dinosaur Reader (1991)": {
+   "engine": "gsplus"
+  },
+  "Talking First Reader (1989)": {
+   "engine": "gsplus"
+  },
+  "Talking First Words (1989)": {
+   "engine": "gsplus"
+  },
+  "Talking First Writer (1989)": {
+   "engine": "gsplus"
+  },
+  "Talking Money (1989)": {
+   "engine": "gsplus"
+  },
+  "Talking Multiplication and Division (1990)": {
+   "engine": "gsplus"
+  },
+  "Talking Numbers (1989)": {
+   "engine": "gsplus"
+  },
+  "Talking Reading Railroad (1989)": {
+   "engine": "gsplus"
+  },
+  "Talking School Bus (1989)": {
+   "engine": "gsplus"
+  },
+  "Talking Shapes (1988)": {
+   "engine": "gsplus"
+  },
+  "Talking Speller (1989)": {
+   "engine": "gsplus"
+  },
+  "Talking Speller II (1989)": {
+   "engine": "gsplus"
+  },
+  "Talking USA Map (1989)": {
+   "engine": "gsplus"
+  },
+  "Tarot (1990)": {
+   "engine": "gsplus"
+  },
+  "Task Force (1990)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "TaskForce-ResumeCard.pdf",
+     "size": 286386
+    }
+   ]
+  },
+  "Tass Times In Tonetown (1986)": {
+   "disks": [
+    "Game.2mg"
+   ],
+   "engine": "mame",
+   "extras": [
+    {
+     "name": "Tass_Times-Newspaper.pdf",
+     "size": 5622986
+    }
+   ]
+  },
+  "Test Drive II - The Duel (1989)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "Addendum.pdf",
+     "size": 2036391
+    }
+   ]
+  },
+  "Tetris (1988)": {
+   "engine": "gsplus"
+  },
+  "Tetrotrix (1990)": {
+   "engine": "gsplus"
+  },
+  "Thexder (1987)": {
+   "engine": "gsplus"
+  },
+  "Third Courier, The (1989)": {
+   "disks": [
+    "Disk1.po",
+    "Disk2.po"
+   ],
+   "engine": "mame",
+   "extras": [
+    {
+     "name": "The_Third_Courier-Addendum.pdf",
+     "size": 92825
+    },
+    {
+     "name": "The_Third_Courier-Cluebook_Promo.pdf",
+     "size": 61398
+    },
+    {
+     "name": "The_Third_Courier-Map.pdf",
+     "size": 306209
+    }
+   ]
+  },
+  "Three Stooges, The (1990)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame",
+   "fast": true
+  },
+  "Tic Tac Toe 3D (1998)": {
+   "engine": "gsplus"
+  },
+  "TicTacToe (1989)": {
+   "engine": "gsplus"
+  },
+  "Tinies, The (1994)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame"
+  },
+  "Tomahawk (1988)": {
+   "disks": [
+    "Game.2mg"
+   ],
+   "engine": "mame",
+   "extras": [
+    {
+     "name": "Apache History and Design.pdf",
+     "size": 4804108
+    }
+   ]
+  },
+  "Tonights Sky GS (1995)": {
+   "engine": "gsplus"
+  },
+  "Tower of Myraglen, The (1987)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "myraglen_level_8.png",
+     "size": 4351
+    },
+    {
+     "name": "tower_of_myraglen_level_4_detail.png",
+     "size": 13851
+    },
+    {
+     "name": "tower_of_myraglen_level_6_detail.png",
+     "size": 3375
+    },
+    {
+     "name": "tower_of_myraglen_level_maps.png",
+     "size": 5180
+    }
+   ]
+  },
+  "Towers (1989)": {
+   "engine": "gsplus"
+  },
+  "Towers of Hanoi (1988)": {
+   "engine": "gsplus"
+  },
+  "Transylvania III (1990)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "Transylvania_III-Comprehend_Plus.pdf",
+     "size": 145092
+    },
+    {
+     "name": "Transylvania_III-Phrasebook.pdf",
+     "size": 104925
+    }
+   ]
+  },
+  "Triango (1988)": {
+   "engine": "gsplus"
+  },
+  "Tunnels of Armageddon (1990)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame",
+   "extras": [
+    {
+     "name": "Reference.pdf",
+     "size": 381556
+    }
+   ]
+  },
+  "Turkey Shoot (1997)": {
+   "engine": "gsplus"
+  },
+  "Typing Tutor IV (1988)": {
+   "engine": "gsplus"
+  },
+  "USA Geograph (1992)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "Reference_Card_Students.pdf",
+     "size": 110309
+    },
+    {
+     "name": "Reference_Card_Teachers.pdf",
+     "size": 120828
+    }
+   ]
+  },
+  "Ugly Duckling, The (1989)": {
+   "engine": "gsplus"
+  },
+  "Ultima I - The First Age of Darkness (1992)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "reference.pdf",
+     "size": 1071314
+    }
+   ]
+  },
+  "Umoria GS (1993)": {
+   "engine": "gsplus"
+  },
+  "Uninvited (1988)": {
+   "engine": "gsplus"
+  },
+  "VIAD (1992)": {
+   "engine": "gsplus"
+  },
+  "Vegas Craps (1988)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "IIGS_Addendum.pdf",
+     "size": 119648
+    }
+   ]
+  },
+  "Vegas Gambler (1988)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "IIGS_Addendum.pdf",
+     "size": 98181
+    }
+   ]
+  },
+  "Video Poker (1989)": {
+   "engine": "gsplus"
+  },
+  "Volcanoes Deluxe (1988)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "Volcanoes Docs.pdf",
+     "size": 2247128
+    }
+   ]
+  },
+  "Wa-Tor (1991)": {
+   "engine": "gsplus"
+  },
+  "War In Middle Earth (1989)": {
+   "engine": "gsplus"
+  },
+  "Warfare (1992)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame"
+  },
+  "Warlock (1988)": {
+   "engine": "gsplus"
+  },
+  "Weather Forecast (1988)": {
+   "engine": "gsplus"
+  },
+  "Weather Station (1988)": {
+   "engine": "gsplus"
+  },
+  "Wheel of Fortune (1988)": {
+   "engine": "gsplus"
+  },
+  "Where in the USA is Carmen Sandiego (1990)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "Carmen_USA-Scrapbook.pdf",
+     "size": 17730362
+    }
+   ]
+  },
+  "Where in the World is Carmen Sandiego (1989)": {
+   "engine": "gsplus"
+  },
+  "Wiggle (1994)": {
+   "engine": "gsplus"
+  },
+  "Will Harvey's Music Construction Set (1986)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame"
+  },
+  "Windwalker (1990)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "WindWalker-Book_of_I_Ching.pdf",
+     "size": 3808124
+    },
+    {
+     "name": "WindWalker-IIGS_Reference.pdf",
+     "size": 430437
+    }
+   ]
+  },
+  "Winter Games (1987)": {
+   "engine": "gsplus"
+  },
+  "Wisconsin Rummy (1990)": {
+   "engine": "gsplus"
+  },
+  "Wolfenstein 3D (1997)": {
+   "engine": "gsplus"
+  },
+  "Word Master, The (1989)": {
+   "engine": "gsplus"
+  },
+  "World (1993)": {
+   "engine": "gsplus"
+  },
+  "World Disk (1989)": {
+   "engine": "gsplus"
+  },
+  "World Games (1987)": {
+   "engine": "gsplus",
+   "extras": [
+    {
+     "name": "Apple IIGS Addendum.pdf",
+     "size": 920839
+    }
+   ]
+  },
+  "World Geograph (1989)": {
+   "engine": "gsplus"
+  },
+  "World Tour Golf (1987)": {
+   "engine": "gsplus",
+   "note": "During loading of the game you will need to double click \"GOLF\" from a directory listing."
+  },
+  "Xenocide (1989)": {
+   "engine": "gsport"
+  },
+  "Yahtzee (1988)": {
+   "engine": "gsplus"
+  },
+  "Zany Golf (1988)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame"
+  },
+  "Zappa Roidz (1989)": {
+   "disks": [
+    "Game.po"
+   ],
+   "engine": "mame",
+   "fast": true
+  }
+ },
+ "schema": 1
+}
