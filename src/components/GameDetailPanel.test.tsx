@@ -558,3 +558,53 @@ describe("GameDetailPanel theme row", () => {
     dispose();
   });
 });
+
+describe("GameDetailPanel - Apple IIGS", () => {
+  const INFO = {
+    exo_engine: "gsplus", engine: "gsplus", source: "pack", pack_id: "gsplus", note: null,
+    options: ["Cribbage King", "Gin King"], selected: "Cribbage King",
+    substitute: null, substitute_note: null, printing_unavailable: false, capslock: false,
+    extras: [{ name: "Quick_Reference-Card.pdf", size: 1_200_000, cached: false }],
+  };
+  const iigsGame = () => makeGame({
+    id: 77, title: "Cribbage King and Gin King", torrent_source: "eXoAppleIIGS",
+    shortcode: "Cribbage King and Gin King (1990)", installed: true, in_library: true,
+  });
+
+  beforeEach(() => {
+    mockInvoke.mockReset();
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_game_metadata") { return EMPTY_META; }
+      if (cmd === "get_game_variants") { return []; }
+      if (cmd === "appleiigs_info") { return INFO; }
+      return null;
+    });
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("offers one chip per program and stores the pick", async () => {
+    const { dispose } = mount(iigsGame());
+    await new Promise((r) => setTimeout(r, 30));
+    const chips = [...document.body.querySelectorAll("[data-testid=iigs-options] .variant-chip")];
+    expect(chips.map((c) => c.textContent)).toEqual(["Cribbage King", "Gin King"]);
+    expect(chips[0].className).toContain("is-selected");
+    (chips[1] as HTMLButtonElement).click();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(mockInvoke).toHaveBeenCalledWith("set_appleiigs_option", { id: 77, option: "Gin King" });
+    dispose();
+  });
+
+  it("names the engine, lists the extras and the controls", async () => {
+    const { dispose } = mount(iigsGame());
+    await new Promise((r) => setTimeout(r, 30));
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("GSplus");
+    expect(text).toContain("Controls");
+    const extras = document.body.querySelector("[data-testid=iigs-extras]");
+    expect(extras?.textContent).toContain("Quick Reference - Card");
+    dispose();
+  });
+});

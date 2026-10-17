@@ -135,6 +135,7 @@ export function platformTag(torrentSource: string | null | undefined): string | 
   if (torrentSource === "eXoWin3x") { return "Win3x"; }
   if (torrentSource === "eXoWin9x") { return "Win9x"; }
   if (torrentSource === "eXoScummVM") { return "ScummVM"; }
+  if (torrentSource === "eXoAppleIIGS") { return "IIGS"; }
   return null;
 }
 

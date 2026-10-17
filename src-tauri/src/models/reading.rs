@@ -14,6 +14,8 @@ pub struct Publication {
     pub cover_key: Option<String>,
     /// `EN` | `DE` - eXo files a translated series under its own name (§19).
     pub language: String,
+    /// The system the series covers: `MS-DOS`, or `Apple IIGS` (§23).
+    pub platform: String,
 }
 
 /// One issue: a PDF to read, or one of the 241 disk magazines to launch.
@@ -57,6 +59,8 @@ pub struct Issue {
     pub language: String,
     /// Cover-CD videos beside the issue - counted, never fetched.
     pub extras_count: i64,
+    /// The publication's platform.
+    pub platform: String,
 }
 
 /// eXo's own "this game was covered in …" link: magazine, page and the PDF it

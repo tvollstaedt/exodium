@@ -1,15 +1,19 @@
 import { createSignal, createEffect, on, onCleanup, type Accessor } from "solid-js";
 import type { Game, Win9xMultiplayerInfo, Win9xSupportStatus } from "../api/tauri";
-import { win9xEngineAvailable, win9xMultiplayerInfo, getWin9xSupportStatus, getScummVmSupportStatus } from "../api/tauri";
+import {
+  win9xEngineAvailable, win9xMultiplayerInfo, getWin9xSupportStatus, getScummVmSupportStatus,
+  getAppleiigsSupportStatus,
+} from "../api/tauri";
 import { installedPacks } from "../stores/contentPacks";
 import { isOffline } from "../stores/network";
-import { isWin9x, isScummVm } from "../launchNotes";
+import { isWin9x, isScummVm, isAppleIigs } from "../launchNotes";
 
 /** What the panel knows about a Win9x game's emulator, the shared support
  *  payload and online play. Probes on game change, re-probes the engine when
  *  a pack install lands or the payload turns ready, and polls the payload
  *  while it downloads. The payload poll also serves ScummVM games (utilSVM.zip
- *  carries eXo's builds on Windows); inert for every other collection. */
+ *  carries eXo's builds on Windows) and the Apple IIGS (its ROMs);
+ *  inert for every other collection. */
 export function createWin9xStatus(game: Accessor<Game | null>, settled: Accessor<boolean>) {
   const [engineMissing, setEngineMissing] = createSignal(false);
   const [support, setSupport] = createSignal<Win9xSupportStatus | null>(null);
@@ -53,19 +57,20 @@ export function createWin9xStatus(game: Accessor<Game | null>, settled: Accessor
   createEffect(() => {
     const g = game();
     const svm = isScummVm(g);
-    if (!g || !(isWin9x(g) || svm) || isOffline()) { setSupport(null); return; }
+    const iigs = isAppleIigs(g);
+    if (!g || !(isWin9x(g) || svm || iigs) || isOffline()) { setSupport(null); return; }
     if (!settled()) { return; }
     const variant = g.dosbox_variant ?? null;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const probe = () => {
-      (svm ? getScummVmSupportStatus() : getWin9xSupportStatus(variant))
+      (svm ? getScummVmSupportStatus() : iigs ? getAppleiigsSupportStatus() : getWin9xSupportStatus(variant))
         .then((s) => {
           if (cancelled) { return; }
           setSupport(s);
           if (s.phase === "failed") { return; }
           if (s.phase === "ready") {
-            if (!svm && engineMissing()) { probeEngine(g); }
+            if (!svm && !iigs && engineMissing()) { probeEngine(g); }
             return;
           }
           // A live bar for an active download; a steady "missing" only needs

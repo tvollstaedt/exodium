@@ -50,6 +50,9 @@ pub enum Launcher {
     Win9x,
     /// ScummVM launched with a game id, no conf at all - eXoScummVM.
     ScummVm,
+    /// GSplus, GSport or MAME booting an Apple IIGS disk image -
+    /// eXoAppleIIGS (§23).
+    AppleIigs,
 }
 
 /// Look up a collection definition by ID.  Returns None for unknown IDs.
@@ -202,6 +205,20 @@ pub const COLLECTION_MAP: &[CollectionDef] = &[
         platform: "ScummVM",
         year_subdirs: false,
         launcher: Launcher::ScummVm,
+    },
+    CollectionDef {
+        id: "eXoAppleIIGS",
+        display_name: "eXoAppleIIGS",
+        metadata_file: "AppleIIGS.xml.gz",
+        torrent_file: "eXoAppleIIGS.torrent",
+        configs_zip: Some("AppleIIGS_configs.zip"),
+        inner_folder: "eXoAppleIIGS",
+        game_prefix: "eXo/eXoAppleIIGS",
+        shortcode_segment: "!appleiigs",
+        lang_dir: None,
+        platform: "Apple IIGS",
+        year_subdirs: false,
+        launcher: Launcher::AppleIigs,
     },
 ];
 

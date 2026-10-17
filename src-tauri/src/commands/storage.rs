@@ -81,10 +81,10 @@ fn classify_content(rest: &[&str], size: u64) -> (Category, Option<String>) {
     }
     match *first {
         "GameData" => (Category::Extras, if rest.len() == 3 { key(2) } else { None }),
-        "magazinecache" => (Category::Reading, key(1)),
+        "magazinecache" | "extrascache" => (Category::Reading, key(1)),
         d if CACHE_DIRS.contains(&d) => (Category::Caches, None),
         d if PACK_DIRS.contains(&d) => (Category::Packs, None),
-        "pristine" => (Category::Configs, None),
+        "pristine" | "iigs-run" => (Category::Configs, None),
         _ => (Category::Other, None),
     }
 }
@@ -508,6 +508,8 @@ mod tests {
         assert_eq!(cat("content/emulators/dosbox-x/x", false, 1), Category::Packs);
         assert_eq!(cat("content/videocache/eXoDOS_1.mp4", false, 1), Category::Caches);
         assert_eq!(cat("content/magazinecache/abc.pdf", false, 1), Category::Reading);
+        assert_eq!(cat("content/extrascache/abc.pdf", false, 1), Category::Reading);
+        assert_eq!(cat("content/iigs-run/Arkanoid (1988)/gsplus.cfg", false, 1), Category::Configs);
         assert_eq!(cat("content/GameData/eXoDOS/x.zip", true, 1), Category::Extras);
         assert_eq!(cat("content/.content-downloads/x", false, 1), Category::Other);
         assert_eq!(cat("librqbit-fastresume/x", false, 1), Category::Other);

@@ -11,11 +11,13 @@ import { FieldIcon, IconPlay, IconSoundOn, IconSoundOff, IconZoom, type FieldIco
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Button } from "./Button";
 import type { Game, GameMetadata, Article, Issue } from "../api/tauri";
-import { gameArticles, getIssue, gameDiskUsage, launchGame, stopGame, gameEngineInfo, gamePrintingUnavailable, scummvmEngineInfo, scummvmVariants, setScummvmOptions, win9xMultiplayerInfo, dismissWin9xNetworkPrompt, enableWin9xNetwork, mediaUrl } from "../api/tauri";
-import type { GameEngineInfo, GameDiskUsage, ScummVmEngineInfo, ScummVmVariants } from "../api/tauri";
+import { gameArticles, getIssue, gameDiskUsage, launchGame, stopGame, gameEngineInfo, gamePrintingUnavailable, scummvmEngineInfo, scummvmVariants, setScummvmOptions, win9xMultiplayerInfo, dismissWin9xNetworkPrompt, enableWin9xNetwork, mediaUrl, appleiigsInfo } from "../api/tauri";
+import { chooseIigsOption as storeIigsOption, iigsRevision } from "../stores/appleiigs";
+import type { AppleIigsInfo, GameEngineInfo, GameDiskUsage, ScummVmEngineInfo, ScummVmVariants } from "../api/tauri";
+import { IigsExtras } from "./IigsExtras";
 import { createWin9xStatus } from "./win9xStatus";
 import { formatBytes, parseLangEntries, langBadgeClass, performUninstall, performReset } from "../util";
-import { launchNote, emulatorName as describeEmulator, emulatorPackId, isScummVm, svmVariantLabel, type PanelNote } from "../launchNotes";
+import { launchNote, emulatorName as describeEmulator, emulatorPackId, isScummVm, isAppleIigs, iigsControls, svmVariantLabel, type PanelNote } from "../launchNotes";
 import { showToast } from "../stores/toasts";
 import { bestThumbnailPath, thumbnailCandidates } from "../stores/thumbnails";
 import { downloads, startGameDownload, getDownloadState, cancelGameDownload, watchExtrasIfPending } from "../stores/downloads";
@@ -153,13 +155,32 @@ export function GameDetailPanel(props: Props) {
       showToast("Couldn't switch the version", "error", { detail: String(e) });
     }
   };
-  const emulatorName = () => describeEmulator(selected() ?? props.game, svmEngine(), runsUnderEce());
+  /** An eXoAppleIIGS game's engine, menu, notes and extras; null for other
+   *  collections and until the backend answers. */
+  const [iigsInfo, setIigsInfo] = createSignal<AppleIigsInfo | null>(null);
+  const loadIigsInfo = (id: number) => {
+    appleiigsInfo(id)
+      .then((info) => { if (props.game?.id === id) { setIigsInfo(info); } })
+      .catch(() => {});
+  };
+  const chooseIigsOption = async (label: string) => {
+    const id = props.game?.id;
+    if (id == null || iigsInfo()?.selected === label) { return; }
+    try {
+      await storeIigsOption(id, label);
+    } catch (e) {
+      showToast("Couldn't switch the program", "error", { detail: String(e) });
+    }
+  };
+  const emulatorName = () => describeEmulator(selected() ?? props.game, svmEngine(), runsUnderEce(), iigsInfo(), isWindows);
   const packCollection = () => selected()?.torrent_source ?? props.game?.torrent_source ?? "eXoWin9x";
   /** The variant that picks the emulator pack (Win9x slug or ScummVM pin). */
   /** The content pack that could supply the missing Win9x emulator. */
   const emulatorPack = () => {
     const g = selected() ?? props.game;
-    const packId = isScummVm(g) ? svmEngine()?.pack_id ?? null : emulatorPackId(g?.dosbox_variant);
+    const packId = isScummVm(g)
+      ? svmEngine()?.pack_id ?? null
+      : isAppleIigs(g) ? iigsInfo()?.pack_id ?? null : emulatorPackId(g?.dosbox_variant);
     if (!packId) { return null; }
     return (packsByCollection()[packCollection()] ?? [])
       .find((p) => p.id === packId && p.available && !p.installed) ?? null;
@@ -174,6 +195,7 @@ export function GameDetailPanel(props: Props) {
       downloading: selectedDownloading(),
       svmEngine: svmEngine(),
       svmNote: svmVariants()?.note ?? null,
+      iigs: iigsInfo(),
       engineInfo: engineInfo(),
       win9xEngineMissing: win9x.engineMissing(),
       support: win9x.support(),
@@ -430,6 +452,17 @@ export function GameDetailPanel(props: Props) {
   // Reset only when the displayed game changes: library refreshes replace
   // the object for the same id, and the memo's equality swallows those.
   const shownGameId = createMemo(() => props.game?.id ?? null);
+  // An Apple IIGS game's info follows a pack install, the ROMs turning ready
+  // and a stored program change - keyed on the id, never the row object
+  // (§12), so a library refresh does not refetch it.
+  createEffect(on(
+    [() => installedPacks(), () => win9x.support()?.phase, iigsRevision],
+    () => {
+      const id = shownGameId();
+      if (id != null && isAppleIigs(untrack(() => props.game))) { loadIigsInfo(id); }
+    },
+    { defer: true },
+  ));
   let lastMetaKey: string | null = null;
   /** The CARD the last metadata load belonged to. Two variants of one card
    *  differ in `torrent_source`, so the load key cannot answer "same game". */
@@ -463,6 +496,8 @@ export function GameDetailPanel(props: Props) {
     }
     setSvmEngine(null);
     setSvmVariants(null);
+    setIigsInfo(null);
+    if (isAppleIigs(g) && g.id != null) { loadIigsInfo(g.id); }
     if (isScummVm(g) && g.id != null) {
       const id = g.id;
       scummvmEngineInfo(id)
@@ -1238,6 +1273,24 @@ export function GameDetailPanel(props: Props) {
               </div>
             </Show>
 
+            {/* Programs on a multi-program Apple IIGS disk: eXo asks at every
+                launch, here the chip is a per-game setting Play uses. */}
+            <Show when={isAppleIigs(selected() ?? props.game) && (iigsInfo()?.options.length ?? 0) > 1}>
+              <div class="variant-switcher" role="group" aria-label="Programs" data-testid="iigs-options">
+                <For each={iigsInfo()!.options}>
+                  {(label) => (
+                    <button
+                      class={`variant-chip${iigsInfo()?.selected === label ? " is-selected" : ""}`}
+                      title={label}
+                      onClick={() => { void chooseIigsOption(label); }}
+                    >
+                      <span class="variant-chip-label">{label}</span>
+                    </button>
+                  )}
+                </For>
+              </div>
+            </Show>
+
             {/* Language switcher: picking a chip re-points the whole panel -
                 actions, description, manual and screenshots all follow it. */}
             <Show when={isMultiLang()}>
@@ -1467,6 +1520,24 @@ export function GameDetailPanel(props: Props) {
                     </Show>
                   </div>
                 </div>
+              </Show>
+
+              <Show when={iigsInfo()}>
+                {(info) => (
+                  <>
+                    <div class="game-detail-controls">
+                      <div class="game-detail-section-label">Controls</div>
+                      <div class="game-detail-controls-text">{iigsControls(info(), isWindows)}</div>
+                    </div>
+                    <Show when={info().extras.length > 0 && props.game?.id != null}>
+                      <IigsExtras
+                        gameId={props.game!.id!}
+                        extras={info().extras}
+                        onChanged={() => { const id = props.game?.id; if (id != null) { loadIigsInfo(id); } }}
+                      />
+                    </Show>
+                  </>
+                )}
               </Show>
 
               {/* Covered in: eXo ships the page numbers, so this jumps

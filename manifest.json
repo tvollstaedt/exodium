@@ -342,12 +342,71 @@
         "posters": {
           "display_name": "Cover Art",
           "description": "HD covers for the magazines, books and catalogs in the reading room",
-          "url": "https://github.com/tvollstaedt/exodium/releases/download/content-v8/posters-eXoMedia-v1.tar.gz",
-          "sha256": "7f24baee5d813e70dcf0a6cffe0a6fafdc74c95eb304488ff8de2e27e89dedf3",
-          "size_bytes": 178472110,
-          "version": 1,
+          "url": "https://github.com/tvollstaedt/exodium/releases/download/content-v9/posters-eXoMedia-v2.tar.gz",
+          "sha256": "87a83c24a289955b699ea93f21ad3df242a5bd08f6f1ce8c1257b1e1a64ff3a5",
+          "size_bytes": 180790027,
+          "version": 2,
           "install_path": "content/posters/eXoMedia",
           "supersedes": []
+        }
+      }
+    },
+    "eXoAppleIIGS": {
+      "torrent_infohash": "11f181e384641fabd2dc1fd92eaa6444a05dcdbe",
+      "game_count": 460,
+      "content_packs": {
+        "posters": {
+          "display_name": "Box Art",
+          "description": "HD box art for the Apple IIGS collection",
+          "url": "https://github.com/tvollstaedt/exodium/releases/download/content-v9/posters-eXoAppleIIGS-v1.tar.gz",
+          "sha256": "77e0b8bc82507544552fdcc5843b6892de3ae5ed3eec5ff4f95b3803e0569312",
+          "size_bytes": 22244432,
+          "version": 1,
+          "install_path": "content/posters/eXoAppleIIGS",
+          "supersedes": []
+        },
+        "metadata": {
+          "display_name": "Metadata Pack",
+          "description": "Box art, screenshots and manuals for the Apple IIGS collection (sourced from the eXoAppleIIGS torrent)",
+          "url": "",
+          "sha256": "",
+          "torrent_file_path": "Content/XOAppleIIGSMetadata.zip",
+          "size_bytes": 1667932185,
+          "version": 1,
+          "install_path": "content/metadata/eXoAppleIIGS",
+          "supersedes": []
+        },
+        "gsplus": {
+          "display_name": "GSplus 1.38",
+          "description": "The emulator that runs the Apple IIGS games on this system. Downloads automatically with your first Apple IIGS game.",
+          "url": "",
+          "sha256": "",
+          "size_bytes": 0,
+          "version": 1,
+          "install_path": "content/emulators/gsplus",
+          "supersedes": [],
+          "platforms": {
+            "darwin-aarch64": {
+              "url": "TODO: content-vN after the gsplus content-packs run",
+              "sha256": "TODO",
+              "size_bytes": 0
+            },
+            "darwin-x86_64": {
+              "url": "TODO: content-vN after the gsplus content-packs run",
+              "sha256": "TODO",
+              "size_bytes": 0
+            },
+            "linux-x86_64": {
+              "url": "TODO: content-vN after the gsplus content-packs run",
+              "sha256": "TODO",
+              "size_bytes": 0
+            },
+            "linux-aarch64": {
+              "url": "TODO: content-vN after the gsplus content-packs run",
+              "sha256": "TODO",
+              "size_bytes": 0
+            }
+          }
         }
       }
     }

@@ -1,7 +1,11 @@
 import { createSignal, createEffect, createMemo, on, Show, For } from "solid-js";
 import { Portal } from "solid-js/web";
 import { Dialog } from "@ark-ui/solid/dialog";
-import { gameEngineInfo, getGameSettings, setGameSettings, scummvmVariants, setScummvmOptions, type ScummVmVariants } from "../api/tauri";
+import {
+  appleiigsInfo, gameEngineInfo, getGameSettings, setGameSettings, scummvmVariants,
+  setScummvmOptions, type AppleIigsInfo, type ScummVmVariants,
+} from "../api/tauri";
+import { chooseIigsOption } from "../stores/appleiigs";
 import { Button } from "./Button";
 
 interface GameSettingsDialogProps {
@@ -33,6 +37,11 @@ export function GameSettingsDialog(props: GameSettingsDialogProps) {
   const [svmSound, setSvmSound] = createSignal("");
   const [svmSubtitles, setSvmSubtitles] = createSignal(false);
   const [svmAspect, setSvmAspect] = createSignal(true);
+  /** Non-null for an eXoAppleIIGS game: eXo fixes speed, ROM and disks per
+   *  game, so only the program and fullscreen are offered (§23). */
+  const [iigs, setIigs] = createSignal<AppleIigsInfo | null>(null);
+  const [iigsOption, setIigsOption] = createSignal("");
+  const dosboxControls = () => !svm() && !iigs();
   const svmVariant = () => svm()?.variants.find((v) => v.name === svm()?.selected.variant) ?? null;
   const svmSubs = () => svmVariant()?.subs ?? [];
   const svmSounds = () => {
@@ -66,6 +75,12 @@ export function GameSettingsDialog(props: GameSettingsDialogProps) {
     setSaveError("");
     setEceIsDefault(false);
     setSvm(null);
+    setIigs(null);
+    appleiigsInfo(id).then((info) => {
+      if (props.gameId !== id || !info) { return; }
+      setIigs(info);
+      setIigsOption(info.selected ?? "");
+    }).catch(() => {});
     scummvmVariants(id).then((v) => {
       if (props.gameId !== id || !v) { return; }
       setSvm(v);
@@ -93,7 +108,12 @@ export function GameSettingsDialog(props: GameSettingsDialogProps) {
     setSaveError("");
     try {
       const tree = svm();
-      if (tree) {
+      if (iigs()) {
+        if ((iigs()?.options.length ?? 0) > 1) {
+          await chooseIigsOption(props.gameId, iigsOption() || null);
+        }
+        await setGameSettings(props.gameId, null, null, fullscreen() || null, null, null);
+      } else if (tree) {
         await setScummvmOptions(props.gameId, {
           variant: tree.selected.variant,
           sub: svmSub() || null,
@@ -191,7 +211,29 @@ export function GameSettingsDialog(props: GameSettingsDialogProps) {
                 </p>
               </Show>
 
-              <Show when={!svm() && eceIsDefault()}>
+              <Show when={iigs()}>
+                {(info) => (
+                  <>
+                    <Show when={info().options.length > 1}>
+                      <div class="game-settings-row">
+                        <label class="game-settings-label">Program</label>
+                        <select
+                          class="game-settings-select"
+                          value={iigsOption()}
+                          onChange={(e) => setIigsOption(e.currentTarget.value)}
+                        >
+                          <For each={info().options}>{(o) => <option value={o}>{o}</option>}</For>
+                        </select>
+                      </div>
+                    </Show>
+                    <p class="game-settings-note">
+                      Speed, ROM and disks follow eXo's setup for this game.
+                    </p>
+                  </>
+                )}
+              </Show>
+
+              <Show when={dosboxControls() && eceIsDefault()}>
                 <div class="game-settings-row">
                   <label class="game-settings-label">Emulator</label>
                   <select
@@ -211,7 +253,7 @@ export function GameSettingsDialog(props: GameSettingsDialogProps) {
                 </p>
               </Show>
 
-              <Show when={!svm()}>
+              <Show when={dosboxControls()}>
               <div class="game-settings-row">
                 <label class="game-settings-label">CRT Shader</label>
                 <select
@@ -248,7 +290,7 @@ export function GameSettingsDialog(props: GameSettingsDialogProps) {
                 </select>
               </div>
 
-              <Show when={!svm()}>
+              <Show when={dosboxControls()}>
               <div class="game-settings-row">
                 <label class="game-settings-label">CPU Cycles</label>
                 <div class="game-settings-cycles">

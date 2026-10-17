@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { launchNote, emulatorName, emulatorPackId, svmVariantLabel, type NoteContext } from "./launchNotes";
-import type { Game, ContentPackStatus } from "./api/tauri";
+import { launchNote, emulatorName, emulatorPackId, iigsControls, svmVariantLabel, type NoteContext } from "./launchNotes";
+import type { AppleIigsInfo, Game, ContentPackStatus } from "./api/tauri";
 
 const game = (over: Partial<Game> = {}): Game =>
   ({ id: 1, title: "T", torrent_source: "eXoDOS", dosbox_variant: null, ...over }) as unknown as Game;
@@ -13,6 +13,7 @@ const ctx = (over: Partial<NoteContext> = {}): NoteContext => ({
   downloading: false,
   svmEngine: null,
   svmNote: null,
+  iigs: null,
   engineInfo: null,
   win9xEngineMissing: false,
   support: null,
@@ -247,5 +248,70 @@ describe("emulatorName", () => {
     expect(emulatorPackId("x98")).toBe("dosbox-x");
     expect(emulatorPackId("86boxME")).toBe("86box");
     expect(emulatorPackId("pcbox")).toBeNull();
+  });
+});
+
+describe("Apple IIGS", () => {
+  const iigsGame = game({ torrent_source: "eXoAppleIIGS", shortcode: "Alien Mind (1988)" } as Partial<Game>);
+  const info = (over: Partial<AppleIigsInfo> = {}): AppleIigsInfo => ({
+    exo_engine: "mame", engine: "gsplus", source: "pack", pack_id: "gsplus", note: null,
+    options: [], selected: null, substitute: null, substitute_note: null,
+    printing: false, printing_unavailable: false, capslock: false, extras: [], ...over,
+  });
+  const gsplusPack: ContentPackStatus = { ...pack, id: "gsplus", display_name: "GSplus 1.38" };
+
+  it("names what runs here, eXo's pick on Windows", () => {
+    expect(emulatorName(iigsGame, null, false, info(), false)).toBe("GSplus");
+    expect(emulatorName(iigsGame, null, false, info({ engine: "mame", source: "exo" }), true)).toBe("MAME");
+    expect(emulatorName(iigsGame, null, false, null, false)).toBe("GSplus");
+  });
+
+  it("offers GSplus with the game, then as a remedy", () => {
+    const missing = info({ engine: null, source: null });
+    expect(key(ctx({ game: iigsGame, iigs: missing, emulatorPack: gsplusPack }))).toBe("iigs-engine-size");
+    const n = launchNote(ctx({ game: iigsGame, iigs: missing, installed: true, emulatorPack: gsplusPack }));
+    expect(n?.key).toBe("engine-missing");
+    expect(n?.blocking).toBe(true);
+    expect(n?.action).toBeDefined();
+  });
+
+  it("waits for the ROMs before anything else is said", () => {
+    const support = { phase: "downloading" as const, progress: 0.5, total_bytes: 148_000_000 };
+    expect(launchNote(ctx({ game: iigsGame, iigs: info(), support }))?.text).toContain("ROMs");
+    expect(key(ctx({ game: iigsGame, iigs: info(), support: { ...support, phase: "missing" as const } }))).toBe("iigs-support-size");
+    // An installed game (adopted from disk) still has no ROMs: Play fetches them.
+    const adopted = launchNote(ctx({ game: iigsGame, iigs: info(), installed: true, support: { ...support, phase: "missing" as const } }));
+    expect(adopted?.key).toBe("iigs-support-missing");
+    expect(adopted?.blocking).toBeFalsy();
+  });
+
+  it("joins the substitution verdict, eXo's note and the printer into one note", () => {
+    const n = launchNote(ctx({
+      game: iigsGame,
+      installed: true,
+      iigs: info({ substitute: "issues", substitute_note: "No sound.", note: "Press F3.", printing_unavailable: true }),
+    }));
+    expect(n?.key).toBe("iigs:Alien Mind (1988)");
+    const lines = n!.text.split("\n");
+    expect(lines[0]).toContain("eXo runs this game with MAME");
+    expect(lines[0]).toContain("No sound.");
+    expect(lines[1]).toBe("Press F3.");
+    expect(lines[2]).toContain("Printing only works on Windows");
+    const windows = launchNote(ctx({
+      game: iigsGame, installed: true, isWindows: true,
+      iigs: info({ exo_engine: "gsplus", engine: "gsplus", source: "exo", printing: true }),
+    }));
+    expect(windows?.text).toContain("Printouts are saved in the game's folder");
+  });
+
+  it("says nothing for a game that runs as eXo runs it and has no note", () => {
+    expect(launchNote(ctx({ game: iigsGame, installed: true, iigs: info({ exo_engine: "gsplus" }) }))).toBeNull();
+    expect(launchNote(ctx({ game: iigsGame, installed: true, iigs: info({ substitute: "ok" }) }))).toBeNull();
+  });
+
+  it("gives the keys of the emulator that runs", () => {
+    expect(iigsControls(info(), false)).toContain("Ctrl+F1+F3");
+    expect(iigsControls(info({ engine: "gsplus", exo_engine: "gsplus" }), true)).toContain("Shift+Esc");
+    expect(iigsControls(info({ engine: "mame" }), true)).toContain("left Ctrl+left Alt+F3");
   });
 });

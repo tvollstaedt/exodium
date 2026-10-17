@@ -1,5 +1,6 @@
 import type {
-  ContentPackStatus, Game, GameEngineInfo, ScummVmEngineInfo, Win9xMultiplayerInfo, Win9xSupportStatus,
+  AppleIigsInfo, ContentPackStatus, Game, GameEngineInfo, IigsEngine, ScummVmEngineInfo, Win9xMultiplayerInfo,
+  Win9xSupportStatus,
 } from "./api/tauri";
 import type { ContentPackJobState } from "./stores/contentPacks";
 import { formatBytes } from "./util";
@@ -28,6 +29,8 @@ export interface NoteContext {
   svmEngine: ScummVmEngineInfo | null;
   /** eXo's note.txt for an installed ScummVM game. */
   svmNote: string | null;
+  /** Null while the backend is still answering, and for other collections. */
+  iigs: AppleIigsInfo | null;
   engineInfo: GameEngineInfo | null;
   win9xEngineMissing: boolean;
   support: Win9xSupportStatus | null;
@@ -52,9 +55,43 @@ export const isWin9x = (g: Game | null): boolean => {
  *  is the marker. */
 export const isScummVm = (g: Game | null): boolean => g?.torrent_source === "eXoScummVM";
 
+export const isAppleIigs = (g: Game | null): boolean => g?.torrent_source === "eXoAppleIIGS";
+
+const IIGS_ENGINE_NAMES: Record<IigsEngine, string> = { gsplus: "GSplus", gsport: "GSport", mame: "MAME" };
+
+/** "GSplus" on macOS and Linux, eXo's own pick on Windows. */
+export function iigsEngineName(info: AppleIigsInfo | null, isWindows: boolean): string {
+  const e = info?.engine ?? (info && isWindows ? info.exo_engine : "gsplus");
+  return IIGS_ENGINE_NAMES[e];
+}
+
+/** The keys that differ per emulator, from eXo's manual and GSplus 1.38's
+ *  readme: Open-Apple and Option, and the control panel a few games save and
+ *  load through (Ctrl+Open-Apple+Esc on the real machine). */
+export function iigsControls(info: AppleIigsInfo, isWindows: boolean): string {
+  const engine = info.engine ?? (isWindows ? info.exo_engine : "gsplus");
+  if (engine === "gsplus" && !isWindows) {
+    return "F1 = Open-Apple, F2 = Option, F3 = Esc, F4 = settings and disk swap, "
+      + "F11 = fullscreen, Ctrl+F12 = reset. Control panel: Ctrl+F1+F3.";
+  }
+  if (engine === "gsplus") {
+    return "F1 or Alt = Open-Apple, F2 or Windows key = Option, F11 = fullscreen, F12 = reset. "
+      + "Control panel: hold Shift+Esc, then press left Ctrl and left Alt.";
+  }
+  return "F1 or left Alt = Open-Apple, F2 or right Alt = Option, F3 = Esc, F12 = reset. "
+    + "Control panel: left Ctrl+left Alt+F3.";
+}
+
 /** What will actually run the game; the backend's own resolver decides
  *  ECE vs Staging (`runsUnderEce`), the variant slug the rest. */
-export function emulatorName(g: Game | null, svmEngine: ScummVmEngineInfo | null, runsUnderEce: boolean): string {
+export function emulatorName(
+  g: Game | null,
+  svmEngine: ScummVmEngineInfo | null,
+  runsUnderEce: boolean,
+  iigs: AppleIigsInfo | null = null,
+  isWindows = false,
+): string {
+  if (isAppleIigs(g)) { return iigsEngineName(iigs, isWindows); }
   if (isScummVm(g)) {
     const pinned = svmEngine?.pinned_version;
     return pinned ? `ScummVM ${pinned}` : "ScummVM";
@@ -81,10 +118,14 @@ export function emulatorPackId(variant: string | null | undefined): string | nul
   return "dosbox-x";
 }
 
-const supportProgressNote = (s: Win9xSupportStatus, family: "Windows 9x" | "ScummVM", what: string): PanelNote => {
+type SupportFamily = "Windows 9x" | "ScummVM" | "Apple IIGS";
+const familyKey = (family: SupportFamily) =>
+  family === "ScummVM" ? "scummvm" : family === "Apple IIGS" ? "iigs" : "win9x";
+
+const supportProgressNote = (s: Win9xSupportStatus, family: SupportFamily, what: string): PanelNote => {
   const pct = Math.round(s.progress * 100);
   return {
-    key: `${family === "ScummVM" ? "scummvm" : "win9x"}-support-progress`,
+    key: `${familyKey(family)}-support-progress`,
     blocking: true,
     pending: true,
     text: pct >= 100
@@ -93,8 +134,8 @@ const supportProgressNote = (s: Win9xSupportStatus, family: "Windows 9x" | "Scum
   };
 };
 
-const supportFailedNote = (family: "Windows 9x" | "ScummVM"): PanelNote => ({
-  key: `${family === "ScummVM" ? "scummvm" : "win9x"}-support-failed`,
+const supportFailedNote = (family: SupportFamily): PanelNote => ({
+  key: `${familyKey(family)}-support-failed`,
   blocking: true,
   text: `Setting up the ${family} support files failed - make sure the library drive has `
     + "enough free space, then restart Exodium to retry.",
@@ -207,6 +248,79 @@ function scummVmNote(ctx: NoteContext, engine: string): PanelNote | null {
   return null;
 }
 
+const SUBSTITUTE_TEXT: Record<string, (exo: string, note: string | null) => string> = {
+  untested: (exo) => `eXo runs this game with ${exo}. Here GSplus runs it, and that has not `
+    + "been tested yet.",
+  issues: (exo, note) => `eXo runs this game with ${exo}. Under GSplus it runs with problems`
+    + (note ? `: ${note}` : "."),
+  broken: (exo, note) => `eXo runs this game with ${exo}, and under GSplus it does not run `
+    + `properly${note ? `: ${note}` : "."} On Windows Exodium uses eXo's ${exo}.`,
+};
+
+/** An eXoAppleIIGS game: the engine and the ROMs come first (Play cannot
+ *  work without them), then one note that carries what eXo says about the
+ *  game plus what differs from eXo here. */
+function appleIigsNote(ctx: NoteContext): PanelNote | null {
+  const info = ctx.iigs;
+  if (!info) { return null; }
+  const engine = iigsEngineName(info, ctx.isWindows);
+  if (info.engine == null) {
+    if (!ctx.isWindows) {
+      if (!ctx.installed && !ctx.downloading && ctx.emulatorPack) {
+        return {
+          key: "iigs-engine-size",
+          text: `Downloading this game also fetches GSplus${oneTime(ctx.emulatorPack.size_bytes)}, `
+            + "which runs every Apple IIGS game.",
+        };
+      }
+      return packRemedy(ctx, "engine-missing", "GSplus", true) ?? {
+        key: "engine-missing",
+        blocking: true,
+        text: "This game needs GSplus, which was not found. Install GSplus 1.38 "
+          + "(github.com/digarok/gsplus) so that gsplus is on your PATH, then try again.",
+      };
+    }
+  }
+  const support = ctx.support;
+  if (support?.phase === "failed") { return supportFailedNote("Apple IIGS"); }
+  if (support?.phase === "downloading") {
+    return supportProgressNote(support, "Apple IIGS", ctx.isWindows ? "ROMs + emulators" : "ROMs");
+  }
+  if (support?.phase === "missing" && !ctx.downloading) {
+    return ctx.installed
+      ? {
+        key: "iigs-support-missing",
+        text: "The Apple IIGS support files (ROMs) are not on disk yet. Play fetches them first"
+          + `${oneTime(support.total_bytes)}.`,
+      }
+      : {
+        key: "iigs-support-size",
+        text: "Downloading this game also fetches the Apple IIGS support files"
+          + `${oneTime(support.total_bytes)} - every Apple IIGS game uses them.`,
+      };
+  }
+  if (info.engine == null) {
+    return {
+      key: "engine-missing",
+      blocking: true,
+      text: `${engine} was not found in the Apple IIGS support files (eXo\\emulators inside `
+        + "your library folder). Press Play to set them up again.",
+    };
+  }
+  const parts: string[] = [];
+  const sub = info.substitute && info.substitute !== "ok" ? SUBSTITUTE_TEXT[info.substitute] : null;
+  if (sub) { parts.push(sub(IIGS_ENGINE_NAMES[info.exo_engine], info.substitute_note)); }
+  if (info.note) { parts.push(info.note); }
+  if (info.capslock) { parts.push("eXo starts this game with Caps Lock on - turn it on before you play."); }
+  if (info.printing_unavailable) {
+    parts.push("Printing only works on Windows, where eXo's GSplus 0.14 prints into the game's folder.");
+  } else if (info.printing) {
+    parts.push("Printouts are saved in the game's folder inside your library.");
+  }
+  if (parts.length === 0) { return null; }
+  return { key: `iigs:${ctx.game?.shortcode ?? ""}`, text: parts.join("\n") };
+}
+
 /** The Win9x emulator does not resolve. A pack that can supply it is the
  *  remedy; otherwise Windows reports the shared payload's state (the engine
  *  comes out of it), and elsewhere the advice is an install hint. */
@@ -276,6 +390,7 @@ export function launchNote(ctx: NoteContext): PanelNote | null {
     };
   }
   if (isScummVm(g)) { return scummVmNote(ctx, engine); }
+  if (isAppleIigs(g)) { return appleIigsNote(ctx); }
   if (v === "pcbox") {
     return {
       key: "pcbox",

@@ -89,6 +89,8 @@ pub fn create_tables(conn: &Connection) -> DbResult<()> {
             last_year   INTEGER,
             cover_key   TEXT,
             language    TEXT NOT NULL DEFAULT 'EN',
+            -- The system a series is about: a label beside the DOS mags (§23).
+            platform    TEXT NOT NULL DEFAULT 'MS-DOS',
             UNIQUE (kind, name)
         );
 

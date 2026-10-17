@@ -39,6 +39,7 @@ const SCAN: Issue = {
   substitutions: null,
   language: "EN",
   extras_count: 0,
+  platform: "MS-DOS",
   favorited: false,
   installed: false,
   last_page: null,

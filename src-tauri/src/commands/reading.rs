@@ -157,7 +157,9 @@ fn cached_file(data_dir: &str, issue: &Issue) -> Option<PathBuf> {
 /// document would otherwise be served forever, and a disk magazine's shards
 /// sit in the game root where nothing else ever looks at them.
 pub fn sweep_partial_downloads(data_dir: &str) {
-    if let Ok(entries) = std::fs::read_dir(cache_dir(data_dir)) {
+    let extras = PathBuf::from(data_dir).join("content").join("extrascache");
+    for dir in [cache_dir(data_dir), extras] {
+        let Ok(entries) = std::fs::read_dir(dir) else { continue };
         for entry in entries.flatten() {
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) == Some("part") {
@@ -524,6 +526,107 @@ pub async fn cancel_issue_fetch(
         job.cancel.store(true, Ordering::Relaxed);
     }
     Ok(())
+}
+
+// ── A game's extras ──────────────────────────────────────────────────────────
+
+/// Reference cards and manuals that eXoAppleIIGS keeps per game in its 2.1 GB
+/// launch-metadata archive: read one entry like an issue, never the archive.
+fn extra_cache_file(data_dir: &str, entry: &str) -> PathBuf {
+    let ext = Path::new(entry)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .unwrap_or_else(|| "pdf".to_string());
+    PathBuf::from(data_dir)
+        .join("content")
+        .join("extrascache")
+        .join(format!("{}.{}", cache_stem(entry), ext))
+}
+
+pub(crate) fn cached_extra(data_dir: &str, shortcode: &str, name: &str) -> Option<PathBuf> {
+    let path = extra_cache_file(data_dir, &super::appleiigs::extra_entry(shortcode, name));
+    path.is_file().then_some(path)
+}
+
+/// The game's row, its data dir and the archive entry of one of its extras;
+/// an extra the index does not list is refused.
+fn game_extra(db_state: &State<'_, DbState>, id: i64, name: &str) -> Result<(crate::models::Game, String, String, u64), String> {
+    let conn = db_state.lock()?;
+    let game = crate::db::queries::fetch_game_by_id(&conn, id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Game with id {id} not found"))?;
+    let data_dir = crate::commands::games::configured_data_dir(&conn)?;
+    let shortcode = game.shortcode.clone().unwrap_or_default();
+    let extra = super::appleiigs::entry(&shortcode)
+        .and_then(|e| e.extras.iter().find(|x| x.name == name))
+        .ok_or_else(|| format!("{} has no extra named {name}", game.title))?;
+    let entry = super::appleiigs::extra_entry(&shortcode, &extra.name);
+    let size = extra.size;
+    Ok((game, data_dir, entry, size))
+}
+
+/// Fetch one of a game's extras; poll `get_issue_status` with the job's key,
+/// `extra:<id>:<name>`.
+#[tauri::command]
+pub async fn open_game_extra(
+    db_state: State<'_, DbState>,
+    torrent_state: State<'_, TorrentState>,
+    media_state: State<'_, MediaTorrentState>,
+    reading_state: State<'_, ReadingState>,
+    id: i64,
+    name: String,
+) -> Result<ReadingStatus, String> {
+    let (game, data_dir, entry, size) = game_extra(&db_state, id, &name)?;
+    // An imported eXo tree carries the extras already; the archive entry IS
+    // the path under the game root.
+    let in_tree = super::paths::game_root(&data_dir).join(&entry);
+    if in_tree.is_file() {
+        return Ok(ReadingStatus::ready(super::paths::path_to_fwd_slash(&in_tree)));
+    }
+    let target = extra_cache_file(&data_dir, &entry);
+    if target.is_file() {
+        return Ok(ReadingStatus::ready(super::paths::path_to_fwd_slash(&target)));
+    }
+    let source = game.torrent_source.clone().unwrap_or_default();
+    let manager = match manager_for(&torrent_state, &media_state, &source).await {
+        SourceManager::Ready(manager) => manager,
+        SourceManager::Offline => return Ok(ReadingStatus::offline()),
+        SourceManager::Missing => {
+            return Err(format!("{} is in the {source} torrent, which this install has not enabled", game.title))
+        }
+    };
+    let archive_path = super::appleiigs::EXTRAS_ARCHIVE;
+    let archive = manager
+        .index()
+        .find_by_path(archive_path)
+        .ok_or_else(|| format!("{archive_path} is not in the {source} torrent"))?
+        .clone();
+    if let Ok(free) = fs4::available_space(Path::new(&data_dir)) {
+        if free < size + 256 * 1024 * 1024 {
+            return Err(format!("Not enough disk space for {name}"));
+        }
+    }
+    let key = format!("extra:{id}:{name}");
+    let jobs = Arc::clone(&reading_state.jobs);
+    let directories = Arc::clone(&reading_state.directories);
+    let job_key = key.clone();
+    Ok(spawn_job(&reading_state.jobs, &key, size, name, move |cancel| async move {
+        fetch_issue(&manager, &directories, &jobs, &job_key, &archive, None, &entry, &target, &cancel).await
+    })
+    .await)
+}
+
+/// Delete a fetched extra; it stays until removed, like an issue (§19).
+#[tauri::command]
+pub async fn remove_game_extra(db_state: State<'_, DbState>, id: i64, name: String) -> Result<(), String> {
+    let (_, data_dir, entry, _) = game_extra(&db_state, id, &name)?;
+    let path = extra_cache_file(&data_dir, &entry);
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("Could not remove {}: {e}", path.display())),
+    }
 }
 
 // ── Disk magazines ───────────────────────────────────────────────────────────
@@ -1224,6 +1327,7 @@ mod tests {
             inner_zip: None,
             language: "EN".into(),
             extras_count: 0,
+            platform: "MS-DOS".into(),
         };
         let path = cache_file("/data", &issue);
         assert_eq!(path.extension().unwrap(), "pdf");
@@ -1296,6 +1400,7 @@ mod tests {
             inner_zip: None,
             language: "EN".into(),
             extras_count: 0,
+            platform: "MS-DOS".into(),
         }
     }
 

@@ -12,7 +12,7 @@ const ISSUE_COLUMNS: &str = "i.id, i.key, i.publication_id, p.name, i.kind, i.ti
      i.launch_bat, i.command_line, i.substitutions, \
      COALESCE(s.favorited, 0), COALESCE(s.installed, 0), \
      s.last_page, s.last_opened, \
-     i.source, i.inner_zip, i.language, i.extras_count";
+     i.source, i.inner_zip, i.language, i.extras_count, p.platform";
 
 const ISSUE_FROM: &str = "FROM issues i \
      JOIN publications p ON p.id = i.publication_id \
@@ -51,12 +51,13 @@ fn row_to_issue(row: &Row) -> rusqlite::Result<Issue> {
         inner_zip: row.get(28)?,
         language: row.get(29)?,
         extras_count: row.get(30)?,
+        platform: row.get(31)?,
     })
 }
 
 pub fn fetch_publications(conn: &Connection, kind: Option<&str>) -> DbResult<Vec<Publication>> {
     let mut stmt = conn.prepare(
-        "SELECT id, kind, name, issue_count, first_year, last_year, cover_key, language \
+        "SELECT id, kind, name, issue_count, first_year, last_year, cover_key, language, platform \
          FROM publications WHERE (?1 IS NULL OR kind = ?1) \
          ORDER BY kind, name COLLATE NOCASE",
     )?;
@@ -70,6 +71,7 @@ pub fn fetch_publications(conn: &Connection, kind: Option<&str>) -> DbResult<Vec
             last_year: row.get(5)?,
             cover_key: row.get(6)?,
             language: row.get(7)?,
+            platform: row.get(8)?,
         })
     })?;
     Ok(rows.collect::<Result<Vec<_>, _>>()?)

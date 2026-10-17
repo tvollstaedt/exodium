@@ -14,6 +14,9 @@ Work dir (default ~/.exodium-dev/mediapack, or $XDO_DEV_DATA/mediapack):
     DOSMagazines.xml / DOSBooks.xml / DOSCatalogs.xml     the platform catalogues
     DOSMagazines.jsonl / DOSBooks.jsonl / DOSCatalogs.jsonl   central directories
     DOS_linux_Magazines.zip                              2.8 MB, fetched whole
+    iigs/MagAppleIIGS.jsonl                              eXoAppleIIGS's magazine
+        archive (same spike, torrents/eXoAppleIIGS.torrent,
+        "Content/Mag!AppleIIGS.zip")
 
 Produces:
     metadata/media.json.gz        one record per issue: publication, title,
@@ -318,6 +321,80 @@ def collect_glp(glp: Path) -> tuple[list[dict] | None, list[str]]:
     return issues, articles
 
 
+IIGS_ZIP = "Content/Mag!AppleIIGS.zip"
+SEASONS = {"Spring": 1, "Summer": 2, "Fall": 3, "Winter": 4}
+
+
+def gs_plus_date(vol: int, num: int) -> tuple[int, int]:
+    """GS+ ran bimonthly from Vol 1 No 1, September-October 1989."""
+    month = 9 + 2 * (num - 1)
+    return 1988 + vol + (month - 1) // 12, (month - 1) % 12 + 1
+
+
+def collect_iigs(iigs: Path) -> list[dict] | None:
+    """
+    eXoAppleIIGS's two magazine series. The pack's LaunchBox catalogue has
+    one row per SERIES (an index PDF whose links point at the other files,
+    which a reader cannot follow), so the issues come from the archive's own
+    directory and their dates from the file names.
+    """
+    listing = iigs / "MagAppleIIGS.jsonl"
+    if not listing.exists():
+        print(f"ERROR: {listing} missing")
+        return None
+    sizes = load_listing(listing)
+    issues = []
+    for entry, size in sorted(sizes.items()):
+        m = re.fullmatch(r"Magazines/([^/]+)/([^/]+)\.pdf", entry)
+        if not m:
+            continue
+        series, stem = m.group(1), m.group(2)
+        gp = re.fullmatch(r"Vol (\d+) Num (\d+)", stem)
+        bg = re.fullmatch(r"(\d{4})_(Spring|Summer|Fall|Winter)", stem)
+        if gp:
+            vol, num = int(gp.group(1)), int(gp.group(2))
+            year, month = gs_plus_date(vol, num)
+            release, sort = f"{year}-{month:02d}-01", f"{vol:02d}-{num:02d}"
+        elif bg:
+            year = int(bg.group(1))
+            release, sort = None, f"{year}-{SEASONS[bg.group(2)]}"
+            stem = f"{bg.group(2)} {year}"
+        else:
+            print(f"ERROR: unrecognised IIGS magazine {entry}")
+            return None
+        title = f"{series} {stem}"
+        issues.append({
+            "key": f"mag:{entry}",
+            "kind": "magazine",
+            "publication": series,
+            "title": title,
+            "sort_title": sort,
+            "year": year,
+            "release_date": release,
+            "publisher": None,
+            "developer": None,
+            "notes": None,
+            "zip": IIGS_ZIP,
+            "entry": entry,
+            "entry_kind": "pdf",
+            "size": size,
+            "cover_key": thumbnail_key(title),
+            "runnable": False,
+            "launch_dir": None,
+            "issue_dir": None,
+            "launch_bat": None,
+            "command_line": None,
+            "substitutions": {},
+            "source": "eXoAppleIIGS",
+            "inner_zip": None,
+            "language": "EN",
+            "extras_count": 0,
+            "platform": "Apple IIGS",
+        })
+    print(f"Apple IIGS magazines: {len(issues)} readable")
+    return issues
+
+
 def main() -> int:
     root = Path(__file__).resolve().parent.parent
     default = Path(os.environ.get("XDO_DEV_DATA", Path.home() / ".exodium-dev")) / "mediapack"
@@ -433,6 +510,15 @@ def main() -> int:
         issues.extend(glp_issues)
     else:
         print(f"NOTE: {glp_dir} missing - German magazines (GLP add-on) not indexed")
+
+    iigs_dir = work / "iigs"
+    if iigs_dir.is_dir():
+        iigs_issues = collect_iigs(iigs_dir)
+        if iigs_issues is None:
+            return 1
+        issues.extend(iigs_issues)
+    else:
+        print(f"NOTE: {iigs_dir} missing - Apple IIGS magazines not indexed")
 
     duplicates = len(issues) - len({i["key"] for i in issues})
     if duplicates:

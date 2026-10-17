@@ -57,7 +57,7 @@ fn main() -> Result<(), String> {
         ("network_mode", "offline".into()),
         ("seeding_enabled", "0".into()),
         ("welcome_seen", "1".into()),
-        ("collections", "eXoDOS,eXoDOS_GLP,eXoDOS_PLP,eXoDOS_SLP,eXoWin3x,eXoWin9x,eXoScummVM".into()),
+        ("collections", "eXoDOS,eXoDOS_GLP,eXoDOS_PLP,eXoDOS_SLP,eXoWin3x,eXoWin9x,eXoScummVM,eXoAppleIIGS".into()),
     ];
     for (key, value) in &rows {
         set_config(&conn, key, value).map_err(|e| e.to_string())?;

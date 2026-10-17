@@ -6,6 +6,7 @@ import slpCover from "../assets/collections/slp.jpg";
 import exowin3xCover from "../assets/collections/exowin3x.jpg";
 import exowin9xCover from "../assets/collections/exowin9x.jpg";
 import exoscummvmCover from "../assets/collections/exoscummvm.jpg";
+import exoappleiigsCover from "../assets/collections/exoappleiigs.jpg";
 
 export interface ShelfCollection {
   id: string;
@@ -32,6 +33,7 @@ const COVER_ART: Record<string, string> = {
   eXoWin3x: exowin3xCover,
   eXoWin9x: exowin9xCover,
   eXoScummVM: exoscummvmCover,
+  eXoAppleIIGS: exoappleiigsCover,
 };
 
 /** Dominant box color per collection - drives the card's ambient glow and the
@@ -44,6 +46,7 @@ const ACCENT: Record<string, string> = {
   eXoWin3x: "#e0442e",
   eXoWin9x: "#c99a45",
   eXoScummVM: "#3d9a4e",
+  eXoAppleIIGS: "#3fc4d4",
 };
 
 /** Card titles: the shelf shows the count right below, so "German Language
