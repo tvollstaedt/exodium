@@ -5,7 +5,7 @@
 <h1 align="center">Exodium</h1>
 
 <p align="center">
-  A cross-platform launcher for the <a href="https://www.retro-exo.com/exodos.html">eXoDOS</a> collections. Browse, download, and play DOS, Windows 3.x, Windows 9x, and ScummVM games on Linux, macOS, and Windows.
+  A cross-platform launcher for the <a href="https://www.retro-exo.com/exodos.html">eXoDOS</a> collections. Browse, download, and play DOS, Windows 3.x, Windows 9x, ScummVM, and Apple IIGS games on Linux, macOS, and Windows.
 </p>
 
 <p align="center">
@@ -51,6 +51,7 @@ eXoDOS ships with a Windows-only LaunchBox frontend and requires downloading the
 - ✅ Browse the eXoDOS catalogue alongside the German, Spanish, and Polish language packs
 - ✅ The Windows collections as well: eXoWin3x runs under DOSBox Staging, eXoWin9x boots a real Windows 95/98
 - ✅ eXoScummVM too - each game runs on the ScummVM build eXo pinned it to, fetched for you, with a picker for edition, sound hardware, and subtitles
+- ✅ eXoAppleIIGS - eXo's own emulators on Windows, GSplus on macOS and Linux, with eXo's reference cards and the GS+ and Buyer's Guide magazines in the Reading Room
 - ✅ Stream individual games on demand - no full collection download required
 - ✅ Launch via bundled DOSBox Staging with no external dependencies
 - ✅ MT-32 and General MIDI music - Roland ROMs and the SoundCanvas soundfont are fetched from the collection and eXoDOS' DOSBox-ECE configs are translated for DOSBox Staging automatically
@@ -60,7 +61,7 @@ eXoDOS ships with a Windows-only LaunchBox frontend and requires downloading the
 - ✅ Per-game settings - CRT shader, fullscreen, CPU cycles, and a free-form DOSBox config editor
 - ✅ Favorites, playlists, and a personal library of installed games
 
-> **Compatibility note:** DOS and Windows 3.x games run under the bundled DOSBox Staging, ScummVM games under the pinned ScummVM build Exodium fetches for them. A handful are tuned for DOSBox-ECE specials such as 3dfx Voodoo settings or the GunStick light gun and may look or behave slightly differently than under the original Windows eXoDOS setup. Windows 9x games need DOSBox-X or 86Box, which Exodium fetches with your first Windows 9x download.
+> **Compatibility note:** DOS and Windows 3.x games run under the bundled DOSBox Staging, ScummVM games under the pinned ScummVM build Exodium fetches for them. A handful are tuned for DOSBox-ECE specials such as 3dfx Voodoo settings or the GunStick light gun and may look or behave slightly differently than under the original Windows eXoDOS setup. Windows 9x games need DOSBox-X or 86Box, which Exodium fetches with your first Windows 9x download. Apple IIGS games run under GSplus on macOS and Linux, including the ones eXo runs with MAME on Windows - those are marked in the game's panel until they have been tested.
 
 ### Planned
 - 🔲 Pausing and resuming downloads, and a history of what has been fetched
