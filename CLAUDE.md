@@ -2032,7 +2032,15 @@ menu, prompt or the GS/OS Finder - within 40 s, three of them only after
 v15 install to v16, enabled the collection, laid the configs down and
 adopted the pack; the UI itself was not driven (screen locked). The Linux and
 Windows labs (both ARM64) are green on build, tests and E2E; no IIGS game has
-been launched on either, and Windows's eXo builds have never run.
+been launched on Linux.
+
+**Windows, 2026-10-19** (lab, Windows 11 ARM64 under x86/x64 emulation,
+`examples/iigs_launch_probe.rs` = Play's own command line): the support
+extraction lays down all three emulators and both ROMs; GSport and MAME 0.245
+boot their games (MAME headless with `-video none` - the lab has no GPU);
+eXo's GSplus 0.14 runs the derived config under SDL's dummy video driver but
+crashes in SDL's video init in a session without a desktop, so its window on
+a real desktop is still unverified.
 
 ## Conventions
 
