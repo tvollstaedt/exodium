@@ -417,6 +417,99 @@ fn run_dir(data_dir: &str, shortcode: &str) -> PathBuf {
     Path::new(data_dir).join("content").join("iigs-run").join(shortcode)
 }
 
+struct Launch<'a> {
+    shortcode: &'a str,
+    entry: &'a Entry,
+    plan: &'a Plan,
+    resolved: &'a Resolved,
+    torrent_root: &'a Path,
+    game_dir: &'a Path,
+    data_dir: &'a str,
+    fullscreen: bool,
+    crt: bool,
+}
+
+/// The emulator command for one launch; writes the config it reads.
+fn command(l: &Launch) -> Result<(std::process::Command, PathBuf), String> {
+    let run = run_dir(l.data_dir, l.shortcode);
+    std::fs::create_dir_all(&run).map_err(|e| format!("cannot create {}: {e}", run.display()))?;
+    let (mut cmd, bin) = l.resolved.cmd.command(l.torrent_root);
+    let modern = l.resolved.source != EngineSource::Exo;
+    match l.resolved.engine {
+        IigsEngine::Mame => {
+            cmd.args(mame_args(l.torrent_root, l.game_dir, l.plan, l.fullscreen));
+            cmd.current_dir(l.torrent_root.join("eXo"));
+        }
+        IigsEngine::Gsport => {
+            // GSport reads `config.txt` from its working directory and takes
+            // no options; the window opens small and F11 goes fullscreen.
+            let text = launch_config(l.shortcode, l.entry, l.plan, l.torrent_root, l.game_dir, false);
+            std::fs::write(run.join("config.txt"), text).map_err(|e| e.to_string())?;
+            cmd.current_dir(&run);
+        }
+        IigsEngine::Gsplus => {
+            let text = launch_config(l.shortcode, l.entry, l.plan, l.torrent_root, l.game_dir, modern);
+            let cfg_path = run.join("gsplus.cfg");
+            std::fs::write(&cfg_path, text).map_err(|e| e.to_string())?;
+            if modern {
+                cmd.arg("-cfg").arg(&cfg_path);
+                cmd.args(["-fullscreen", if l.fullscreen { "1" } else { "0" }]);
+                cmd.args(["-crt", if l.crt { "1" } else { "0" }]);
+            } else {
+                cmd.arg("-config").arg(&cfg_path);
+                if l.fullscreen {
+                    cmd.arg("-fullscreen");
+                } else {
+                    cmd.args(["-sw", "1400", "-sh", "920"]);
+                }
+            }
+            // eXo starts it from the game folder; GSplus 0.14 prints there.
+            cmd.current_dir(l.game_dir);
+        }
+    }
+    Ok((cmd, bin))
+}
+
+/// The command Play would run for an unpacked game, for the launch probe
+/// (`examples/iigs_launch_probe.rs`); `option` picks a menu entry by label.
+#[doc(hidden)]
+pub fn probe_command(
+    shortcode: &str,
+    torrent_root: &Path,
+    data_dir: &str,
+    option: Option<&str>,
+) -> Result<std::process::Command, String> {
+    let entry = entry(shortcode).ok_or_else(|| format!("{shortcode} is not in the launch index"))?;
+    if !support_ready(torrent_root) {
+        return Err("support files missing".into());
+    }
+    let resolved = resolve(torrent_root, data_dir, entry.engine).ok_or("no emulator resolves")?;
+    let cfg: HashMap<String, String> = option.map(|o| (OPTION_KEY.to_string(), o.to_string())).into_iter().collect();
+    let plan = plan(entry, &cfg);
+    let game_dir = torrent_root
+        .join(crate::commands::collections::collection_game_prefix(COLLECTION))
+        .join(shortcode);
+    let launch = Launch {
+        shortcode,
+        entry,
+        plan: &plan,
+        resolved: &resolved,
+        torrent_root,
+        game_dir: &game_dir,
+        data_dir,
+        fullscreen: false,
+        crt: false,
+    };
+    command(&launch).map(|(cmd, _)| cmd)
+}
+
+/// Unpacks utilAppleIIGS.zip the way the support-file watcher does, for the
+/// launch probe.
+#[doc(hidden)]
+pub fn probe_extract_support(util_zip: &Path, torrent_root: &Path) -> Result<usize, String> {
+    crate::support_files::extract(&crate::support_files::APPLEIIGS_SUPPORT, util_zip, torrent_root)
+}
+
 pub(crate) async fn launch_appleiigs_game(
     app: &AppHandle,
     game: Game,
@@ -477,43 +570,17 @@ async fn launch_inner(
         Some("false") => false,
         _ => fullscreen,
     };
-    let run = run_dir(data_dir, &shortcode);
-    std::fs::create_dir_all(&run).map_err(|e| format!("cannot create {}: {e}", run.display()))?;
-
-    let (mut cmd, bin) = resolved.cmd.command(&torrent_root);
-    let modern = resolved.source != EngineSource::Exo;
-    match resolved.engine {
-        IigsEngine::Mame => {
-            cmd.args(mame_args(&torrent_root, &game_dir, &plan, fullscreen));
-            cmd.current_dir(torrent_root.join("eXo"));
-        }
-        IigsEngine::Gsport => {
-            // GSport reads `config.txt` from its working directory and takes
-            // no options; the window opens small and F11 goes fullscreen.
-            let text = launch_config(&shortcode, entry, &plan, &torrent_root, &game_dir, false);
-            std::fs::write(run.join("config.txt"), text).map_err(|e| e.to_string())?;
-            cmd.current_dir(&run);
-        }
-        IigsEngine::Gsplus => {
-            let text = launch_config(&shortcode, entry, &plan, &torrent_root, &game_dir, modern);
-            let cfg_path = run.join("gsplus.cfg");
-            std::fs::write(&cfg_path, text).map_err(|e| e.to_string())?;
-            if modern {
-                cmd.arg("-cfg").arg(&cfg_path);
-                cmd.args(["-fullscreen", if fullscreen { "1" } else { "0" }]);
-                cmd.args(["-crt", if crt { "1" } else { "0" }]);
-            } else {
-                cmd.arg("-config").arg(&cfg_path);
-                if fullscreen {
-                    cmd.arg("-fullscreen");
-                } else {
-                    cmd.args(["-sw", "1400", "-sh", "920"]);
-                }
-            }
-            // eXo starts it from the game folder; GSplus 0.14 prints there.
-            cmd.current_dir(&game_dir);
-        }
-    }
+    let (cmd, bin) = command(&Launch {
+        shortcode: &shortcode,
+        entry,
+        plan: &plan,
+        resolved: &resolved,
+        torrent_root: &torrent_root,
+        game_dir: &game_dir,
+        data_dir,
+        fullscreen,
+        crt,
+    })?;
     log::info!(
         "Launching {} via {:?} ({:?}, eXo: {:?}){}",
         game.title,
@@ -792,6 +859,53 @@ mod tests {
         let info = info_for(&native, Some(&gsplus), &HashMap::new());
         assert!(info.substitute.is_none());
         assert!(info.printing_unavailable, "GSplus 1.38 has no printer");
+    }
+
+    /// GSplus 1.38 takes `-cfg`, eXo's 0.14 `-config`; GSport takes nothing
+    /// and reads `config.txt` from its working directory.
+    #[test]
+    fn each_build_gets_the_command_line_it_understands() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let data = root.to_str().unwrap();
+        let game = root.join("eXo/eXoAppleIIGS/Cogito (1992)");
+        std::fs::create_dir_all(&game).unwrap();
+        std::fs::write(game.join("Game.po"), b"x").unwrap();
+        let e = entry_json(r#"{"engine":"gsplus"}"#);
+        let plan = plan(&e, &HashMap::new());
+        let run = run_dir(data, "Cogito (1992)");
+        let start = |engine, source| {
+            let resolved = Resolved { engine, cmd: EngineCmd::Direct(PathBuf::from("emu")), source };
+            let launch = Launch {
+                shortcode: "Cogito (1992)",
+                entry: &e,
+                plan: &plan,
+                resolved: &resolved,
+                torrent_root: root,
+                game_dir: &game,
+                data_dir: data,
+                fullscreen: false,
+                crt: true,
+            };
+            let (cmd, _) = command(&launch).unwrap();
+            let args: Vec<String> = cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+            (args, cmd.get_current_dir().map(Path::to_path_buf))
+        };
+        let cfg = run.join("gsplus.cfg").to_string_lossy().into_owned();
+
+        let (args, cwd) = start(IigsEngine::Gsplus, EngineSource::Pack);
+        assert_eq!(args, ["-cfg", cfg.as_str(), "-fullscreen", "0", "-crt", "1"]);
+        assert_eq!(cwd.as_deref(), Some(game.as_path()));
+        assert!(std::fs::read_to_string(&cfg).unwrap().contains("g_status_enable = 0"));
+
+        let (args, _) = start(IigsEngine::Gsplus, EngineSource::Exo);
+        assert_eq!(args, ["-config", cfg.as_str(), "-sw", "1400", "-sh", "920"]);
+        assert!(!std::fs::read_to_string(&cfg).unwrap().contains("g_status_enable"));
+
+        let (args, cwd) = start(IigsEngine::Gsport, EngineSource::Exo);
+        assert!(args.is_empty());
+        assert_eq!(cwd.as_deref(), Some(run.as_path()));
+        assert!(run.join("config.txt").is_file());
     }
 
     #[test]

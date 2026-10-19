@@ -16,6 +16,8 @@ pub use commands::{collection_base_id, CollectionDef, COLLECTION_MAP};
 pub use commands::{bundled_metadata_dir, extract_bundled_configs, load_root_folder, scan_installed_games_with_db, set_root_folder};
 #[doc(hidden)]
 pub use commands::appleiigs::sweep_config as appleiigs_sweep_config;
+#[doc(hidden)]
+pub use commands::appleiigs::{probe_command as appleiigs_probe_command, probe_extract_support as appleiigs_probe_extract_support};
 
 use std::path::Path;
 use std::sync::Mutex;
