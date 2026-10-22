@@ -117,7 +117,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
 
-      # Two edits to the AppDir, both about the GPU:
+      # Edits to the AppDir, the first two about the GPU:
       #
       # 1. Tauri's linuxdeploy auto-bundles GPU-adjacent libs (libwayland,
       #    libgbm, libdrm, libEGL, libGL) from the jammy runner. These must
@@ -133,7 +133,7 @@ jobs:
       #    previous start did not survive.
       #
       # Then repack and re-sign (the updater signature covers the file bytes).
-      - name: Fix AppImage graphics stack (host GPU libs, GDK backend)
+      - name: Fix AppImage (host GPU libs, GDK backend, .DirIcon)
         if: matrix.platform == 'linux'
         shell: bash
         env:
@@ -157,6 +157,19 @@ jobs:
           fi
           sed -i 's|^export GDK_BACKEND=x11.*$|# GDK_BACKEND deliberately unset - Exodium picks the backend, see apply_render_path()|' "$hook"
           grep -n 'GDK_BACKEND' "$hook"
+          # Tauri < 2.11.4 points .DirIcon at the runner's AppDir (tauri#15110),
+          # dangling inside the mounted image: no icon, AppImageHub lint fails.
+          for link in squashfs-root/.DirIcon squashfs-root/*.desktop; do
+            target=$(readlink "$link" || true)
+            if [[ "$target" == /*.AppDir/* ]]; then
+              ln -sfn "${target#*.AppDir/}" "$link"
+            fi
+            if [[ "$(readlink "$link" || true)" == /* ]] || [[ ! -e "$link" ]]; then
+              echo "::error::$link does not resolve inside the AppDir"
+              exit 1
+            fi
+          done
+          ls -la squashfs-root/.DirIcon squashfs-root/*.desktop
           rm -f "$name" "$name.sig"
           ARCH=x86_64 /tmp/appimagetool --appimage-extract-and-run squashfs-root "$name"
           rm -rf squashfs-root
