@@ -444,7 +444,7 @@ export function SettingsDialog(props: Props) {
               </div>
 
               <div class="ark-dialog-actions">
-                <Dialog.CloseTrigger class="btn-secondary">Close</Dialog.CloseTrigger>
+                <Dialog.CloseTrigger class="btn-secondary" data-testid="settings-close">Close</Dialog.CloseTrigger>
               </div>
             </Dialog.Content>
           </Dialog.Positioner>
