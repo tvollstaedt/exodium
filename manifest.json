@@ -387,24 +387,24 @@
           "supersedes": [],
           "platforms": {
             "darwin-aarch64": {
-              "url": "TODO: content-vN after the gsplus content-packs run",
-              "sha256": "TODO",
-              "size_bytes": 0
+              "url": "https://github.com/tvollstaedt/exodium/releases/download/content-v9/gsplus-macos-universal-v1.tar.gz",
+              "sha256": "681b8bd489149fb134601ed410f49f79813614bfda060ddb4a1d9ab44656a141",
+              "size_bytes": 3345796
             },
             "darwin-x86_64": {
-              "url": "TODO: content-vN after the gsplus content-packs run",
-              "sha256": "TODO",
-              "size_bytes": 0
+              "url": "https://github.com/tvollstaedt/exodium/releases/download/content-v9/gsplus-macos-universal-v1.tar.gz",
+              "sha256": "681b8bd489149fb134601ed410f49f79813614bfda060ddb4a1d9ab44656a141",
+              "size_bytes": 3345796
             },
             "linux-x86_64": {
-              "url": "TODO: content-vN after the gsplus content-packs run",
-              "sha256": "TODO",
-              "size_bytes": 0
+              "url": "https://github.com/tvollstaedt/exodium/releases/download/content-v9/gsplus-linux-x86_64-v1.tar.gz",
+              "sha256": "83b7e178d270ee03525e9e658d964702d9851830af5e2f7030f9ac0cb6dcf518",
+              "size_bytes": 19419740
             },
             "linux-aarch64": {
-              "url": "TODO: content-vN after the gsplus content-packs run",
-              "sha256": "TODO",
-              "size_bytes": 0
+              "url": "https://github.com/tvollstaedt/exodium/releases/download/content-v9/gsplus-linux-aarch64-v1.tar.gz",
+              "sha256": "f7843c2126d139f165c5327fafef88b788f8b3b5533cf29dd0cdeb7a83c56ee0",
+              "size_bytes": 18550025
             }
           }
         }
