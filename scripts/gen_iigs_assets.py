@@ -42,7 +42,7 @@ PREFIX = "eXo/eXoAppleIIGS/!appleiigs/"
 ENGINES = {"gsplus\\gsplus.exe": "gsplus", "gsport\\gsport.exe": "gsport", "mame": "mame"}
 # Lines of an exception.bat that only steer eXo's console window.
 NOISE = re.compile(
-    r"^(@?echo (off|on)|echo\.|cls|pause|cd |goto |if errorlevel|:|"
+    r"^(@?echo (off|on)$|echo\.|cls|pause|cd |goto |if errorlevel|:|"
     r"\.\.\\\.\.\\\.\.\\util\\(setconsole|choice)|\.\\util\\capslock)",
     re.I,
 )

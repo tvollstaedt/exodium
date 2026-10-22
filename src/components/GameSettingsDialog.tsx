@@ -108,11 +108,11 @@ export function GameSettingsDialog(props: GameSettingsDialogProps) {
     setSaveError("");
     try {
       const tree = svm();
-      if (iigs()) {
-        if ((iigs()?.options.length ?? 0) > 1) {
+      const info = iigs();
+      if (info) {
+        if (info.options.length > 1) {
           await chooseIigsOption(props.gameId, iigsOption() || null);
         }
-        await setGameSettings(props.gameId, null, null, fullscreen() || null, null, null);
       } else if (tree) {
         await setScummvmOptions(props.gameId, {
           variant: tree.selected.variant,
@@ -121,6 +121,8 @@ export function GameSettingsDialog(props: GameSettingsDialogProps) {
           subtitles: svmSubtitles(),
           aspect: svmAspect(),
         });
+      }
+      if (info || tree) {
         await setGameSettings(props.gameId, null, null, fullscreen() || null, null, null);
       } else {
         await setGameSettings(
@@ -277,6 +279,8 @@ export function GameSettingsDialog(props: GameSettingsDialogProps) {
               </Show>
               </Show>
 
+              {/* GSport takes no options (§23). */}
+              <Show when={iigs()?.engine !== "gsport"}>
               <div class="game-settings-row">
                 <label class="game-settings-label">Fullscreen</label>
                 <select
@@ -289,6 +293,7 @@ export function GameSettingsDialog(props: GameSettingsDialogProps) {
                   <option value="false">Off</option>
                 </select>
               </div>
+              </Show>
 
               <Show when={dosboxControls()}>
               <div class="game-settings-row">

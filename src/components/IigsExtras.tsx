@@ -37,7 +37,12 @@ export function IigsExtras(props: Props) {
   const [progress, setProgress] = createSignal<Record<string, number>>({});
   const [viewing, setViewing] = createSignal<{ name: string; path: string } | null>(null);
   const timers = new Set<ReturnType<typeof setTimeout>>();
-  onCleanup(() => timers.forEach(clearTimeout));
+  // A status request still in flight when the panel closes must not re-arm.
+  let disposed = false;
+  onCleanup(() => {
+    disposed = true;
+    timers.forEach(clearTimeout);
+  });
 
   const setPct = (name: string, value: number | null) =>
     setProgress((p) => {
@@ -47,6 +52,7 @@ export function IigsExtras(props: Props) {
     });
 
   const settle = (name: string, status: ReadingStatus | null, id: number) => {
+    if (disposed) { return; }
     if (status?.phase === "ready" && status.path) {
       setPct(name, null);
       props.onChanged();

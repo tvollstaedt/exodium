@@ -264,6 +264,16 @@ describe("Apple IIGS", () => {
     expect(emulatorName(iigsGame, null, false, info(), false)).toBe("GSplus");
     expect(emulatorName(iigsGame, null, false, info({ engine: "mame", source: "exo" }), true)).toBe("MAME");
     expect(emulatorName(iigsGame, null, false, null, false)).toBe("GSplus");
+    // Windows runs eXo's pick, unknown until the backend answers.
+    expect(emulatorName(iigsGame, null, false, null, true)).toBe("");
+  });
+
+  it("on Windows waits for the support probe, and offline says to go online", () => {
+    const missing = info({ engine: null, source: null });
+    expect(launchNote(ctx({ game: iigsGame, iigs: missing, installed: true, isWindows: true }))).toBeNull();
+    const offline = launchNote(ctx({ game: iigsGame, iigs: missing, installed: true, isWindows: true, offline: true }));
+    expect(offline?.key).toBe("engine-missing");
+    expect(offline?.text).toContain("Go online");
   });
 
   it("offers GSplus with the game, then as a remedy", () => {

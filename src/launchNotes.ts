@@ -59,17 +59,23 @@ export const isAppleIigs = (g: Game | null): boolean => g?.torrent_source === "e
 
 const IIGS_ENGINE_NAMES: Record<IigsEngine, string> = { gsplus: "GSplus", gsport: "GSport", mame: "MAME" };
 
-/** "GSplus" on macOS and Linux, eXo's own pick on Windows. */
+/** The emulator Play uses, or would use once it resolves. */
+function iigsEngine(info: AppleIigsInfo, isWindows: boolean): IigsEngine {
+  return info.engine ?? (isWindows ? info.exo_engine : "gsplus");
+}
+
+/** "GSplus" on macOS and Linux, eXo's own pick on Windows - unknown there
+ *  until the backend answers. */
 export function iigsEngineName(info: AppleIigsInfo | null, isWindows: boolean): string {
-  const e = info?.engine ?? (info && isWindows ? info.exo_engine : "gsplus");
-  return IIGS_ENGINE_NAMES[e];
+  if (!info) { return isWindows ? "" : "GSplus"; }
+  return IIGS_ENGINE_NAMES[iigsEngine(info, isWindows)];
 }
 
 /** The keys that differ per emulator, from eXo's manual and GSplus 1.38's
  *  readme: Open-Apple and Option, and the control panel a few games save and
  *  load through (Ctrl+Open-Apple+Esc on the real machine). */
 export function iigsControls(info: AppleIigsInfo, isWindows: boolean): string {
-  const engine = info.engine ?? (isWindows ? info.exo_engine : "gsplus");
+  const engine = iigsEngine(info, isWindows);
   if (engine === "gsplus" && !isWindows) {
     return "F1 = Open-Apple, F2 = Option, F3 = Esc, F4 = settings and disk swap, "
       + "F11 = fullscreen, Ctrl+F12 = reset. Control panel: Ctrl+F1+F3.";
@@ -282,6 +288,18 @@ function appleIigsNote(ctx: NoteContext): PanelNote | null {
     }
   }
   const support = ctx.support;
+  // Windows' emulators come out of the support payload, whose state is
+  // unknown before the first probe and never probed offline.
+  if (ctx.isWindows && info.engine == null && !support) {
+    return ctx.offline
+      ? {
+        key: "engine-missing",
+        blocking: true,
+        text: `This game needs eXo's ${engine}, which downloads with the game. `
+          + "Go online (Settings → Network) to fetch it.",
+      }
+      : null;
+  }
   if (support?.phase === "failed") { return supportFailedNote("Apple IIGS"); }
   if (support?.phase === "downloading") {
     return supportProgressNote(support, "Apple IIGS", ctx.isWindows ? "ROMs + emulators" : "ROMs");
