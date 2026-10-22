@@ -85,7 +85,7 @@ asset_url() { # asset_url <repo> <tag> <grep-pattern> — names embed build stam
     | grep -o 'https://[^"]*download/[^"]*' | grep -E "$3" | head -1
 }
 
-# License texts ship inside each pack (both emulators are GPLv2; the source
+# License texts ship inside each pack (every emulator is GPL; the source
 # tarballs go onto the same content release).
 fetch_license() { # fetch_license <raw-url> <out>
   curl -fsSL -o "$2" "$1" || echo "WARNING: could not fetch license $1"

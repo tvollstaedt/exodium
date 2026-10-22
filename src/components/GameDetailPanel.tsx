@@ -434,29 +434,30 @@ export function GameDetailPanel(props: Props) {
   });
   onCleanup(() => clearTimeout(settleTimer));
   const win9x = createWin9xStatus(() => props.game, panelSettled);
+  // Reset only when the displayed game changes: library refreshes replace
+  // the object for the same id, and the memo's equality swallows those.
+  const shownGameId = createMemo(() => props.game?.id ?? null);
+  // Every probe sets a fresh status object; only a phase change matters here.
+  const supportPhase = createMemo(() => win9x.support()?.phase);
   // A finished pack install - or, on Windows, the support payload turning
   // ready - has to clear the "not found" note without the panel being
   // reopened; the Win9x status does the same re-probe.
   createEffect(() => {
     void installedPacks();
-    void win9x.support()?.phase;
+    void supportPhase();
     if (!panelSettled()) { return; }
-    const g = props.game;
-    if (!isScummVm(g) || g?.id == null) { return; }
-    const id = g.id;
+    const id = shownGameId();
+    if (id == null || !isScummVm(untrack(() => props.game))) { return; }
     scummvmEngineInfo(id)
       .then((e) => { if (props.game?.id === id) { setSvmEngine(e); } })
       .catch(() => {});
   });
 
-  // Reset only when the displayed game changes: library refreshes replace
-  // the object for the same id, and the memo's equality swallows those.
-  const shownGameId = createMemo(() => props.game?.id ?? null);
   // An Apple IIGS game's info follows a pack install, the ROMs turning ready
   // and a stored program change - keyed on the id, never the row object
   // (§12), so a library refresh does not refetch it.
   createEffect(on(
-    [() => installedPacks(), () => win9x.support()?.phase, iigsRevision],
+    [() => installedPacks(), supportPhase, iigsRevision],
     () => {
       const id = shownGameId();
       if (id != null && isAppleIigs(untrack(() => props.game))) { loadIigsInfo(id); }

@@ -583,6 +583,35 @@ describe("GameDetailPanel - Apple IIGS", () => {
 
   afterEach(() => {
     document.body.innerHTML = "";
+    vi.useRealTimers();
+  });
+
+  /** The ROM probe repeats while the support files are missing, and a library
+   *  refresh hands over a new row object - neither may refetch the info. */
+  it("does not refetch its info on support probes or library refreshes", async () => {
+    vi.useFakeTimers();
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_game_metadata") { return EMPTY_META; }
+      if (cmd === "get_game_variants") { return []; }
+      if (cmd === "appleiigs_info") { return INFO; }
+      if (cmd === "get_appleiigs_support_status") { return { phase: "missing", progress: 0, total_bytes: 148_000_000 }; }
+      return null;
+    });
+    const calls = (cmd: string) => mockInvoke.mock.calls.filter((c) => c[0] === cmd).length;
+    const [game, setGame] = createSignal(iigsGame());
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const dispose = render(() => <GameDetailPanel game={game()} onClose={() => {}} />, host);
+    await vi.advanceTimersByTimeAsync(3200);
+    const settled = calls("appleiigs_info");
+
+    setGame(iigsGame());
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect(calls("get_appleiigs_support_status"), "the probe keeps running").toBeGreaterThan(2);
+    expect(calls("appleiigs_info")).toBe(settled);
+
+    dispose();
+    host.remove();
   });
 
   it("offers one chip per program and stores the pick", async () => {

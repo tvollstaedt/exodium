@@ -297,7 +297,7 @@
     "Game.po"
    ],
    "engine": "mame",
-   "note": "has started, you need to press Ctrl+r to start player control of the helicopter."
+   "note": "Once you have selected \"Play Game\" and the game has started, you need to press Ctrl+r to start player control of the helicopter."
   },
   "Charlie Brown ABCs (1989)": {
    "engine": "gsplus"

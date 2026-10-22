@@ -367,31 +367,44 @@ fn mame_args(torrent_root: &Path, game_dir: &Path, plan: &Plan, fullscreen: bool
 
 /// The template for this launch: the option's or eXo's config from the
 /// game's `!appleiigs` folder, else the `config.txt` a GSport game carries in
-/// its own zip. None for MAME's games, which have no config at all.
-fn template(config_dir: &Path, game_dir: &Path, plan: &Plan, exo: IigsEngine) -> Option<String> {
+/// its own zip. None for MAME's games, which have no config at all; a missing
+/// one is an error for the others, whose disks are named only in it.
+fn template(config_dir: &Path, game_dir: &Path, plan: &Plan, exo: IigsEngine) -> Result<Option<String>, String> {
     let name = plan.config.as_deref().unwrap_or("config.txt");
     let candidates = [resolve_case_insensitive(config_dir, name), resolve_case_insensitive(game_dir, "config.txt")];
-    let found = candidates.iter().find(|p| p.is_file());
-    match (found, exo) {
-        (Some(p), _) => std::fs::read(p).ok().map(|b| String::from_utf8_lossy(&b).into_owned()),
-        (None, IigsEngine::Mame) => None,
-        (None, _) => {
-            log::warn!("appleiigs: no config for {} - building one from its disks", game_dir.display());
-            None
-        }
+    match (candidates.iter().find(|p| p.is_file()), exo) {
+        (Some(p), _) => std::fs::read(p)
+            .map(|b| Some(String::from_utf8_lossy(&b).into_owned()))
+            .map_err(|e| format!("cannot read {}: {e}", p.display())),
+        (None, IigsEngine::Mame) => Ok(None),
+        (None, IigsEngine::Gsport) => Err(format!(
+            "{} has no config.txt - reset the game to unpack it again.",
+            game_dir.display()
+        )),
+        (None, IigsEngine::Gsplus) => Err(format!(
+            "eXo's config {name} is missing from {} - delete that folder and restart Exodium to restore it.",
+            config_dir.display()
+        )),
     }
 }
 
 /// The GSplus config one launch of `shortcode` uses: its template from the
 /// game's `!appleiigs` folder or zip, with this machine's absolute paths.
-fn launch_config(shortcode: &str, entry: &Entry, plan: &Plan, torrent_root: &Path, game_dir: &Path, modern: bool) -> String {
+fn launch_config(
+    shortcode: &str,
+    entry: &Entry,
+    plan: &Plan,
+    torrent_root: &Path,
+    game_dir: &Path,
+    modern: bool,
+) -> Result<String, String> {
     let config_dir = torrent_root
         .join(crate::commands::collections::collection_game_prefix(COLLECTION))
         .join("!appleiigs")
         .join(shortcode);
     let bram = index().map(|i| i.default_bram.as_slice()).unwrap_or(&[]);
-    let tpl = template(&config_dir, game_dir, plan, entry.engine);
-    derive_config(tpl.as_deref(), game_dir, torrent_root, plan, bram, modern)
+    let tpl = template(&config_dir, game_dir, plan, entry.engine)?;
+    Ok(derive_config(tpl.as_deref(), game_dir, torrent_root, plan, bram, modern))
 }
 
 /// The config GSplus 1.38 would get for a game, for the playtest sweep
@@ -407,7 +420,7 @@ pub fn sweep_config(shortcode: &str, torrent_root: &Path, option: Option<&str>) 
     let game_dir = torrent_root
         .join(crate::commands::collections::collection_game_prefix(COLLECTION))
         .join(shortcode);
-    Ok(launch_config(shortcode, entry, &plan, torrent_root, &game_dir, true))
+    launch_config(shortcode, entry, &plan, torrent_root, &game_dir, true)
 }
 
 /// Per-launch configs. Not `content/appleiigs`: the torrent carries an empty
@@ -443,12 +456,12 @@ fn command(l: &Launch) -> Result<(std::process::Command, PathBuf), String> {
         IigsEngine::Gsport => {
             // GSport reads `config.txt` from its working directory and takes
             // no options; the window opens small and F11 goes fullscreen.
-            let text = launch_config(l.shortcode, l.entry, l.plan, l.torrent_root, l.game_dir, false);
+            let text = launch_config(l.shortcode, l.entry, l.plan, l.torrent_root, l.game_dir, false)?;
             std::fs::write(run.join("config.txt"), text).map_err(|e| e.to_string())?;
             cmd.current_dir(&run);
         }
         IigsEngine::Gsplus => {
-            let text = launch_config(l.shortcode, l.entry, l.plan, l.torrent_root, l.game_dir, modern);
+            let text = launch_config(l.shortcode, l.entry, l.plan, l.torrent_root, l.game_dir, modern)?;
             let cfg_path = run.join("gsplus.cfg");
             std::fs::write(&cfg_path, text).map_err(|e| e.to_string())?;
             if modern {
@@ -871,6 +884,9 @@ mod tests {
         let game = root.join("eXo/eXoAppleIIGS/Cogito (1992)");
         std::fs::create_dir_all(&game).unwrap();
         std::fs::write(game.join("Game.po"), b"x").unwrap();
+        let exo_cfg = root.join("eXo/eXoAppleIIGS/!appleiigs/Cogito (1992)");
+        std::fs::create_dir_all(&exo_cfg).unwrap();
+        std::fs::write(exo_cfg.join("config.txt"), "s7d1 = game.po\r\ng_cfg_rom_path = ..\\..\\..\\GSPlus\\ROM1\r\n").unwrap();
         let e = entry_json(r#"{"engine":"gsplus"}"#);
         let plan = plan(&e, &HashMap::new());
         let run = run_dir(data, "Cogito (1992)");
@@ -896,7 +912,9 @@ mod tests {
         let (args, cwd) = start(IigsEngine::Gsplus, EngineSource::Pack);
         assert_eq!(args, ["-cfg", cfg.as_str(), "-fullscreen", "0", "-crt", "1"]);
         assert_eq!(cwd.as_deref(), Some(game.as_path()));
-        assert!(std::fs::read_to_string(&cfg).unwrap().contains("g_status_enable = 0"));
+        let written = std::fs::read_to_string(&cfg).unwrap();
+        assert!(written.contains("g_status_enable = 0"));
+        assert!(written.contains(&format!("s7d1 = {}", native(&game.join("Game.po")))));
 
         let (args, _) = start(IigsEngine::Gsplus, EngineSource::Exo);
         assert_eq!(args, ["-config", cfg.as_str(), "-sw", "1400", "-sh", "920"]);
@@ -906,6 +924,25 @@ mod tests {
         assert!(args.is_empty());
         assert_eq!(cwd.as_deref(), Some(run.as_path()));
         assert!(run.join("config.txt").is_file());
+    }
+
+    /// The `!appleiigs` config wins over the zip's; GSplus and GSport games
+    /// name their disks only there, so without one the launch stops.
+    #[test]
+    fn template_prefers_exos_config_and_refuses_a_missing_one() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (cfg_dir, game) = (tmp.path().join("cfg"), tmp.path().join("game"));
+        let plan = plan(&entry_json(r#"{"engine":"gsport"}"#), &HashMap::new());
+        assert!(template(&cfg_dir, &game, &plan, IigsEngine::Gsplus).is_err());
+        assert!(template(&cfg_dir, &game, &plan, IigsEngine::Gsport).is_err());
+        assert_eq!(template(&cfg_dir, &game, &plan, IigsEngine::Mame), Ok(None));
+
+        std::fs::create_dir_all(&game).unwrap();
+        std::fs::write(game.join("config.txt"), "zip").unwrap();
+        assert_eq!(template(&cfg_dir, &game, &plan, IigsEngine::Gsport), Ok(Some("zip".into())));
+        std::fs::create_dir_all(&cfg_dir).unwrap();
+        std::fs::write(cfg_dir.join("CONFIG.TXT"), "exo").unwrap();
+        assert_eq!(template(&cfg_dir, &game, &plan, IigsEngine::Gsport), Ok(Some("exo".into())));
     }
 
     #[test]
