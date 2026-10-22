@@ -172,7 +172,7 @@ export function ContentPackSettings() {
                 const blockedOffline = () => isOffline();
 
                 return (
-                  <div class="pack-row">
+                  <div class="pack-row" data-testid="content-pack" data-pack={key()}>
                     <div class="pack-info">
                       <span class="pack-name">{pack.display_name}</span>
                       <span class="pack-desc">{pack.description} · {formatBytes(pack.size_bytes)}</span>
