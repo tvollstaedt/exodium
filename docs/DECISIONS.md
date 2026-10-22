@@ -503,3 +503,8 @@
 - Rejected: a bat interpreter at launch (fragile, untestable); our own MAME build for macOS/Linux (a CI job, eXo's 0.245 cfg/nvram against a newer MAME, MAME's open IIgs joystick drift bug); GSplus 1.38 on Windows too (leaves eXo's tested setup without need); hiding failing titles per platform (a catalogue that differs by OS).
 - Why: GSplus was revived in June 2026 (KEGS 1.38 + SDL3, binaries for all three) and reads eXo's configs as they are; a boot sweep of all configs on MARU decides which substitutes need a hand test.
 - Gotcha: 1.38 takes `-cfg` (0.14: `-config`), rewrites the file and chdirs into its folder - so the launch writes a fresh copy with absolute paths. eXo's disk names ignore case; resolve them from the listing, not `exists()`.
+
+## 2026-10-22 - AppImage `.DirIcon` made relative in our repack step
+- Decision: The build's existing AppImage repack rewrites an absolute `.DirIcon`/root `.desktop` symlink to its path inside the AppDir and fails the build if either does not resolve afterwards.
+- Rejected: raising `@tauri-apps/cli` to >= 2.11.4 (tauri#15596) - moves the bundler two minors while the GStreamer bundling and the GDK hook patch depend on its output; worth doing separately with a lab run.
+- Why: Tauri's bundler pointed `.DirIcon` at the runner's AppDir (tauri#15110). Measured on the v0.15.4 asset: dangling inside the mounted image, so no icon in file managers and AppImageHub's lint fails ("FATAL: .DirIcon is missing"). The root `.desktop` was already relative.
