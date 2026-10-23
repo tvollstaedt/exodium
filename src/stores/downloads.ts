@@ -1,11 +1,11 @@
 import { createSignal } from "solid-js";
 import { listen } from "@tauri-apps/api/event";
-import { cancelDownload, downloadGame, getDownloadProgress, listActiveDownloads } from "../api/tauri";
+import { cancelDownload, downloadGame, getDownloadProgress, listActiveDownloads, pauseDownload } from "../api/tauri";
 import { refreshLoadedGames, notifyGameLibraryChanged } from "./games";
 import { showToast } from "./toasts";
 import { transferStats } from "./transfer";
 
-interface DownloadState {
+export interface DownloadState {
   status: string;
   progress: number;
   downloading: boolean;
@@ -15,6 +15,13 @@ interface DownloadState {
   /** Waiting in a "Download playlist" queue: shown and cancellable like a
    *  download, but nothing has been asked of the backend yet. */
   queued?: boolean;
+  /** A queued game the backend already holds (a resumed pause): cancelling
+   *  it must reach the backend too. */
+  held?: boolean;
+  /** Paused by the user: no poll, files out of the torrent's selection. */
+  paused?: boolean;
+  /** Archive complete, extraction or a dependency pending - too late to pause. */
+  finishing?: boolean;
   title?: string;
   /** What the download sheet needs for a cover; absent for extras-only trackers. */
   cover?: DownloadCover;
@@ -191,6 +198,7 @@ async function tick(t: Tracker) {
       status: p.waiting_for ? `Waiting for ${p.waiting_for}…` : "Extracting...",
       progress: safeProgress,
       downloading: true,
+      finishing: true,
     });
     return;
   }
@@ -321,17 +329,49 @@ export function startGameDownload(gameId: number, title?: string, cover?: Downlo
   });
 }
 
-export function markQueued(gameId: number, title?: string, cover?: DownloadCover) {
+export function markQueued(gameId: number, title?: string, cover?: DownloadCover, held = false) {
   if (trackers.has(gameId)) { return; }
   setDownloads((prev) => ({
     ...prev,
-    [gameId]: { status: "Queued", progress: 0, downloading: true, queued: true, title, cover },
+    [gameId]: { status: "Queued", progress: 0, downloading: true, queued: true, held, title, cover },
   }));
 }
 
-/** Drops a queue entry; a download that already started is left alone. */
+/** Running, and early enough that pausing cannot strand a finished archive. */
+export function isPausable(s: DownloadState | undefined): boolean {
+  return !!s && s.downloading && !s.paused && !s.queued && !s.finishing && !s.installed;
+}
+
+function markPaused(gameId: number, title?: string, cover?: DownloadCover, progress = 0) {
+  setDownloads((prev) => ({
+    ...prev,
+    [gameId]: { status: "Paused", progress, downloading: true, paused: true, title, cover },
+  }));
+}
+
+/** Resuming goes through the batch queue (`resumeGameDownloads`), which
+ *  starts it with `startGameDownload` like any download. */
+export async function pauseGameDownload(gameId: number) {
+  const state = downloads()[gameId];
+  if (!isPausable(state)) { return; }
+  const t = trackers.get(gameId);
+  if (t) { endTracker(t); }
+  markPaused(gameId, state!.title, state!.cover, state!.progress);
+  try {
+    await pauseDownload(gameId);
+  } catch (e) {
+    showToast(state!.title ? `Couldn't pause ${state!.title}` : "Couldn't pause the download", "error", { detail: String(e) });
+    const again = newTracker(gameId, state!.title, false, state!.cover);
+    setState(again, { status: state!.status, progress: state!.progress, downloading: true });
+    void poll(again);
+  }
+}
+
+/** Drops a queue entry the backend knows nothing of; a started download or a
+ *  held one is left alone. */
 export function unmarkQueued(gameId: number) {
-  if (downloads()[gameId]?.queued) { clearState(gameId); }
+  const s = downloads()[gameId];
+  if (s?.queued && !s.held) { clearState(gameId); }
 }
 
 /** Re-arm a tracker for every download the session resumed on its own
@@ -341,10 +381,15 @@ export function unmarkQueued(gameId: number) {
 export async function resumeDownloads() {
   let pending: Awaited<ReturnType<typeof listActiveDownloads>>;
   try { pending = await listActiveDownloads(); } catch { return; }
-  for (const { id, title, torrent_source, thumbnail_key } of pending) {
+  for (const { id, title, torrent_source, thumbnail_key, paused } of pending) {
     if (trackers.has(id)) { continue; }
+    const cover = { source: torrent_source, key: thumbnail_key };
+    if (paused) {
+      markPaused(id, title, cover);
+      continue;
+    }
     // No download_game call to wait for: the session already has the file.
-    const t = newTracker(id, title, false, { source: torrent_source, key: thumbnail_key });
+    const t = newTracker(id, title, false, cover);
     setState(t, { status: "Resuming download…", progress: 0, downloading: true });
     void poll(t);
   }
@@ -397,7 +442,8 @@ export async function watchExtrasIfPending(gameId: number, title?: string) {
 }
 
 export async function cancelGameDownload(gameId: number) {
-  if (downloads()[gameId]?.queued) {
+  const state = downloads()[gameId];
+  if (state?.queued && !state.held) {
     clearState(gameId);
     return;
   }

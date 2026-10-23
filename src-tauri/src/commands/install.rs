@@ -25,6 +25,24 @@ fn retry_state() -> &'static Mutex<std::collections::HashMap<i64, (std::time::In
     RETRY_STATE.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
 }
 
+/// `game_config` key of a paused download (§24): the game stays in the
+/// library with its files out of the torrent's selection.
+pub(crate) const PAUSED_KEY: &str = "download_paused";
+
+/// Whether another game still fetching `gamedata` keeps it selected. A paused
+/// one does not; resuming re-selects it through `download_game`.
+fn gamedata_needed_elsewhere(conn: &rusqlite::Connection, gamedata: i64, id: i64) -> bool {
+    conn.query_row(
+        "SELECT COUNT(*) FROM games g WHERE g.gamedata_torrent_index = ?1 AND g.id != ?2 \
+           AND g.in_library = 1 AND NOT EXISTS ( \
+             SELECT 1 FROM game_config c WHERE c.game_id = g.id AND c.key = ?3)",
+        rusqlite::params![gamedata, id, PAUSED_KEY],
+        |r| r.get::<_, i64>(0),
+    )
+    .map(|n| n > 0)
+    .unwrap_or(true)
+}
+
 /// Queue a game for download via torrent.
 #[tauri::command]
 pub async fn download_game(
@@ -291,6 +309,7 @@ pub async fn download_game(
     {
         let conn = db_state.lock()?;
         queries::set_in_library(&conn, id).map_err(|e| e.to_string())?;
+        queries::delete_game_config(&conn, id, PAUSED_KEY).map_err(|e| e.to_string())?;
     }
 
     Ok(format!("Downloading: {}", game.title))
@@ -365,22 +384,28 @@ pub struct PendingDownload {
     pub rel_path: String,
     pub installed: bool,
     pub complete: bool,
+    /// Paused by the user: out of the selection, still in the library.
+    pub paused: bool,
 }
 
 pub(crate) async fn pending_downloads(
     db: &Mutex<rusqlite::Connection>,
     torrent_state: &TorrentState,
 ) -> Result<Vec<PendingDownload>, String> {
-    let rows: Vec<(i64, String, String, i64, bool, Option<String>)> = {
+    type Row = (i64, String, String, i64, bool, Option<String>, bool);
+    let rows: Vec<Row> = {
         let conn = db.lock().map_err(|_| "database lock poisoned".to_string())?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, title, torrent_source, game_torrent_index, installed, thumbnail_key \
-                 FROM games WHERE in_library = 1 AND game_torrent_index IS NOT NULL",
+                "SELECT g.id, g.title, g.torrent_source, g.game_torrent_index, g.installed, g.thumbnail_key, \
+                   EXISTS (SELECT 1 FROM game_config c WHERE c.game_id = g.id AND c.key = ?1) \
+                 FROM games g WHERE g.in_library = 1 AND g.game_torrent_index IS NOT NULL",
             )
             .map_err(|e| e.to_string())?;
         let rows = stmt
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get::<_, i64>(4)? != 0, r.get(5)?)))
+            .query_map([PAUSED_KEY], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get::<_, i64>(4)? != 0, r.get(5)?, r.get(6)?))
+            })
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())?;
@@ -388,13 +413,26 @@ pub(crate) async fn pending_downloads(
     };
     let managers = torrent_state.0.read().await.clone();
     let mut out = Vec::new();
-    for (id, title, source, idx, installed, thumbnail_key) in rows {
+    for (id, title, source, idx, installed, thumbnail_key, paused) in rows {
         let Some(mgr) = managers.get(&source) else { continue };
         let idx = idx as usize;
+        let Some(file) = mgr.index().files.get(idx) else { continue };
+        if paused && !installed {
+            out.push(PendingDownload {
+                id,
+                title,
+                torrent_source: source.clone(),
+                thumbnail_key,
+                rel_path: file.path.clone(),
+                installed,
+                complete: false,
+                paused: true,
+            });
+            continue;
+        }
         if !mgr.is_file_selected(idx).await {
             continue;
         }
-        let Some(file) = mgr.index().files.get(idx) else { continue };
         let complete = mgr.is_file_complete(idx).await;
         // An installed row whose archive is complete is simply done.
         if installed && complete {
@@ -408,6 +446,7 @@ pub(crate) async fn pending_downloads(
             rel_path: file.path.clone(),
             installed,
             complete,
+            paused: false,
         });
     }
     Ok(out)
@@ -812,30 +851,15 @@ pub async fn cancel_download(
 
         // The GameData ZIP is shared with this game's other language
         // variants (LP installs auto-download the EN GameData). Only
-        // deselect it when no other in-flight download still needs it.
+        // deselect it when no other in-flight download still needs it -
+        // in_library, not installed=0: an extracted variant may still be
+        // fetching it.
         let gamedata_idx = match game.gamedata_torrent_index {
-            Some(gd) => {
-                // in_library, not installed=0: an extracted variant may still
-                // be fetching this GameData.
-                let still_needed: i64 = conn
-                    .query_row(
-                        "SELECT COUNT(*) FROM games \
-                         WHERE gamedata_torrent_index = ?1 AND id != ?2 \
-                           AND in_library = 1",
-                        rusqlite::params![gd, id],
-                        |r| r.get(0),
-                    )
-                    .unwrap_or(0);
-                if still_needed > 0 {
-                    log::info!(
-                        "cancel_download: keeping shared GameData index {} ({} other download(s) need it)",
-                        gd, still_needed
-                    );
-                    None
-                } else {
-                    Some(gd as usize)
-                }
+            Some(gd) if gamedata_needed_elsewhere(&conn, gd, id) => {
+                log::info!("cancel_download: keeping shared GameData index {gd}");
+                None
             }
+            Some(gd) => Some(gd as usize),
             None => None,
         };
 
@@ -873,6 +897,7 @@ pub async fn cancel_download(
     {
         let conn = db_state.lock()?;
         queries::clear_in_library(&conn, id).map_err(|e| e.to_string())?;
+        queries::delete_game_config(&conn, id, PAUSED_KEY).map_err(|e| e.to_string())?;
     }
 
     // Both directions. Overlay variants waiting on this English base can
@@ -883,6 +908,45 @@ pub async fn cancel_download(
     cancelled.extend(cancel_orphaned_base(&db_state, &torrent_state, id).await?);
 
     Ok(cancelled)
+}
+
+/// Pause a download (§24): its files leave the torrent's selection, the game
+/// stays in the library and keeps what it has on disk, and the pause outlives
+/// a restart. `download_game` resumes it.
+#[tauri::command]
+pub async fn pause_download(
+    db_state: State<'_, DbState>,
+    torrent_state: State<'_, TorrentState>,
+    id: i64,
+) -> Result<(), String> {
+    let (game_idx, gamedata_idx, source) = {
+        let conn = db_state.lock()?;
+        let game = queries::fetch_game_by_id(&conn, id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("Game {} not found", id))?;
+        if game.installed || !game.in_library {
+            return Err(format!("{} is not downloading", game.title));
+        }
+        queries::set_game_config(&conn, id, PAUSED_KEY, "1").map_err(|e| e.to_string())?;
+        let gamedata_idx = game
+            .gamedata_torrent_index
+            .filter(|&gd| !gamedata_needed_elsewhere(&conn, gd, id))
+            .map(|gd| gd as usize);
+        (
+            game.game_torrent_index.map(|i| i as usize),
+            gamedata_idx,
+            game.torrent_source.unwrap_or_else(|| "eXoDOS".to_string()),
+        )
+    };
+    let op_lock = game_op_lock(id);
+    let _op_guard = op_lock.lock().await;
+    let manager = { torrent_state.0.read().await.get(&source).cloned() };
+    if let Some(manager) = manager {
+        for idx in [game_idx, gamedata_idx].into_iter().flatten() {
+            manager.deselect_file(idx).await;
+        }
+    }
+    Ok(())
 }
 
 /// Cancel every not-yet-installed overlay variant that was waiting on this
@@ -1325,6 +1389,26 @@ pub(crate) fn extract_game_zip(zip_path: &std::path::Path, dest: &std::path::Pat
 mod tests {
     use super::*;
     use std::fs;
+
+    /// A paused sibling no longer holds the shared GameData selected; an
+    /// active one does.
+    #[test]
+    fn shared_gamedata_stays_selected_only_for_an_active_sibling() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::init(&conn).unwrap();
+        for (title, lang) in [("Game", "EN"), ("Spiel", "DE")] {
+            conn.execute(
+                "INSERT INTO games (title, language, gamedata_torrent_index, in_library) VALUES (?1, ?2, 5, 1)",
+                rusqlite::params![title, lang],
+            )
+            .unwrap();
+        }
+        assert!(gamedata_needed_elsewhere(&conn, 5, 1), "the German download still runs");
+        queries::set_game_config(&conn, 2, PAUSED_KEY, "1").unwrap();
+        assert!(!gamedata_needed_elsewhere(&conn, 5, 1), "a paused sibling does not need it");
+        conn.execute("UPDATE games SET in_library = 0 WHERE id = 2", []).unwrap();
+        assert!(!gamedata_needed_elsewhere(&conn, 5, 1));
+    }
 
     /// The shared `!save/<sc>` holds a COMPLETE game directory (§5), so a
     /// localized variant must never restore from it: Spanish Alien Odyssey

@@ -16,6 +16,7 @@ describe("download-all queue", () => {
     mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
       const id = (args as { id?: number } | undefined)?.id ?? -1;
       if (cmd === "download_game") { return "Downloading"; }
+      if (cmd === "cancel_download") { return []; }
       if (cmd === "get_download_progress") {
         return finished.has(id)
           ? { progress: 1, finished: true, installed: true, extras_done: true, error: null }
@@ -67,5 +68,65 @@ describe("download-all queue", () => {
     await vi.advanceTimersByTimeAsync(1100);
     expect(started()).toEqual(ids.slice(0, 4));
     expect(getDownloadState(602)?.downloading).toBe(true);
+  });
+
+  it("frees a paused game's slot, and resuming puts it back in front", async () => {
+    const { enqueueDownloads, resumeGameDownload, queuedCount } = await import("./batchDownloads");
+    const { getDownloadState, pauseGameDownload } = await import("./downloads");
+    const ids = [701, 702, 703, 704, 705, 706];
+    enqueueDownloads(9, ids.map((gameId) => ({ gameId, title: `Game ${gameId}` })));
+
+    await pauseGameDownload(702);
+    expect(mockInvoke).toHaveBeenCalledWith("pause_download", { id: 702 });
+    expect(getDownloadState(702)?.paused).toBe(true);
+    expect(started()).toEqual([701, 702, 703, 704, 705]);
+
+    resumeGameDownload(702);
+    expect(getDownloadState(702)?.status).toBe("Queued");
+    finished.add(701);
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(started()).toEqual([701, 702, 703, 704, 705, 702]);
+    expect(queuedCount(9)).toBe(1);
+  });
+
+  it("pause all holds the queue until resume all, and cancel all reaches what the backend holds", async () => {
+    const { enqueueDownloads, pauseAllDownloads, resumeAllDownloads, cancelAllDownloads, queueHalted } =
+      await import("./batchDownloads");
+    const { getDownloadState } = await import("./downloads");
+    const ids = [801, 802, 803, 804, 805];
+    enqueueDownloads(10, ids.map((gameId) => ({ gameId, title: `Game ${gameId}` })));
+
+    await pauseAllDownloads();
+    expect(queueHalted()).toBe(true);
+    expect(ids.slice(0, 4).every((id) => getDownloadState(id)?.paused)).toBe(true);
+    expect(started()).toEqual(ids.slice(0, 4));
+
+    resumeAllDownloads();
+    expect(started()).toEqual([...ids.slice(0, 4), ...ids.slice(0, 4)]);
+    expect(getDownloadState(805)?.status).toBe("Queued");
+
+    // Pausing 804 lets 805 start; resumed, 804 waits behind the four running
+    // - still the backend's, so cancel all must reach it.
+    await (await import("./downloads")).pauseGameDownload(804);
+    expect(getDownloadState(805)?.queued).toBeFalsy();
+    (await import("./batchDownloads")).resumeGameDownload(804);
+    expect(getDownloadState(804)?.held).toBe(true);
+
+    mockInvoke.mockClear();
+    await cancelAllDownloads();
+    const cancelled = mockInvoke.mock.calls.filter((c) => c[0] === "cancel_download").map((c) => (c[1] as { id: number }).id);
+    expect(cancelled.sort()).toEqual(ids);
+    expect(ids.every((id) => getDownloadState(id) === undefined)).toBe(true);
+  });
+
+  it("restores a paused download after a restart without polling it", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => (cmd === "list_active_downloads"
+      ? [{ id: 901, title: "Keen", torrent_source: "eXoDOS", thumbnail_key: null, installed: false, complete: false, paused: true }]
+      : null));
+    const { resumeDownloads, getDownloadState } = await import("./downloads");
+    await resumeDownloads();
+    expect(getDownloadState(901)?.paused).toBe(true);
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(mockInvoke.mock.calls.some((c) => c[0] === "get_download_progress")).toBe(false);
   });
 });

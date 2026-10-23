@@ -46,7 +46,7 @@ pub use setup::{
     setup_from_local, setup_import, setup_start,
     validate_exodos_dir, TorrentState,
 };
-pub use install::{cancel_download, download_game, get_download_progress};
+pub use install::{cancel_download, download_game, get_download_progress, pause_download};
 pub use library::{game_name_from_app_path, reset_game_data, scan_installed_games, torrent_search_names, uninstall_game};
 pub use assets::{get_game_metadata, get_poster_dir, get_preview_dir};
 pub use paths::{bundled_metadata_dir, init_log_dir, init_resource_dir};

@@ -60,12 +60,13 @@ eXoDOS ships with a Windows-only LaunchBox frontend and requires downloading the
 - ✅ A theme player - a game's theme streams from its archive when you open its details, and Browse doubles as a jukebox over the games that have one
 - ✅ Per-game settings - CRT shader, fullscreen, CPU cycles, and a free-form DOSBox config editor
 - ✅ Favorites, playlists, and a personal library of installed games
+- ✅ Pause and resume downloads one by one or all at once, and cancel everything in one go
 - ✅ Import a list of games as a playlist (a text file with one title per line, or a CSV with `title`, `collection`, `year`), export one the same way, and download a whole playlist in one go
 
 > **Compatibility note:** DOS and Windows 3.x games run under the bundled DOSBox Staging, ScummVM games under the pinned ScummVM build Exodium fetches for them. A handful are tuned for DOSBox-ECE specials such as 3dfx Voodoo settings or the GunStick light gun and may look or behave slightly differently than under the original Windows eXoDOS setup. Windows 9x games need DOSBox-X or 86Box, which Exodium fetches with your first Windows 9x download. Apple IIGS games run under GSplus on macOS and Linux, including the ones eXo runs with MAME or GSport on Windows - those are marked in the game's panel until they have been tested.
 
 ### Planned
-- 🔲 Pausing and resuming downloads, and a history of what has been fetched
+- 🔲 A history of what has been fetched
 - 🔲 Support for other eXo collections - eXoDREAMM, eXoIF, and future releases
 
 ---

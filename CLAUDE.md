@@ -2079,6 +2079,24 @@ says "Queued" and Cancel drops them without asking the backend; the store's
 transitions are the queue's clock. A restart drops what has not started -
 started downloads resume as always.
 
+**Pausing takes a game out of its torrent's selection and keeps it in the
+library** (`pause_download`): the archive, and the shared GameData unless an
+active sibling still fetches it, are deselected; `in_library` stays; the
+`game_config` key `download_paused` records the intent, because librqbit
+persists only the selection and a paused game would otherwise come back from
+a restart as a half-done download indistinguishable from a cancelled one.
+`pending_downloads` reports such rows as `paused`, the store restores them
+without a poll, and `download_game` - which IS resume - clears the key. Only a
+game that is really transferring can pause (`isPausable`): once the archive is
+complete the poll is what extracts, and stopping it would strand the file.
+Resuming goes through the queue's FRONT (`resumeGameDownloads`), so it never
+exceeds four running; a queued entry the backend still holds carries `held`
+and is cancelled there too, while a plain queued one is dropped locally. The
+global pause (`pauseAllDownloads`) also halts the queue; "Cancel all" empties
+the queue first - each cancelled slot would otherwise start the next game.
+Torrent-level pause and a zero rate limit were rejected: both stop preview
+streams, the Reading Room and seeding with the downloads.
+
 ## Conventions
 
 - **Every Tauri command that touches the DB, filesystem, or network MUST be
