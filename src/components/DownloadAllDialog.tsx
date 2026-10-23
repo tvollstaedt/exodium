@@ -11,6 +11,8 @@ import { Button } from "./Button";
 /** Must match the CSS animation duration on .closing. */
 const EXIT_MS = 180;
 
+const games = (n: number) => `${n} ${n === 1 ? "game" : "games"}`;
+
 interface Props {
   playlist: Playlist | null;
   /** Preselected; a game without that version downloads in English. */
@@ -63,8 +65,8 @@ export function DownloadAllDialog(props: Props) {
     const p = plan();
     if (!p) { return ""; }
     return [
-      p.present > 0 && `${p.present} already installed`,
-      p.in_progress > 0 && `${p.in_progress} already downloading`,
+      p.present > 0 && `${games(p.present)} already installed`,
+      p.in_progress > 0 && `${games(p.in_progress)} already downloading`,
     ].filter(Boolean).join(", ");
   };
 
@@ -88,7 +90,7 @@ export function DownloadAllDialog(props: Props) {
       cover: i.torrent_source ? { source: i.torrent_source, key: i.thumbnail_key } : undefined,
     })));
     const n = p.items.length;
-    showToast(`Downloading ${n} ${n === 1 ? "game" : "games"} from "${playlist.name}"`, "success");
+    showToast(`Downloading ${games(n)} from "${playlist.name}"`, "success");
     close();
   };
 
@@ -127,10 +129,10 @@ export function DownloadAllDialog(props: Props) {
                       <div>
                         {p().items.length === 0
                           ? "Nothing left to download."
-                          : `${p().items.length} ${p().items.length === 1 ? "game" : "games"} to download · ${formatBytes(p().total_bytes)}`}
+                          : `${games(p().items.length)} to download · ${formatBytes(p().total_bytes)}`}
                       </div>
                       <Show when={skipped()}>
-                        <div class="playlist-io-muted">Skipped: {skipped()}</div>
+                        <div class="playlist-io-muted">{skipped()}</div>
                       </Show>
                       <Show when={p().free_bytes != null}>
                         <div class={tooLittleSpace() ? "playlist-io-warn" : "playlist-io-muted"}>
