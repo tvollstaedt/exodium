@@ -2097,6 +2097,33 @@ the queue first - each cancelled slot would otherwise start the next game.
 Torrent-level pause and a zero rate limit were rejected: both stop preview
 streams, the Reading Room and seeding with the downloads.
 
+### 25. Multi-select works on ONE list at a time
+
+`stores/selection.ts` holds the selected cards of exactly one list - scope
+`browse` (grid or list, the same rows) or `shelf:<key>` for a My Library
+shelf (`recent`, `favorites`, `installed`, `pl-<id>`). A game can sit in
+several shelves at once, and a selection spanning them would act on rows the
+user cannot see together, so picking in another list starts over; a tab or
+Browse-filter change clears it. Cmd/Ctrl-click toggles, Shift-click takes the
+range from the last single pick in on-screen order, and in Select mode every
+click does - otherwise a click still opens the panel (`onPick` returns true
+when it consumed the click). The selection keeps `GameRef`s, not ids, so the
+bar can tell what to download and whether "Favorite" or "Unfavorite" applies;
+a rendered card's group state comes from its language map, because the card's
+own row may be the one variant not installed.
+
+**"Select all" in Browse asks the backend** (`get_game_refs`): the same
+`build_where_clause` as `get_games`, without paging, so it selects exactly
+what the grid would page through - a filter that matched a German title still
+selects the merged card. A frame (`components/marquee.ts`) only ever sees
+rendered cards: it starts on free space inside a `[data-select-zone]`,
+measures every `[data-game-id]` of that zone once in content coordinates and
+scrolls at the edges without re-measuring. Bulk writes are one transaction
+each (`set_playlist_membership_many`, `set_favorites`); favorites are SET,
+never toggled - toggling a mixed selection flips it instead of unifying it.
+Cards track their favorite flag themselves, so a bulk change is announced
+(`favoriteChange`) rather than waiting for a refetch.
+
 ## Conventions
 
 - **Every Tauri command that touches the DB, filesystem, or network MUST be

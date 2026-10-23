@@ -6305,3 +6305,103 @@ body.has-player {
   color: var(--text-secondary);
   white-space: nowrap;
 }
+
+/* ── Multi-select (§25) ── */
+.game-card.is-selected,
+.game-card.is-selected:hover {
+  box-shadow: 0 0 0 2px var(--accent), 0 6px 24px rgba(124, 92, 252, 0.25);
+}
+
+.game-row.is-selected {
+  background: rgba(124, 92, 252, 0.12);
+}
+
+.game-row .row-cover {
+  position: relative;
+}
+
+.select-check {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 3;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid rgba(255, 255, 255, 0.7);
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.45);
+  color: transparent;
+  font-size: 12px;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+.select-check.is-checked {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.game-row .select-check {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 18px;
+  height: 18px;
+  font-size: 10px;
+}
+
+.selection-bar {
+  position: fixed;
+  left: 50%;
+  bottom: calc(16px + var(--player-h, 0px));
+  transform: translateX(-50%);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px 8px 16px;
+  background: var(--bg-card);
+  border: 1px solid rgba(124, 92, 252, 0.35);
+  border-radius: 999px;
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.5);
+  white-space: nowrap;
+}
+
+.selection-bar-count {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-right: 4px;
+}
+
+.selection-bar-close {
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.selection-bar-close:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.marquee-rect {
+  position: fixed;
+  z-index: 40;
+  border: 1px solid var(--accent);
+  background: rgba(124, 92, 252, 0.12);
+  pointer-events: none;
+}
+
+body.is-marquee {
+  user-select: none;
+  -webkit-user-select: none;
+}

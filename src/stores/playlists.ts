@@ -1,7 +1,7 @@
 import { createSignal } from "solid-js";
 import {
   getPlaylists, createPlaylist as apiCreate, createPlaylistFrom, renamePlaylist as apiRename,
-  deletePlaylist as apiDelete, setPlaylistMembership, type Playlist,
+  deletePlaylist as apiDelete, setPlaylistMembership, setPlaylistMembershipMany, type Playlist,
 } from "../api/tauri";
 
 const [playlists, setPlaylists] = createSignal<Playlist[]>([]);
@@ -11,9 +11,9 @@ export const userPlaylists = () => playlists().filter(p => p.kind === "user");
 export const curatedPlaylists = () => playlists().filter(p => p.kind === "curated");
 
 // Single app-wide name dialog (mounted once in Library): "create" optionally
-// carries a game to add to the fresh playlist; "rename" carries the playlist.
+// carries games to add to the fresh playlist; "rename" carries the playlist.
 export type PlaylistDialogRequest =
-  | { mode: "create"; gameId?: number }
+  | { mode: "create"; gameId?: number; gameIds?: number[] }
   | { mode: "rename"; playlist: Playlist };
 const [playlistDialog, setPlaylistDialog] = createSignal<PlaylistDialogRequest | null>(null);
 export { playlistDialog, setPlaylistDialog };
@@ -67,6 +67,12 @@ export async function renamePlaylist(id: number, name: string): Promise<void> {
 
 export async function deletePlaylist(id: number): Promise<void> {
   await apiDelete(id);
+  refreshInBackground();
+}
+
+/** A selection added to or removed from a playlist in one step (§25). */
+export async function setMembershipMany(playlistId: number, gameIds: number[], member: boolean): Promise<void> {
+  await setPlaylistMembershipMany(playlistId, gameIds, member);
   refreshInBackground();
 }
 

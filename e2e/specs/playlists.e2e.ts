@@ -49,7 +49,8 @@ describe("playlists", () => {
     await $('[data-testid="shelf-menu"]').click();
     await $('[data-testid="playlist-delete"]').click();
     await $('[data-testid="confirm-ok"]').click();
-    await $(".lib-empty").waitForDisplayed();
+    // Not ".lib-empty" - see the multi-select spec.
+    await $('[data-testid="shelf-menu"]').waitForExist({ reverse: true });
     await $('[data-testid="tab-browse"]').click();
     // The toasts this spec raised sit over the bottom-right corner, where the
     // next spec's dialog has its Close button.

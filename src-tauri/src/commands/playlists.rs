@@ -70,6 +70,22 @@ pub async fn set_playlist_membership(
     queries::set_playlist_membership(&conn, playlist_id, game_id, member).map_err(|e| e.to_string())
 }
 
+/// A selection's membership change in one transaction (§25).
+#[tauri::command]
+pub async fn set_playlist_membership_many(
+    state: State<'_, DbState>,
+    playlist_id: i64,
+    game_ids: Vec<i64>,
+    member: bool,
+) -> Result<(), String> {
+    let conn = state.lock()?;
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    for game_id in game_ids {
+        queries::set_playlist_membership(&tx, playlist_id, game_id, member).map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn get_game_playlists(
     state: State<'_, DbState>,

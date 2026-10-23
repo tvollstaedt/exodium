@@ -18,7 +18,7 @@ import {
   setPlaylistDialog, deletePlaylist,
 } from "../stores/playlists";
 import { PackHintBanner } from "../components/PackHintBanner";
-import { getGame, getGenres, getInstalledGames, getLibraryFingerprint, getRecentlyPlayed, getConfig, getAvailableCollections, getSectionKeys, getGames, importPlaylistPreview, exportPlaylist, playlistMissingCount, type CollectionInfo, type Game, type ImportPreview, type Playlist } from "../api/tauri";
+import { getGame, getGenres, getInstalledGames, getLibraryFingerprint, getRecentlyPlayed, getConfig, getAvailableCollections, getSectionKeys, getGames, importPlaylistPreview, exportPlaylist, playlistMissingCount, getGameRefs, type CollectionInfo, type Game, type ImportPreview, type Playlist } from "../api/tauri";
 import { open as openFileDialog, save as saveFileDialog } from "@tauri-apps/plugin-dialog";
 import { GameCard } from "../components/GameCard";
 import { IconEmptySearch, IconEmptyLibrary } from "../components/icons";
@@ -29,6 +29,12 @@ import { PlaylistNameDialog } from "../components/PlaylistNameDialog";
 import { PlaylistImportDialog } from "../components/PlaylistImportDialog";
 import { DownloadAllDialog } from "../components/DownloadAllDialog";
 import { cancelQueued, queuedCount } from "../stores/batchDownloads";
+import { SelectionBar } from "../components/SelectionBar";
+import { attachMarquee } from "../components/marquee";
+import {
+  clearSelection, exitSelection, refOf, selectedRefs, selectionCount, selectionScope, selectMode, selectRange,
+  selectRefs, setSelectMode, toggleSelected,
+} from "../stores/selection";
 import { CollectionShelf } from "../components/CollectionShelf";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Button } from "../components/Button";
@@ -679,22 +685,133 @@ export function Library() {
     return "";
   };
 
+  // ── Multi-select (§25) ────────────────────────────────────────────────
+  /** The rendered games of a selection list, in their on-screen order. */
+  const scopeGames = (scope: string): Game[] => {
+    if (scope === "browse") { return games(); }
+    const key = scope.slice("shelf:".length);
+    if (key === "recent") { return shownRecent(); }
+    if (key === "favorites") { return shownFavorites(); }
+    if (key === "installed") { return shownInstalled(); }
+    return key.startsWith("pl-") ? shownPlaylistGames(Number(key.slice(3))) : [];
+  };
+  /** Modifier clicks select; in Select mode every click does. */
+  const pick = (scope: string) => (game: Game, e: MouseEvent): boolean => {
+    if (e.shiftKey && selectionScope() === scope && selectionCount() > 0) {
+      selectRange(scope, scopeGames(scope), game);
+      return true;
+    }
+    if (e.metaKey || e.ctrlKey || e.shiftKey || selectMode()) {
+      toggleSelected(scope, game);
+      return true;
+    }
+    return false;
+  };
+  const refsOf = (scope: string, ids: number[]) => {
+    const wanted = new Set(ids);
+    return scopeGames(scope).filter((g) => g.id != null && wanted.has(g.id)).map(refOf).filter((r) => r != null);
+  };
+  /** The user playlist the selection's list shows - what "Remove" acts on. */
+  const selectionPlaylist = (): Playlist | null => {
+    const scope = selectionScope();
+    if (scope === "browse") {
+      const p = activePlaylist();
+      return p?.kind === "user" ? p : null;
+    }
+    const m = scope?.match(/^shelf:pl-(\d+)$/);
+    return m ? userPlaylists().find((p) => p.id === Number(m[1])) ?? null : null;
+  };
+  /** Browse selects every match of the filter, loaded or not; a shelf, its games. */
+  const selectAll = async () => {
+    const scope = activeTab() === "browse" ? "browse" : selectionScope();
+    if (!scope) {
+      showToast("Pick a game in a shelf first - Select all then takes the whole shelf", "info");
+      return;
+    }
+    if (scope !== "browse") {
+      selectRefs(scope, scopeGames(scope).map(refOf).filter((r) => r != null));
+      return;
+    }
+    try {
+      selectRefs("browse", await getGameRefs(
+        searchQuery(), genreFilter(), sortBy(), collectionFilter(), false, playlistFilter(), withMusic(),
+      ));
+    } catch (e) {
+      showToast("Couldn't select all games", "error", { detail: String(e) });
+    }
+  };
+  const afterSelectionChange = () => {
+    refreshFavorites();
+    if (selectionScope() === "browse" && playlistFilter() != null) { fetchGames(); }
+  };
+  const SelectToggle = () => (
+    <button
+      class={`filter-chip ${selectMode() ? "active" : ""}`}
+      data-testid="select-mode"
+      title="Select several games (or Cmd/Ctrl-click, Shift-click, drag a frame)"
+      onClick={() => (selectMode() ? exitSelection() : setSelectMode(true))}
+    >Select</button>
+  );
+  // A selection belongs to the list it was made in.
+  createEffect(on(activeTab, exitSelection, { defer: true }));
+  createEffect(on(
+    [searchQuery, genreFilter, collectionFilter, playlistFilter, withMusic],
+    () => { if (selectionScope() === "browse") { clearSelection(); } },
+    { defer: true },
+  ));
+  onMount(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && (selectMode() || selectionCount() > 0)) { exitSelection(); }
+    };
+    window.addEventListener("keydown", onKey);
+    let marqueeBase: ReturnType<typeof selectedRefs> = [];
+    const detach = libraryRef
+      ? attachMarquee(libraryRef, {
+        onStart: (zone, additive) => {
+          marqueeBase = additive && selectionScope() === zone ? selectedRefs() : [];
+        },
+        onSelect: (zone, ids) => selectRefs(zone, [...marqueeBase, ...refsOf(zone, ids)]),
+        onEmptyClick: (zone) => { if (selectionScope() === zone) { clearSelection(); } },
+      })
+      : () => {};
+    onCleanup(() => {
+      window.removeEventListener("keydown", onKey);
+      detach();
+    });
+  });
+
   // Shelf body in the current view mode. No sortable header here: a shelf's
   // order is its own semantic (recency, install state, playlist order).
-  const ShelfGames = (p: { games: Game[] }) => (
+  const ShelfGames = (p: { games: Game[]; shelf: string }) => (
     <Show
       when={viewMode() === "list"}
       fallback={
         <div class="game-grid" data-testid="shelf-grid">
           <For each={p.games}>
-            {(game) => <GameCard game={game} onFavoriteChanged={handleFavoriteChanged} onDetail={setDetailGame} />}
+            {(game) => (
+              <GameCard
+                game={game}
+                onFavoriteChanged={handleFavoriteChanged}
+                onDetail={setDetailGame}
+                selectScope={`shelf:${p.shelf}`}
+                onPick={pick(`shelf:${p.shelf}`)}
+              />
+            )}
           </For>
         </div>
       }
     >
       <div class="game-list">
         <For each={p.games}>
-          {(game) => <GameRow game={game} onFavoriteChanged={handleFavoriteChanged} onDetail={setDetailGame} />}
+          {(game) => (
+            <GameRow
+              game={game}
+              onFavoriteChanged={handleFavoriteChanged}
+              onDetail={setDetailGame}
+              selectScope={`shelf:${p.shelf}`}
+              onPick={pick(`shelf:${p.shelf}`)}
+            />
+          )}
         </For>
       </div>
     </Show>
@@ -791,6 +908,7 @@ export function Library() {
           <Show when={totalGames() > 0}>
             <span class="results-count">{totalGames().toLocaleString()} games</span>
           </Show>
+          <SelectToggle />
           <ViewToggle mode={viewMode()} onChange={switchView} />
         </div>
 
@@ -856,7 +974,7 @@ export function Library() {
         </Show>
 
         <Show when={viewMode() === "grid"}>
-          <div class="sections-list" data-testid="browse-grid">
+          <div class="sections-list" data-testid="browse-grid" data-select-zone="browse">
             <For each={sections()}>
               {(section) => (
                 <>
@@ -877,6 +995,8 @@ export function Library() {
                           game={game}
                           onFavoriteChanged={handleFavoriteChanged}
                           onDetail={setDetailGame}
+                          selectScope="browse"
+                          onPick={pick("browse")}
                         />
                       )}
                     </For>
@@ -887,7 +1007,7 @@ export function Library() {
           </div>
         </Show>
         <Show when={viewMode() === "list"}>
-          <div class="game-list">
+          <div class="game-list" data-select-zone="browse">
             <div class="game-list-header" style={{ top: separatorTop() }}>
               <span class="row-fav" />
               <span class="row-play" />
@@ -910,6 +1030,8 @@ export function Library() {
                   game={game}
                   onFavoriteChanged={handleFavoriteChanged}
                   onDetail={setDetailGame}
+                  selectScope="browse"
+                  onPick={pick("browse")}
                 />
               )}
             </For>
@@ -924,6 +1046,7 @@ export function Library() {
         {/* Not sticky: the shelf titles stick at the tab bar's edge (top:
             40px) and a sticky toolbar would sit on top of them. */}
         <div class="library-toolbar library-toolbar-plain">
+          <SelectToggle />
           <ViewToggle mode={viewMode()} onChange={switchView} />
         </div>
         <Show
@@ -958,29 +1081,29 @@ export function Library() {
           }
         >
           <Show when={shownRecent().length > 0}>
-            <div class="library-section" data-shelf-key="recent">
+            <div class="library-section" data-shelf-key="recent" data-select-zone="shelf:recent">
               <h2 class="section-title">Recently Played <span class="section-count">{shownRecent().length}</span></h2>
-              <ShelfGames games={shownRecent()} />
+              <ShelfGames games={shownRecent()} shelf="recent" />
             </div>
           </Show>
 
           <Show when={shownFavorites().length > 0}>
-            <div class="library-section" data-shelf-key="favorites">
+            <div class="library-section" data-shelf-key="favorites" data-select-zone="shelf:favorites">
               <h2 class="section-title">Favorites <span class="section-count">{shownFavorites().length}</span></h2>
-              <ShelfGames games={shownFavorites()} />
+              <ShelfGames games={shownFavorites()} shelf="favorites" />
             </div>
           </Show>
 
           <Show when={shownInstalled().length > 0}>
-            <div class="library-section" data-shelf-key="installed">
+            <div class="library-section" data-shelf-key="installed" data-select-zone="shelf:installed">
               <h2 class="section-title">Installed <span class="section-count">{shownInstalled().length}</span></h2>
-              <ShelfGames games={shownInstalled()} />
+              <ShelfGames games={shownInstalled()} shelf="installed" />
             </div>
           </Show>
 
           <For each={shownPlaylists()}>
             {(playlist) => (
-              <div class="library-section" data-shelf-key={`pl-${playlist.id}`}>
+              <div class="library-section" data-shelf-key={`pl-${playlist.id}`} data-select-zone={`shelf:pl-${playlist.id}`}>
                 <h2 class="section-title">
                   {playlist.name}
                   <span class="section-count">
@@ -1005,7 +1128,7 @@ export function Library() {
                     </div>
                   }
                 >
-                  <ShelfGames games={shownPlaylistGames(playlist.id)} />
+                  <ShelfGames games={shownPlaylistGames(playlist.id)} shelf={`pl-${playlist.id}`} />
                 </Show>
               </div>
             )}
@@ -1096,6 +1219,9 @@ export function Library() {
       />
 
       <PlaylistNameDialog />
+      <Show when={activeTab() !== "reading"}>
+        <SelectionBar playlist={selectionPlaylist()} onSelectAll={() => void selectAll()} onChanged={afterSelectionChange} />
+      </Show>
       <PlaylistImportDialog preview={importPreview()} onClose={() => setImportPreview(null)} />
       <DownloadAllDialog playlist={downloadAll()} onClose={() => setDownloadAll(null)} />
 
