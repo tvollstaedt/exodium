@@ -4,7 +4,11 @@ import { Tooltip } from "@ark-ui/solid/tooltip";
 import { AutoProgress } from "./ProgressBar";
 import { isOffline } from "../stores/network";
 import { transferStats, isTransferring, formatRate } from "../stores/transfer";
-import { downloads, cancelGameDownload, type DownloadCover } from "../stores/downloads";
+import { downloads, cancelGameDownload, isPausable, pauseGameDownload, type DownloadCover } from "../stores/downloads";
+import {
+  cancelAllDownloads, pauseAllDownloads, queueHalted, resumeAllDownloads, resumeGameDownload, waitingCount,
+} from "../stores/batchDownloads";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { thumbnailCandidates } from "../stores/thumbnails";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { activeJobs, cancelContentPackJob } from "../stores/contentPacks";
@@ -27,12 +31,22 @@ interface ActiveDownload {
   status: string;
   speed: string;
   type: "game" | "content-pack";
+  paused?: boolean;
+  pausable?: boolean;
 }
 
 const IconDown = () => (
   <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
     <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v15m0 0l-6-6m6 6l6-6" />
   </svg>
+);
+
+const IconPause = () => (
+  <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="4" width="5" height="16" rx="1" /><rect x="14" y="4" width="5" height="16" rx="1" /></svg>
+);
+
+const IconPlay = () => (
+  <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l12.5-7.5z" /></svg>
 );
 
 const IconUp = () => (
@@ -129,6 +143,8 @@ export function ActivityBadge(props: Props) {
           status: state.status,
           speed: "",
           type: "game",
+          paused: state.paused,
+          pausable: isPausable(state),
         });
       }
     }
@@ -156,6 +172,11 @@ export function ActivityBadge(props: Props) {
       }
     }
   };
+
+  const [confirmCancelAll, setConfirmCancelAll] = createSignal(false);
+  const gameRows = () => activeDownloads().filter((d) => d.type === "game");
+  const canPauseAll = () => gameRows().some((d) => d.pausable) || (waitingCount() > 0 && !queueHalted());
+  const canResumeAll = () => gameRows().some((d) => d.paused) || (queueHalted() && waitingCount() > 0);
 
   const s = () => transferStats();
   /** Anchored to jobs, not rates: rates dip to zero between piece bursts. */
@@ -232,6 +253,29 @@ export function ActivityBadge(props: Props) {
           <div class="download-sheet" style={{ top: `${sheetTop()}px` }}>
             <div class="download-sheet-header">
               <span>Downloads</span>
+              <Show when={!isOffline() && gameRows().length > 0}>
+                <div class="download-sheet-actions">
+                  <Show
+                    when={canPauseAll()}
+                    fallback={
+                      <Show when={canResumeAll()}>
+                        <button class="download-sheet-icon" title="Resume all" data-testid="downloads-resume-all" onClick={resumeAllDownloads}>
+                          <IconPlay />
+                        </button>
+                      </Show>
+                    }
+                  >
+                    <button class="download-sheet-icon" title="Pause all" data-testid="downloads-pause-all" onClick={() => void pauseAllDownloads()}>
+                      <IconPause />
+                    </button>
+                  </Show>
+                  <button
+                    class="link-btn"
+                    data-testid="downloads-cancel-all"
+                    onClick={() => { setShowSheet(false); setConfirmCancelAll(true); }}
+                  >Cancel all</button>
+                </div>
+              </Show>
             </div>
             <Show when={totalCount() > 0} fallback={
               <div class="download-sheet-empty">No active downloads.</div>
@@ -266,6 +310,15 @@ export function ActivityBadge(props: Props) {
                         </Show>
                       </div>
                     </div>
+                    <Show when={!isOffline() && dl().gameId != null && (dl().pausable || dl().paused)}>
+                      <button
+                        class="download-sheet-icon"
+                        title={dl().paused ? "Resume" : "Pause"}
+                        onClick={() => dl().paused ? resumeGameDownload(dl().gameId!) : void pauseGameDownload(dl().gameId!)}
+                      >
+                        <Show when={dl().paused} fallback={<IconPause />}><IconPlay /></Show>
+                      </button>
+                    </Show>
                     <button
                       class="download-sheet-cancel"
                       onClick={() => handleCancel(dl())}
@@ -285,6 +338,18 @@ export function ActivityBadge(props: Props) {
           </div>
         </Portal>
       </Show>
+
+      {/* Opened with the sheet closed: the sheet sits above every dialog. */}
+      <ConfirmDialog
+        open={confirmCancelAll()}
+        title="Cancel all downloads"
+        message="Stop every game download - running, paused and queued? Content packs keep going."
+        confirmLabel="Cancel all"
+        cancelLabel="Keep downloading"
+        danger
+        onConfirm={() => void cancelAllDownloads()}
+        onClose={() => setConfirmCancelAll(false)}
+      />
     </>
   );
 }

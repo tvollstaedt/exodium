@@ -514,3 +514,9 @@
 - Rejected: fuzzy matching (a near miss would silently add a different game); a fixed collection priority without a preview (about 700 titles exist in several collections); starting every download at once (a 1 Hz poll and a torrent re-selection per game); a persistent queue table (migration for a rare restart case).
 - Why: #43 asks to automate downloading a hand-written list; the list must land on the games the user meant.
 - Gotcha: `EN` in "Download playlist" means "any version" - a German install counts as present - while DE/ES/... count only that version. Queued games are downloads-store entries with `queued: true`; cancelling one never reaches the backend.
+
+## 2026-10-24 - Pausing a download deselects its files and keeps it in the library
+- Decision: `pause_download` takes the archive (and the shared GameData unless an active sibling needs it) out of the torrent's selection, keeps `in_library`, and stores the intent as `game_config.download_paused`; `download_game` is resume. The download sheet gets per-row Pause/Play, a global Pause/Play and "Cancel all" (game downloads only, with a confirm).
+- Rejected: librqbit's torrent pause and a zero download rate (both stop preview streams, the Reading Room and seeding along with the downloads); a `paused` column on `games` (a migration for one flag, on a table `refresh_catalog` rewrites).
+- Why: The user wants to stop downloads without losing them. librqbit persists only the selection, so without the key a paused game would return from a restart as a broken half-download.
+- Gotcha: Only a transferring game can pause - once the archive is complete the poll extracts it. Resumes re-enter the queue's front; a queued entry the backend holds (`held`) must be cancelled in the backend, a plain queued one only locally.

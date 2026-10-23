@@ -26,7 +26,7 @@ use tauri::Manager;
 use tokio::sync::RwLock;
 
 use commands::{
-    cancel_content_pack_install, cancel_download,
+    cancel_content_pack_install, cancel_download, pause_download,
     download_game, factory_reset, get_available_collections, get_config,
     get_content_pack_progress, get_default_data_dir, get_download_progress, get_game,
     data_dir_is_empty, get_game_metadata, get_game_settings, get_log_dir, get_poster_dir,
@@ -806,6 +806,7 @@ pub fn run() {
             factory_reset,
             download_game,
             cancel_download,
+            pause_download,
             uninstall_game,
             reset_game_data,
             commands::archives::archive_usage,

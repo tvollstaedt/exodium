@@ -82,6 +82,11 @@ export async function cancelDownload(id: number): Promise<CancelledDependent[]> 
   return invoke("cancel_download", { id });
 }
 
+/** Takes the game's files out of the selection; `downloadGame` resumes it. */
+export async function pauseDownload(id: number): Promise<void> {
+  return invoke("pause_download", { id });
+}
+
 export async function getGenres(collection?: string): Promise<string[]> {
   return invoke("get_genres", { collection });
 }
@@ -713,6 +718,8 @@ export async function getDownloadProgress(id: number): Promise<DownloadProgress 
 /** Downloads the torrent session still owns after a restart. */
 export async function listActiveDownloads(): Promise<{
   id: number; title: string; torrent_source: string; thumbnail_key: string | null; installed: boolean; complete: boolean;
+  /** Paused by the user: no poll until it is resumed. */
+  paused: boolean;
 }[]> {
   return invoke("list_active_downloads");
 }
