@@ -8,11 +8,16 @@ import { downloads, cancelGameDownload } from "../stores/downloads";
 import { isOffline } from "../stores/network";
 import { toggleFavorite, collectionFilter } from "../stores/games";
 import { GameActionsMenu } from "./GameActionsMenu";
+import { favoriteChange, isSelected, selectMode } from "../stores/selection";
 
 interface GameCardProps {
   game: Game;
   onFavoriteChanged?: (id: number, favorited: boolean) => void;
   onDetail: (game: Game) => void;
+  /** The selection list this card belongs to (§25); none = not selectable. */
+  selectScope?: string;
+  /** A click the selection consumes (modifier, Select mode) returns true. */
+  onPick?: (game: Game, e: MouseEvent) => boolean;
 }
 
 export function GameCard(props: GameCardProps) {
@@ -28,6 +33,11 @@ export function GameCard(props: GameCardProps) {
   // key change). Do NOT run on favorited-flag-only changes - that would race with the
   // optimistic update in handleToggleFavorite and cause a visible flicker.
   createEffect(on(() => props.game.id, () => { setFavorited(props.game.favorited); }, { defer: true }));
+  createEffect(on(favoriteChange, (c) => {
+    if (c && props.game.id != null && c.ids.has(props.game.id)) { setFavorited(c.value); }
+  }, { defer: true }));
+  const selected = () => isSelected(props.selectScope, props.game.id);
+  const showCheck = () => props.selectScope != null && (selectMode() || selected());
 
   // Pre-load variant IDs for multi-lang games so download state is visible on main card.
   // createEffect re-runs when props.game.shortcode changes, handling component reuse in For loops.
@@ -109,6 +119,7 @@ export function GameCard(props: GameCardProps) {
 
   const handleClick = (e: MouseEvent) => {
     e.stopPropagation();
+    if (props.onPick?.(props.game, e)) { return; }
     props.onDetail(props.game);
   };
 
@@ -135,8 +146,11 @@ export function GameCard(props: GameCardProps) {
   const isDownloading = () => dlState()?.downloading ?? false;
 
   return (
-    <div ref={cardRef} class={`game-card ${props.game.installed || props.game.in_library ? "installed" : ""}`} data-testid="game-card" onContextMenu={handleContextMenu} data-game-id={props.game.id != null ? String(props.game.id) : undefined}>
+    <div ref={cardRef} class={`game-card ${props.game.installed || props.game.in_library ? "installed" : ""}${selected() ? " is-selected" : ""}`} data-testid="game-card" onContextMenu={handleContextMenu} data-game-id={props.game.id != null ? String(props.game.id) : undefined}>
       <div class="game-card-art" onClick={handleClick}>
+        <Show when={showCheck()}>
+          <span class={`select-check${selected() ? " is-checked" : ""}`} aria-hidden="true">✓</span>
+        </Show>
         <Show when={thumbSrc()}>
           <Show when={underSrc()}>
             <img class="game-card-thumb-base" src={underSrc()!} alt="" aria-hidden="true" />

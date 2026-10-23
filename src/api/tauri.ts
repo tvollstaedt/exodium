@@ -75,6 +75,34 @@ export async function toggleFavorite(id: number): Promise<boolean> {
   return invoke("toggle_favorite", { id });
 }
 
+/** A card as a selection keeps it; `installed`/`in_library` cover the group. */
+export interface GameRef {
+  id: number;
+  title: string;
+  torrent_source: string | null;
+  thumbnail_key: string | null;
+  installed: boolean;
+  in_library: boolean;
+  favorited: boolean;
+}
+
+/** Every card the Browse filter matches, in the grid's order. */
+export async function getGameRefs(
+  query?: string,
+  genre?: string,
+  sortBy?: string,
+  collection?: string,
+  favoritesOnly?: boolean,
+  playlistId?: number | null,
+  withMusic?: boolean,
+): Promise<GameRef[]> {
+  return invoke("get_game_refs", { query, genre, sortBy, collection, favoritesOnly, playlistId, withMusic });
+}
+
+export async function setFavorites(ids: number[], favorited: boolean): Promise<void> {
+  return invoke("set_favorites", { ids, favorited });
+}
+
 /** Localized variants cancelled along with the English game they needed. */
 export interface CancelledDependent { id: number; title: string }
 
@@ -136,6 +164,10 @@ export async function setPlaylistMembership(
   member: boolean,
 ): Promise<void> {
   return invoke("set_playlist_membership", { playlistId, gameId, member });
+}
+
+export async function setPlaylistMembershipMany(playlistId: number, gameIds: number[], member: boolean): Promise<void> {
+  return invoke("set_playlist_membership_many", { playlistId, gameIds, member });
 }
 
 export async function getGamePlaylists(gameId: number): Promise<number[]> {

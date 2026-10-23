@@ -155,6 +155,67 @@ pub fn toggle_favorite(conn: &Connection, id: i64) -> DbResult<bool> {
     Ok(new_val != 0)
 }
 
+/// Set the favorited flag on many rows at once. Explicit, not a toggle: a
+/// mixed selection must end up all favorites, not with its flags flipped.
+pub fn set_favorites(conn: &Connection, ids: &[i64], favorited: bool) -> DbResult<()> {
+    let tx = conn.unchecked_transaction()?;
+    {
+        let mut stmt = tx.prepare_cached("UPDATE games SET favorited = ?1 WHERE id = ?2")?;
+        for id in ids {
+            stmt.execute(params![favorited as i32, id])?;
+        }
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// A card as a selection holds it: enough to download it and to show its
+/// state, for every row a filter matches - loaded or not.
+#[derive(Debug, Clone, serde::Serialize, PartialEq)]
+pub struct GameRef {
+    pub id: i64,
+    pub title: String,
+    pub torrent_source: Option<String>,
+    pub thumbnail_key: Option<String>,
+    /// Any variant of the group installed / in the library.
+    pub installed: bool,
+    pub in_library: bool,
+    pub favorited: bool,
+}
+
+/// Every card `f` matches, in the grid's order - what "Select all" selects.
+pub fn fetch_game_refs(conn: &Connection, f: &GameFilter) -> DbResult<Vec<GameRef>> {
+    let (where_clause, params) = build_where_clause(f);
+    let any = |flag: &str| {
+        format!(
+            "EXISTS (SELECT 1 FROM games v WHERE (v.id = g.id OR (g.shortcode IS NOT NULL AND {})) AND v.{flag} = 1)",
+            same_group("v", "g")
+        )
+    };
+    let sql = format!(
+        "SELECT g.id, g.title, g.torrent_source, g.thumbnail_key, {}, {}, g.favorited FROM games g{} {}",
+        any("installed"),
+        any("in_library"),
+        where_clause,
+        order_clause(f.sort_by)
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let refs = stmt
+        .query_map(rusqlite::params_from_iter(&params), |r| {
+            Ok(GameRef {
+                id: r.get(0)?,
+                title: r.get(1)?,
+                torrent_source: r.get(2)?,
+                thumbnail_key: r.get(3)?,
+                installed: r.get(4)?,
+                in_library: r.get(5)?,
+                favorited: r.get::<_, i32>(6)? != 0,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(refs)
+}
+
 /// Filter parameters for game queries.
 pub struct GameFilter<'a> {
     pub query: &'a str,
@@ -929,6 +990,38 @@ mod tests {
             "group lookup must not walk the installed rows: {plan:?}"
         );
         assert_eq!(fetch_installed_games(&conn).unwrap().len(), 3);
+    }
+
+    /// "Select all" must select exactly what the grid pages through, and see
+    /// a group as installed when only its German variant is.
+    #[test]
+    fn game_refs_match_the_paged_grid_and_carry_the_groups_state() {
+        let conn = open_test_db();
+        let mut games: Vec<Game> = (0..7).map(|i| make_game(&format!("Keen {i}"))).collect();
+        games.push(make_game("Other"));
+        let mut de = make_game("Kommandant Keen 0");
+        de.language = "DE".to_string();
+        de.shortcode = Some("K0".to_string());
+        games[0].shortcode = Some("K0".to_string());
+        games.push(de);
+        insert_games(&conn, &games).unwrap();
+        conn.execute("UPDATE games SET installed = 1 WHERE language = 'DE'", []).unwrap();
+
+        let f = GameFilter { query: "Keen", genre: "", sort_by: "title", collection: "", favorites_only: false, playlist_id: None, with_music: false };
+        let paged: Vec<i64> = (1..=3)
+            .flat_map(|page| fetch_games_filtered(&conn, page, 3, &f).unwrap())
+            .filter_map(|g| g.id)
+            .collect();
+        let refs = fetch_game_refs(&conn, &f).unwrap();
+        assert_eq!(refs.iter().map(|r| r.id).collect::<Vec<_>>(), paged);
+        assert_eq!(refs.len(), 7, "the German row merges into its card");
+        assert!(refs[0].installed, "installed through its German variant");
+        assert!(!refs[1].installed);
+
+        set_favorites(&conn, &[refs[0].id, refs[1].id], true).unwrap();
+        set_favorites(&conn, &[refs[1].id], true).unwrap();
+        let favs: Vec<bool> = fetch_game_refs(&conn, &f).unwrap().iter().map(|r| r.favorited).collect();
+        assert_eq!(&favs[..3], [true, true, false], "explicit, never toggled");
     }
 
     fn open_test_db() -> Connection {

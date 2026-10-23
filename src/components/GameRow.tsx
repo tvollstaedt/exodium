@@ -9,6 +9,7 @@ import {
   playableHint, playFromList, togglePlay, currentTrack, musicPlaying, musicCached, getMusicState,
 } from "../stores/music";
 import { GameActionsMenu } from "./GameActionsMenu";
+import { favoriteChange, isSelected, selectMode } from "../stores/selection";
 import { createCover } from "./cover";
 import { IconPause, IconPlay } from "./icons";
 
@@ -16,6 +17,10 @@ interface GameRowProps {
   game: Game;
   onFavoriteChanged?: (id: number, favorited: boolean) => void;
   onDetail: (game: Game) => void;
+  /** The selection list this card belongs to (§25); none = not selectable. */
+  selectScope?: string;
+  /** A click the selection consumes (modifier, Select mode) returns true. */
+  onPick?: (game: Game, e: MouseEvent) => boolean;
 }
 
 /** One line of the Browse list view (#21) - GameCard's exact props, so both
@@ -28,6 +33,11 @@ export function GameRow(props: GameRowProps) {
   const [contextMenu, setContextMenu] = createSignal<{x: number, y: number} | null>(null);
 
   createEffect(on(() => props.game.id, () => { setFavorited(props.game.favorited); }, { defer: true }));
+  createEffect(on(favoriteChange, (c) => {
+    if (c && props.game.id != null && c.ids.has(props.game.id)) { setFavorited(c.value); }
+  }, { defer: true }));
+  const selected = () => isSelected(props.selectScope, props.game.id);
+  const showCheck = () => props.selectScope != null && (selectMode() || selected());
 
   const langEntries = () => parseLangEntries(props.game);
   // Shown only where the collection is not implied by a filter.
@@ -105,12 +115,13 @@ export function GameRow(props: GameRowProps) {
   return (
     <div
       ref={rowRef}
-      class={`game-row ${props.game.installed || props.game.in_library ? "installed" : ""}${isCurrentTrack() ? " is-playing" : ""}`}
+      class={`game-row ${props.game.installed || props.game.in_library ? "installed" : ""}${isCurrentTrack() ? " is-playing" : ""}${selected() ? " is-selected" : ""}`}
       data-game-id={props.game.id != null ? String(props.game.id) : undefined}
       onClick={(e) => {
         // Delegated clicks walk back through the Portal; only real DOM
         // descendants count as row clicks.
         if (!e.currentTarget.contains(e.target as Node)) { return; }
+        if (props.onPick?.(props.game, e)) { return; }
         props.onDetail(props.game);
       }}
       onContextMenu={handleContextMenu}
@@ -138,6 +149,9 @@ export function GameRow(props: GameRowProps) {
       <span class="row-cover">
         <Show when={cover.src()}>
           <img src={cover.src()!} alt="" onError={cover.onError} />
+        </Show>
+        <Show when={showCheck()}>
+          <span class={`select-check${selected() ? " is-checked" : ""}`} aria-hidden="true">✓</span>
         </Show>
       </span>
       <span class="row-title" title={props.game.title}>

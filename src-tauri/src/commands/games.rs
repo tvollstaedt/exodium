@@ -79,6 +79,41 @@ pub async fn get_games(
     Ok(GameList { games, total })
 }
 
+/// Every card the Browse filter matches, for "Select all" - the same filter
+/// `get_games` pages through.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn get_game_refs(
+    state: State<'_, DbState>,
+    query: Option<String>,
+    genre: Option<String>,
+    sort_by: Option<String>,
+    collection: Option<String>,
+    favorites_only: Option<bool>,
+    playlist_id: Option<i64>,
+    with_music: Option<bool>,
+) -> Result<Vec<queries::GameRef>, String> {
+    let conn = state.lock()?;
+    let (query, genre, sort_by, collection) =
+        (query.unwrap_or_default(), genre.unwrap_or_default(), sort_by.unwrap_or_default(), collection.unwrap_or_default());
+    let f = queries::GameFilter {
+        query: &query,
+        genre: &genre,
+        sort_by: &sort_by,
+        collection: &collection,
+        favorites_only: favorites_only.unwrap_or(false),
+        playlist_id,
+        with_music: with_music.unwrap_or(false),
+    };
+    queries::fetch_game_refs(&conn, &f).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn set_favorites(state: State<'_, DbState>, ids: Vec<i64>, favorited: bool) -> Result<(), String> {
+    let conn = state.lock()?;
+    queries::set_favorites(&conn, &ids, favorited).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn get_genres(state: State<'_, DbState>, collection: Option<String>) -> Result<Vec<String>, String> {
     let conn = state.lock()?;

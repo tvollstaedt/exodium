@@ -520,3 +520,9 @@
 - Rejected: librqbit's torrent pause and a zero download rate (both stop preview streams, the Reading Room and seeding along with the downloads); a `paused` column on `games` (a migration for one flag, on a table `refresh_catalog` rewrites).
 - Why: The user wants to stop downloads without losing them. librqbit persists only the selection, so without the key a paused game would return from a restart as a broken half-download.
 - Gotcha: Only a transferring game can pause - once the archive is complete the poll extracts it. Resumes re-enter the queue's front; a queued entry the backend holds (`held`) must be cancelled in the backend, a plain queued one only locally.
+
+## 2026-10-24 - Multi-select over one list, with Select all from the backend
+- Decision: Cmd/Ctrl-click, Shift-click, a drag frame and a Select mode pick cards of ONE list (the Browse grid/list or one My Library shelf); a bar adds them to a playlist, removes them from the one shown, downloads or (un)favorites them. "Select all" in Browse fetches every match with `get_game_refs`.
+- Rejected: a "manage playlist" dialog with a checklist (rebuilds Browse's filters, does not scale to the catalogue); drag & drop onto shelves (shelves sit in another tab, and alone it is still one game at a time); Select all over the loaded cards only (smaller than the count in the header, silently).
+- Why: Thomas found picking games one by one tedious when curating playlists.
+- Gotcha: `get_game_refs` must reuse `build_where_clause` - a filter rebuilt elsewhere drifts from what the grid shows. Favorites are set, never toggled. A frame sees only rendered cards; Select all is the way past that.

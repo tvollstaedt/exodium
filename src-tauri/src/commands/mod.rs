@@ -28,7 +28,7 @@ pub use content_packs::{
 pub use games::{
     game_printing_unavailable, game_engine_info, get_config, get_game,
     get_game_settings, get_game_variants, get_games, get_genres, get_recently_played,
-    get_section_keys, get_installed_games, get_library_fingerprint, launch_game, stop_game, open_document, set_config,
+    get_section_keys, get_installed_games, get_library_fingerprint, get_game_refs, set_favorites, launch_game, stop_game, open_document, set_config,
     set_game_settings,
     get_transfer_stats, set_rate_limits, set_seeding_enabled, toggle_favorite,
     update_check_supported, DbState,
@@ -36,7 +36,7 @@ pub use games::{
 pub use playlists::{
     create_playlist, create_playlist_from, delete_playlist, export_playlist, get_game_playlists,
     get_playlists, import_playlist_preview, playlist_download_plan, playlist_missing_count, rename_playlist,
-    set_playlist_membership,
+    set_playlist_membership, set_playlist_membership_many,
 };
 pub use setup::{
     factory_reset,

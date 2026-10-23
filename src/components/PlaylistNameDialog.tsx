@@ -3,7 +3,7 @@ import { Portal } from "solid-js/web";
 import { Dialog } from "@ark-ui/solid/dialog";
 import {
   playlistDialog, setPlaylistDialog, createPlaylist, renamePlaylist,
-  togglePlaylistMembership,
+  togglePlaylistMembership, setMembershipMany,
 } from "../stores/playlists";
 import { showToast } from "../stores/toasts";
 import { Button } from "./Button";
@@ -59,7 +59,11 @@ export function PlaylistNameDialog() {
     try {
       if (req.mode === "create") {
         const id = await createPlaylist(trimmed);
-        if (req.gameId != null) {
+        if (req.gameIds?.length) {
+          await setMembershipMany(id, req.gameIds, true);
+          const n = req.gameIds.length;
+          showToast(`Created "${trimmed}" with ${n} ${n === 1 ? "game" : "games"}`, "success");
+        } else if (req.gameId != null) {
           await togglePlaylistMembership(id, req.gameId, true);
           showToast(`Created "${trimmed}" and added the game`, "success");
         } else {
