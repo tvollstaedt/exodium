@@ -113,6 +113,7 @@ export function GameActionsMenu(props: GameActionsMenuProps) {
               <button
                 class="context-menu-item"
                 onMouseDown={(e) => e.stopPropagation()}
+                data-testid="menu-add-to-playlist"
                 onClick={() => setPhase("playlist")}
               >Add to playlist…</button>
             </Show>

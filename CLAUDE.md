@@ -2042,6 +2042,39 @@ eXo's GSplus 0.14 runs the derived config under SDL's dummy video driver but
 crashes in SDL's video init in a session without a desktop, so its window on
 a real desktop is still unverified.
 
+### 24. Playlists as files, and "Download all" (#43)
+
+`commands/playlist_io.rs` reads a `.txt` (one title per line, `#` comments)
+or `.csv` (`title`, optional `collection` and `year`; header optional, `;`
+accepted as Excel writes it in many locales; UTF-8 or Windows-1252) and
+matches every line per GROUP, over every variant's title - a German title
+finds the merged card. Case, typographic quotes, whitespace and a leading or
+trailing "The" do not count; when nothing has the title, the part before a
+subtitle is tried ("Commander Keen 4"), then a trailing "(1994)" as a year.
+**Matching is exact after that, never fuzzy**: a near miss lists as "not
+found" with its line number instead of quietly adding a different game.
+
+**About 700 English titles exist in more than one collection** (Phantasmagoria
+in four), so a title alone is often ambiguous. The preview dialog shows those
+rows with one chip per collection, eXoDOS preselected, plus Skip. A named
+collection (id, display name, platform, or the grid's badge label `DOS`/
+`Win3x`/...) that has none of the candidates leaves the row unmatched; a year
+narrows only when it leaves something. Export writes the same CSV with the
+FAMILY id (a GLP row exports as `eXoDOS`) and reads back to the same groups -
+a test holds that round trip.
+
+**"Download all" picks one variant per group** (`pick_variant`): `EN` means
+"whatever the user has", so a game installed in any language is skipped;
+any other language counts only its own variant and falls back to EN where the
+game has none. Prices are `get_game_variants`' own - overlay base included,
+bytes the session holds deducted (`deduct_held_bytes`, shared). The queue is
+frontend-only (`stores/batchDownloads.ts`, at most four running): every
+download polls once a second and every start re-selects the torrent's files.
+Waiting games are downloads-store entries with `queued: true`, so the card
+says "Queued" and Cancel drops them without asking the backend; the store's
+transitions are the queue's clock. A restart drops what has not started -
+started downloads resume as always.
+
 ## Conventions
 
 - **Every Tauri command that touches the DB, filesystem, or network MUST be

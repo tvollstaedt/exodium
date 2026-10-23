@@ -18,13 +18,17 @@ import {
   setPlaylistDialog, deletePlaylist,
 } from "../stores/playlists";
 import { PackHintBanner } from "../components/PackHintBanner";
-import { getGame, getGenres, getInstalledGames, getLibraryFingerprint, getRecentlyPlayed, getConfig, getAvailableCollections, getSectionKeys, getGames, type CollectionInfo, type Game, type Playlist } from "../api/tauri";
+import { getGame, getGenres, getInstalledGames, getLibraryFingerprint, getRecentlyPlayed, getConfig, getAvailableCollections, getSectionKeys, getGames, importPlaylistPreview, exportPlaylist, type CollectionInfo, type Game, type ImportPreview, type Playlist } from "../api/tauri";
+import { open as openFileDialog, save as saveFileDialog } from "@tauri-apps/plugin-dialog";
 import { GameCard } from "../components/GameCard";
 import { IconEmptySearch, IconEmptyLibrary } from "../components/icons";
 import { GameRow } from "../components/GameRow";
 import { viewMode, applyViewMode, loadViewMode, setViewModeTransient, type ViewMode } from "../stores/view";
 import { GameDetailPanel } from "../components/GameDetailPanel";
 import { PlaylistNameDialog } from "../components/PlaylistNameDialog";
+import { PlaylistImportDialog } from "../components/PlaylistImportDialog";
+import { DownloadAllDialog } from "../components/DownloadAllDialog";
+import { cancelQueued, queuedCount } from "../stores/batchDownloads";
 import { CollectionShelf } from "../components/CollectionShelf";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Select } from "../components/Select";
@@ -373,6 +377,35 @@ export function Library() {
   const [playlistShelves, setPlaylistShelves] = createSignal<Map<number, Game[]>>(new Map());
   const [shelfMenu, setShelfMenu] = createSignal<{ playlist: Playlist; x: number; y: number } | null>(null);
   const [confirmDelete, setConfirmDelete] = createSignal<Playlist | null>(null);
+  const [importPreview, setImportPreview] = createSignal<ImportPreview | null>(null);
+  const [downloadAll, setDownloadAll] = createSignal<Playlist | null>(null);
+
+  const startImport = async () => {
+    const path = await openFileDialog({
+      multiple: false,
+      filters: [{ name: "Game lists", extensions: ["txt", "csv"] }],
+    });
+    if (typeof path !== "string") { return; }
+    try {
+      setImportPreview(await importPlaylistPreview(path));
+    } catch (e) {
+      showToast("Couldn't read the list", "error", { detail: String(e) });
+    }
+  };
+
+  const startExport = async (playlist: Playlist) => {
+    const path = await saveFileDialog({
+      defaultPath: `${playlist.name.replace(/[\\/:*?"<>|]/g, "-")}.csv`,
+      filters: [{ name: "CSV", extensions: ["csv"] }],
+    });
+    if (!path) { return; }
+    try {
+      await exportPlaylist(playlist.id, path);
+      showToast(`Exported "${playlist.name}"`, "success");
+    } catch (e) {
+      showToast(`Couldn't export "${playlist.name}"`, "error", { detail: String(e) });
+    }
+  };
 
   // Epoch guard, same idea as stores/games.ts fetchEpoch: a slower
   // pre-mutation batch resolving after a post-mutation one must not
@@ -872,8 +905,13 @@ export function Library() {
                 <div class="lib-empty">
                   <div class="lib-empty-icon"><IconEmptyLibrary /></div>
                   <div class="lib-empty-text">No games yet</div>
-                  <div class="lib-empty-sub">Switch to Browse to find and download games</div>
-                  <button class="lib-empty-btn" onClick={() => switchTab("browse")}>Browse games</button>
+                  <div class="lib-empty-sub">Switch to Browse to find and download games, or start from a list you already have</div>
+                  <div class="lib-empty-actions">
+                    <button class="lib-empty-btn" onClick={() => switchTab("browse")}>Browse games</button>
+                    <button class="lib-empty-btn secondary" data-testid="playlist-import-empty" onClick={() => void startImport()}>
+                      Import a list…
+                    </button>
+                  </div>
                 </div>
               }
             >
@@ -920,6 +958,7 @@ export function Library() {
                   </span>
                   <button
                     class="shelf-menu-btn"
+                    data-testid="shelf-menu"
                     title="Playlist options"
                     onClick={(e) => {
                       e.stopPropagation();
@@ -941,10 +980,15 @@ export function Library() {
             )}
           </For>
 
-          <button
-            class="playlist-new-btn"
-            onClick={() => setPlaylistDialog({ mode: "create" })}
-          >＋ New playlist</button>
+          <div class="playlist-new-row">
+            <button
+              class="playlist-new-btn"
+              onClick={() => setPlaylistDialog({ mode: "create" })}
+            >＋ New playlist</button>
+            <button class="playlist-new-btn" data-testid="playlist-import" onClick={() => void startImport()}>
+              Import list…
+            </button>
+          </div>
         </Show>
         </div>
       </Show>
@@ -960,6 +1004,29 @@ export function Library() {
         <Portal>
           <div class="context-backdrop" onMouseDown={() => setShelfMenu(null)} onContextMenu={(e) => { e.preventDefault(); setShelfMenu(null); }} />
           <div class="context-menu" style={{ left: `${shelfMenu()!.x}px`, top: `${shelfMenu()!.y}px` }}>
+            <button class="context-menu-item" data-testid="playlist-download-all" onMouseDown={(e) => e.stopPropagation()} onClick={() => {
+              const playlist = shelfMenu()!.playlist;
+              setShelfMenu(null);
+              setDownloadAll(playlist);
+            }}>
+              Download all…
+            </button>
+            <Show when={queuedCount(shelfMenu()!.playlist.id) > 0}>
+              <button class="context-menu-item" onMouseDown={(e) => e.stopPropagation()} onClick={() => {
+                const playlist = shelfMenu()!.playlist;
+                setShelfMenu(null);
+                cancelQueued(playlist.id);
+              }}>
+                Cancel queued downloads
+              </button>
+            </Show>
+            <button class="context-menu-item" onMouseDown={(e) => e.stopPropagation()} onClick={() => {
+              const playlist = shelfMenu()!.playlist;
+              setShelfMenu(null);
+              void startExport(playlist);
+            }}>
+              Export…
+            </button>
             <button class="context-menu-item" onMouseDown={(e) => e.stopPropagation()} onClick={() => {
               const playlist = shelfMenu()!.playlist;
               setShelfMenu(null);
@@ -967,7 +1034,7 @@ export function Library() {
             }}>
               Rename
             </button>
-            <button class="context-menu-item danger" onMouseDown={(e) => e.stopPropagation()} onClick={() => {
+            <button class="context-menu-item danger" data-testid="playlist-delete" onMouseDown={(e) => e.stopPropagation()} onClick={() => {
               const playlist = shelfMenu()!.playlist;
               setShelfMenu(null);
               setConfirmDelete(playlist);
@@ -989,6 +1056,8 @@ export function Library() {
       />
 
       <PlaylistNameDialog />
+      <PlaylistImportDialog preview={importPreview()} onClose={() => setImportPreview(null)} />
+      <DownloadAllDialog playlist={downloadAll()} onClose={() => setDownloadAll(null)} />
 
       {/* Infinite scroll sentinel - always mounted */}
       <div ref={sentinelRef} class="scroll-sentinel">

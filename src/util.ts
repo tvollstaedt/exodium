@@ -139,6 +139,16 @@ export function platformTag(torrentSource: string | null | undefined): string | 
   return null;
 }
 
+/** Language codes seen in the eXoDOS catalogue, spelled out for prose like
+ *  "no German description". Unknown codes fall back to the raw code. */
+const LANGUAGE_NAMES: Record<string, string> = {
+  EN: "English", DE: "German", PL: "Polish", ES: "Spanish",
+  FR: "French", IT: "Italian", RU: "Russian", CZ: "Czech",
+  NL: "Dutch", PT: "Portuguese", SV: "Swedish", HU: "Hungarian",
+};
+export const languageName = (code: string | null | undefined) =>
+  (code && LANGUAGE_NAMES[code]) || code || "";
+
 export function langBadgeClass(state: number): string {
   if (state === 2) { return "lang-installed"; }
   if (state === 1) { return "lang-downloading"; }

@@ -13,6 +13,7 @@ pub(crate) mod lp_overlay;
 pub(crate) mod content_packs;
 mod games;
 mod playlists;
+pub(crate) mod playlist_io;
 pub(crate) mod setup;
 pub(crate) mod shell_open;
 pub(crate) mod updates;
@@ -33,7 +34,8 @@ pub use games::{
     update_check_supported, DbState,
 };
 pub use playlists::{
-    create_playlist, delete_playlist, get_game_playlists, get_playlists, rename_playlist,
+    create_playlist, create_playlist_from, delete_playlist, export_playlist, get_game_playlists,
+    get_playlists, import_playlist_preview, playlist_download_plan, rename_playlist,
     set_playlist_membership,
 };
 pub use setup::{

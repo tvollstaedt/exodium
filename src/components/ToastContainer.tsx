@@ -11,7 +11,7 @@ const ICONS: Record<ToastType, string> = {
 
 function ToastRow(props: { t: Toast }) {
   return (
-    <div class={`toast toast-${props.t.type}`}>
+    <div class={`toast toast-${props.t.type}`} data-testid="toast">
       <span class={`toast-icon toast-icon-${props.t.type}`}>{ICONS[props.t.type]}</span>
       <div class="toast-body">
         <div class="toast-message">{props.t.message}</div>

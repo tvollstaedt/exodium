@@ -12,6 +12,9 @@ interface DownloadState {
   /** True from the moment the game itself is playable (extras may still be
    *  downloading) - components must use this, not string-match the status. */
   installed?: boolean;
+  /** Waiting in a "Download all" queue: shown and cancellable like a
+   *  download, but nothing has been asked of the backend yet. */
+  queued?: boolean;
   title?: string;
   /** What the download sheet needs for a cover; absent for extras-only trackers. */
   cover?: DownloadCover;
@@ -318,6 +321,19 @@ export function startGameDownload(gameId: number, title?: string, cover?: Downlo
   });
 }
 
+export function markQueued(gameId: number, title?: string, cover?: DownloadCover) {
+  if (trackers.has(gameId)) { return; }
+  setDownloads((prev) => ({
+    ...prev,
+    [gameId]: { status: "Queued", progress: 0, downloading: true, queued: true, title, cover },
+  }));
+}
+
+/** Drops a queue entry; a download that already started is left alone. */
+export function unmarkQueued(gameId: number) {
+  if (downloads()[gameId]?.queued) { clearState(gameId); }
+}
+
 /** Re-arm a tracker for every download the session resumed on its own
  *  (librqbit persists selections). The poll is what shows progress AND what
  *  extracts on completion, so without this a restarted download finishes
@@ -381,6 +397,10 @@ export async function watchExtrasIfPending(gameId: number, title?: string) {
 }
 
 export async function cancelGameDownload(gameId: number) {
+  if (downloads()[gameId]?.queued) {
+    clearState(gameId);
+    return;
+  }
   const t = trackers.get(gameId);
   if (t) { endTracker(t); }
   clearState(gameId);

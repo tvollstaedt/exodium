@@ -128,10 +128,15 @@ pub async fn get_game_variants(
         let conn = state.lock()?;
         variants_with_overlay_prices(&conn, &shortcode, &collection)?
     };
-    // Bytes the session already holds are not fetched again (§6): a complete
-    // archive, or the GameData a sibling variant brought. Only rows with a
-    // full-length file on disk ask the ledger - `stats()` copies the whole
-    // file-progress table, and most rows have a placeholder.
+    deduct_held_bytes(&mut games, &torrent_state).await;
+    Ok(games)
+}
+
+/// Bytes the session already holds are not fetched again (§6): a complete
+/// archive, or the GameData a sibling variant brought. Only rows with a
+/// full-length file on disk ask the ledger - `stats()` copies the whole
+/// file-progress table, and most rows have a placeholder.
+pub(crate) async fn deduct_held_bytes(games: &mut [Game], torrent_state: &TorrentState) {
     let managers: std::collections::HashMap<String, std::sync::Arc<crate::torrent::manager::DownloadManager>> = {
         let guard = torrent_state.0.read().await;
         guard.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
@@ -170,10 +175,9 @@ pub async fn get_game_variants(
             }
         }
     }
-    Ok(games)
 }
 
-fn variants_with_overlay_prices(
+pub(crate) fn variants_with_overlay_prices(
     conn: &rusqlite::Connection,
     shortcode: &str,
     collection: &str,

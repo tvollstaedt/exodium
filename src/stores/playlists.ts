@@ -1,6 +1,6 @@
 import { createSignal } from "solid-js";
 import {
-  getPlaylists, createPlaylist as apiCreate, renamePlaylist as apiRename,
+  getPlaylists, createPlaylist as apiCreate, createPlaylistFrom, renamePlaylist as apiRename,
   deletePlaylist as apiDelete, setPlaylistMembership, type Playlist,
 } from "../api/tauri";
 
@@ -49,6 +49,13 @@ function refreshInBackground() {
 /// Create and return the new playlist's id.
 export async function createPlaylist(name: string): Promise<number> {
   const id = await apiCreate(name);
+  refreshInBackground();
+  return id;
+}
+
+/// An imported list's playlist, created with its games in one step.
+export async function importPlaylist(name: string, gameIds: number[]): Promise<number> {
+  const id = await createPlaylistFrom(name, gameIds);
   refreshInBackground();
   return id;
 }
