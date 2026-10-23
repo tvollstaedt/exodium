@@ -36,7 +36,7 @@ use commands::{
     get_section_keys, set_game_settings,
     create_playlist, delete_playlist, get_game_playlists, get_playlists, rename_playlist,
     set_playlist_membership, import_playlist_preview, create_playlist_from, export_playlist,
-    playlist_download_plan,
+    playlist_download_plan, playlist_missing_count,
     get_setup_status, get_torrent_info, init_download_manager,
     game_printing_unavailable, game_engine_info, init_log_dir, init_resource_dir, install_content_pack, launch_game, stop_game,
     list_content_packs,
@@ -865,6 +865,7 @@ pub fn run() {
             create_playlist_from,
             export_playlist,
             playlist_download_plan,
+            playlist_missing_count,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")

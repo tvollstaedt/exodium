@@ -1,7 +1,7 @@
 import { createEffect, createRoot, createSignal } from "solid-js";
 import { downloads, markQueued, startGameDownload, unmarkQueued, type DownloadCover } from "./downloads";
 
-/** "Download all" runs at most this many at once: every download polls once
+/** "Download playlist" runs at most this many at once: every download polls once
  *  a second and every start re-selects the torrent's files, so a list started
  *  in one go would do both a few hundred times over. */
 export const MAX_ACTIVE = 4;

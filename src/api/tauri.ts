@@ -189,6 +189,10 @@ export interface DownloadPlan {
   free_bytes: number | null;
 }
 
+export async function playlistMissingCount(id: number): Promise<number> {
+  return invoke("playlist_missing_count", { id });
+}
+
 export async function playlistDownloadPlan(id: number, language: string): Promise<DownloadPlan> {
   return invoke("playlist_download_plan", { id, language });
 }

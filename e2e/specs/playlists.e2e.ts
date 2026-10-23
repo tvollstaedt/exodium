@@ -1,6 +1,6 @@
 import { $, $$, browser, expect } from "@wdio/globals";
 
-// A playlist made from a card's menu, then "Download all" priced against the
+// A playlist made from a card's menu, then "Download playlist" priced against the
 // seeded catalogue - which is offline, so the dialog must refuse to start.
 // Leaves no playlist behind: the library spec expects an empty My Library.
 describe("playlists", () => {
@@ -32,7 +32,7 @@ describe("playlists", () => {
     await $('[data-testid="shelf-menu"]').waitForExist({ timeoutMsg: "the playlist shelf did not appear" });
   });
 
-  it("prices Download all and refuses to start offline", async () => {
+  it("prices Download playlist and refuses to start offline", async () => {
     await $('[data-testid="shelf-menu"]').click();
     await $('[data-testid="playlist-download-all"]').click();
     const facts = $('[data-testid="download-all-facts"]');

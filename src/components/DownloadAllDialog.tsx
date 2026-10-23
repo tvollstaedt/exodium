@@ -20,7 +20,7 @@ interface Props {
   onClose: () => void;
 }
 
-/** "Download all" (#43): what the playlist still lacks, what it costs and in
+/** "Download playlist" (#43): what the playlist still lacks, what it costs and in
  *  which language - then the batch queue takes over. */
 export function DownloadAllDialog(props: Props) {
   const [language, setLanguage] = createSignal("EN");
@@ -104,7 +104,7 @@ export function DownloadAllDialog(props: Props) {
               class={`ark-dialog-content playlist-dialog playlist-io-dialog${closing() ? " closing" : ""}`}
               data-testid="download-all-dialog"
             >
-              <Dialog.Title class="ark-dialog-title">Download all</Dialog.Title>
+              <Dialog.Title class="ark-dialog-title">Download playlist</Dialog.Title>
               <p class="playlist-io-sub">{props.playlist!.name}</p>
 
               <Show when={languages().length > 1}>
