@@ -90,6 +90,7 @@ export function PlaylistNameDialog() {
               <input
                 ref={inputRef}
                 class="playlist-name-input"
+                data-testid="playlist-name-input"
                 type="text"
                 value={name()}
                 placeholder="Playlist name"
@@ -105,6 +106,7 @@ export function PlaylistNameDialog() {
               <div class="ark-dialog-actions">
                 <Button variant="secondary" onClick={close}>Cancel</Button>
                 <Button variant="primary"
+                  data-testid="playlist-name-save"
                   onClick={handleSave}
                   disabled={!name().trim() || saving()}
                 >

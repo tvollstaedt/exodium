@@ -78,6 +78,7 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
                 </Button>
                 <button
                   class={props.danger ? "btn-danger" : "btn-primary"}
+                  data-testid="confirm-ok"
                   onClick={() => close(true)}
                 >
                   {props.confirmLabel}

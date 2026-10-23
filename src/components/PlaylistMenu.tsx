@@ -94,6 +94,7 @@ export function PlaylistMenu(props: PlaylistMenuProps) {
         </Show>
         <button
           class="context-menu-item"
+          data-testid="playlist-menu-new"
           onMouseDown={(e) => e.stopPropagation()}
           onClick={() => {
             props.onClose();

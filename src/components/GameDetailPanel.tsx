@@ -16,7 +16,7 @@ import { chooseIigsOption as storeIigsOption, iigsRevision } from "../stores/app
 import type { AppleIigsInfo, GameEngineInfo, GameDiskUsage, ScummVmEngineInfo, ScummVmVariants } from "../api/tauri";
 import { IigsExtras } from "./IigsExtras";
 import { createWin9xStatus } from "./win9xStatus";
-import { formatBytes, parseLangEntries, langBadgeClass, performUninstall, performReset } from "../util";
+import { formatBytes, parseLangEntries, langBadgeClass, languageName, performUninstall, performReset } from "../util";
 import { launchNote, emulatorName as describeEmulator, emulatorPackId, isScummVm, isAppleIigs, iigsControls, svmVariantLabel, type PanelNote } from "../launchNotes";
 import { showToast } from "../stores/toasts";
 import { bestThumbnailPath, thumbnailCandidates } from "../stores/thumbnails";
@@ -91,16 +91,6 @@ const Field = (props: {
 
 const isWindows = typeof navigator !== "undefined"
   && /Win/i.test(navigator.platform || navigator.userAgent || "");
-
-/** Language codes seen in the eXoDOS catalogue, spelled out for prose like
- *  "no German description". Unknown codes fall back to the raw code. */
-const LANGUAGE_NAMES: Record<string, string> = {
-  EN: "English", DE: "German", PL: "Polish", ES: "Spanish",
-  FR: "French", IT: "Italian", RU: "Russian", CZ: "Czech",
-  NL: "Dutch", PT: "Portuguese", SV: "Swedish", HU: "Hungarian",
-};
-const languageName = (code: string | null | undefined) =>
-  (code && LANGUAGE_NAMES[code]) || code || "";
 
 export function GameDetailPanel(props: Props) {
   const [variants, setVariants] = createSignal<Game[]>([]);

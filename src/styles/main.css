@@ -602,6 +602,22 @@ body {
   background: rgba(124, 92, 252, 0.25);
 }
 
+.lib-empty-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.lib-empty-btn.secondary {
+  background: transparent;
+  color: var(--text-secondary);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.lib-empty-btn.secondary:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
 /* ── Tab bar height = 40px ── sticky offsets for Browse subtabs ── */
 /* ── Collection shelf: one box per collection above the Browse grid.
    Deliberately NOT sticky - it scrolls away with the content, the toolbar
@@ -2281,6 +2297,11 @@ body {
   opacity: 0.8;
 }
 
+.playlist-new-row {
+  display: flex;
+  gap: 10px;
+}
+
 .playlist-new-btn {
   display: block;
   margin: 8px 0 24px;
@@ -2317,6 +2338,89 @@ body {
 
 .playlist-name-error {
   margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--danger);
+}
+
+/* Import and "Download all" share one shape: a summary line, a scrolling
+   body, then the controls. */
+.playlist-io-dialog {
+  max-width: 520px;
+}
+
+.playlist-io-sub {
+  margin: -6px 0 14px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.playlist-io-body {
+  max-height: 46vh;
+  overflow-y: auto;
+  margin-bottom: 14px;
+}
+
+.playlist-io-heading {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.playlist-io-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.playlist-io-row .variant-chip {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.playlist-io-title {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.playlist-io-details {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.playlist-io-details summary {
+  cursor: pointer;
+}
+
+.playlist-io-details ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.playlist-io-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.playlist-io-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 14px 0;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.playlist-io-muted {
+  color: var(--text-muted);
+}
+
+.playlist-io-warn {
   font-size: 12px;
   color: var(--danger);
 }

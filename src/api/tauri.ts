@@ -137,6 +137,62 @@ export async function getGamePlaylists(gameId: number): Promise<number[]> {
   return invoke("get_game_playlists", { gameId });
 }
 
+/** A game an imported line could mean; `collection` is the pack family. */
+export interface ImportCandidate {
+  game_id: number;
+  title: string;
+  collection: string;
+  year: number | null;
+}
+
+export interface ImportRow {
+  line: number;
+  title: string;
+  /** Empty: not found. One: matched. Several: the user picks (eXoDOS first). */
+  candidates: ImportCandidate[];
+}
+
+export interface ImportPreview {
+  /** The file's name, proposed for the playlist. */
+  name: string;
+  rows: ImportRow[];
+}
+
+export async function importPlaylistPreview(path: string): Promise<ImportPreview> {
+  return invoke("import_playlist_preview", { path });
+}
+
+export async function createPlaylistFrom(name: string, gameIds: number[]): Promise<number> {
+  return invoke("create_playlist_from", { name, gameIds });
+}
+
+export async function exportPlaylist(id: number, path: string): Promise<void> {
+  return invoke("export_playlist", { id, path });
+}
+
+export interface PlanItem {
+  game_id: number;
+  title: string;
+  size_bytes: number;
+  torrent_source: string | null;
+  thumbnail_key: string | null;
+}
+
+export interface DownloadPlan {
+  items: PlanItem[];
+  total_bytes: number;
+  /** Games skipped as installed / already downloading. */
+  present: number;
+  in_progress: number;
+  /** Languages the playlist's games come in, EN first. */
+  languages: string[];
+  free_bytes: number | null;
+}
+
+export async function playlistDownloadPlan(id: number, language: string): Promise<DownloadPlan> {
+  return invoke("playlist_download_plan", { id, language });
+}
+
 export async function getGameVariants(shortcode: string, collection: string): Promise<Game[]> {
   return invoke("get_game_variants", { shortcode, collection });
 }
