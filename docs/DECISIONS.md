@@ -509,8 +509,8 @@
 - Rejected: raising `@tauri-apps/cli` to >= 2.11.4 (tauri#15596) - moves the bundler two minors while the GStreamer bundling and the GDK hook patch depend on its output; worth doing separately with a lab run.
 - Why: Tauri's bundler pointed `.DirIcon` at the runner's AppDir (tauri#15110). Measured on the v0.15.4 asset: dangling inside the mounted image, so no icon in file managers and AppImageHub's lint fails ("FATAL: .DirIcon is missing"). The root `.desktop` was already relative.
 
-## 2026-10-23 - Playlist import matches per group with a preview; "Download all" queues four at a time (#43)
-- Decision: titles match exactly after normalising (case, quotes, whitespace, "The"), with a subtitle and a trailing-year fallback; rows that fit several collections are picked in a preview (eXoDOS preselected, Skip). "Download all" plans per group in the chosen language and a frontend queue runs at most four downloads.
+## 2026-10-23 - Playlist import matches per group with a preview; "Download playlist" queues four at a time (#43)
+- Decision: titles match exactly after normalising (case, quotes, whitespace, "The"), with a subtitle and a trailing-year fallback; rows that fit several collections are picked in a preview (eXoDOS preselected, Skip). "Download playlist" plans per group in the chosen language and a frontend queue runs at most four downloads.
 - Rejected: fuzzy matching (a near miss would silently add a different game); a fixed collection priority without a preview (about 700 titles exist in several collections); starting every download at once (a 1 Hz poll and a torrent re-selection per game); a persistent queue table (migration for a rare restart case).
 - Why: #43 asks to automate downloading a hand-written list; the list must land on the games the user meant.
-- Gotcha: `EN` in "Download all" means "any version" - a German install counts as present - while DE/ES/... count only that version. Queued games are downloads-store entries with `queued: true`; cancelling one never reaches the backend.
+- Gotcha: `EN` in "Download playlist" means "any version" - a German install counts as present - while DE/ES/... count only that version. Queued games are downloads-store entries with `queued: true`; cancelling one never reaches the backend.

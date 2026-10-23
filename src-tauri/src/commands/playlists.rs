@@ -129,7 +129,16 @@ pub async fn export_playlist(state: State<'_, DbState>, id: i64, path: String) -
     std::fs::write(&path, bytes).map_err(|e| format!("Could not write {path}: {e}"))
 }
 
-/// What "Download all" would fetch in `language` (§24), priced like the
+/// How many of the playlist's games "Download playlist" would fetch: none
+/// installed in any language, none downloading. Cheap enough for a button.
+#[tauri::command]
+pub async fn playlist_missing_count(state: State<'_, DbState>, id: i64) -> Result<usize, String> {
+    let conn = state.lock()?;
+    let groups = playlist_io::playlist_groups(&conn, id, false)?;
+    Ok(groups.iter().filter(|g| matches!(playlist_io::pick_variant(g, "EN"), Some(Pick::Fetch(_)))).count())
+}
+
+/// What "Download playlist" would fetch in `language` (§24), priced like the
 /// panel's language picker.
 #[tauri::command]
 pub async fn playlist_download_plan(
@@ -142,7 +151,7 @@ pub async fn playlist_download_plan(
         let conn = state.lock()?;
         let mut languages = std::collections::BTreeSet::new();
         let (mut targets, mut present, mut in_progress) = (Vec::new(), 0, 0);
-        for group in playlist_io::playlist_groups(&conn, id)? {
+        for group in playlist_io::playlist_groups(&conn, id, true)? {
             languages.extend(group.iter().map(|v| v.language.to_uppercase()));
             match playlist_io::pick_variant(&group, &language) {
                 Some(Pick::Fetch(game)) => targets.push(*game),

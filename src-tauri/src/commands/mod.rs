@@ -35,7 +35,7 @@ pub use games::{
 };
 pub use playlists::{
     create_playlist, create_playlist_from, delete_playlist, export_playlist, get_game_playlists,
-    get_playlists, import_playlist_preview, playlist_download_plan, rename_playlist,
+    get_playlists, import_playlist_preview, playlist_download_plan, playlist_missing_count, rename_playlist,
     set_playlist_membership,
 };
 pub use setup::{

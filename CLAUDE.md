@@ -2042,7 +2042,7 @@ eXo's GSplus 0.14 runs the derived config under SDL's dummy video driver but
 crashes in SDL's video init in a session without a desktop, so its window on
 a real desktop is still unverified.
 
-### 24. Playlists as files, and "Download all" (#43)
+### 24. Playlists as files, and "Download playlist" (#43)
 
 `commands/playlist_io.rs` reads a `.txt` (one title per line, `#` comments)
 or `.csv` (`title`, optional `collection` and `year`; header optional, `;`
@@ -2063,9 +2063,11 @@ narrows only when it leaves something. Export writes the same CSV with the
 FAMILY id (a GLP row exports as `eXoDOS`) and reads back to the same groups -
 a test holds that round trip.
 
-**"Download all"** sits in a playlist shelf's menu and in Browse's playlist
-header, so eXo's curated lists get it too (the largest, MT-32 with 893 games,
-plans in a quarter second). **It picks one variant per group** (`pick_variant`): `EN` means
+**"Download playlist"** sits in a playlist shelf's menu and in Browse's
+playlist header, so eXo's curated lists get it too (the largest, MT-32 with
+893 games, plans in a quarter second). Both entry points ask
+`playlist_missing_count` first (unpriced, EN semantics) and are disabled with
+a hint when it answers 0. **It picks one variant per group** (`pick_variant`): `EN` means
 "whatever the user has", so a game installed in any language is skipped;
 any other language counts only its own variant and falls back to EN where the
 game has none. Prices are `get_game_variants`' own - overlay base included,

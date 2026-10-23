@@ -363,9 +363,9 @@ pub fn pick_variant(variants: &[Game], language: &str) -> Option<Pick> {
     })
 }
 
-/// The playlist's groups as variant lists, EN first, priced like the panel's
-/// language picker prices them.
-pub fn playlist_groups(conn: &Connection, playlist_id: i64) -> Result<Vec<Vec<Game>>, String> {
+/// The playlist's groups as variant lists, EN first; `priced` adds what the
+/// panel's language picker charges (the overlay base), at a cost per group.
+pub fn playlist_groups(conn: &Connection, playlist_id: i64, priced: bool) -> Result<Vec<Vec<Game>>, String> {
     let ids: Vec<i64> = conn
         .prepare_cached("SELECT game_id FROM playlist_games WHERE playlist_id = ?1 ORDER BY position")
         .and_then(|mut stmt| stmt.query_map(params![playlist_id], |r| r.get(0))?.collect())
@@ -380,7 +380,11 @@ pub fn playlist_groups(conn: &Connection, playlist_id: i64) -> Result<Vec<Vec<Ga
                 if !seen.insert((crate::collection_base_id(source), sc.to_string())) {
                     continue;
                 }
-                super::games::variants_with_overlay_prices(conn, sc, source)?
+                if priced {
+                    super::games::variants_with_overlay_prices(conn, sc, source)?
+                } else {
+                    queries::fetch_game_variants(conn, sc, source).map_err(|e| e.to_string())?
+                }
             }
             None => vec![member],
         };

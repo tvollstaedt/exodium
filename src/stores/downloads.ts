@@ -12,7 +12,7 @@ interface DownloadState {
   /** True from the moment the game itself is playable (extras may still be
    *  downloading) - components must use this, not string-match the status. */
   installed?: boolean;
-  /** Waiting in a "Download all" queue: shown and cancellable like a
+  /** Waiting in a "Download playlist" queue: shown and cancellable like a
    *  download, but nothing has been asked of the backend yet. */
   queued?: boolean;
   title?: string;

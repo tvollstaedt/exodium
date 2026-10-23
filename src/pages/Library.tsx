@@ -18,7 +18,7 @@ import {
   setPlaylistDialog, deletePlaylist,
 } from "../stores/playlists";
 import { PackHintBanner } from "../components/PackHintBanner";
-import { getGame, getGenres, getInstalledGames, getLibraryFingerprint, getRecentlyPlayed, getConfig, getAvailableCollections, getSectionKeys, getGames, importPlaylistPreview, exportPlaylist, type CollectionInfo, type Game, type ImportPreview, type Playlist } from "../api/tauri";
+import { getGame, getGenres, getInstalledGames, getLibraryFingerprint, getRecentlyPlayed, getConfig, getAvailableCollections, getSectionKeys, getGames, importPlaylistPreview, exportPlaylist, playlistMissingCount, type CollectionInfo, type Game, type ImportPreview, type Playlist } from "../api/tauri";
 import { open as openFileDialog, save as saveFileDialog } from "@tauri-apps/plugin-dialog";
 import { GameCard } from "../components/GameCard";
 import { IconEmptySearch, IconEmptyLibrary } from "../components/icons";
@@ -380,6 +380,18 @@ export function Library() {
   const [confirmDelete, setConfirmDelete] = createSignal<Playlist | null>(null);
   const [importPreview, setImportPreview] = createSignal<ImportPreview | null>(null);
   const [downloadAll, setDownloadAll] = createSignal<Playlist | null>(null);
+  /** Games "Download playlist" would fetch, per playlist; 0 disables it. */
+  const [missingByPlaylist, setMissingByPlaylist] = createSignal<Record<number, number>>({});
+  const refreshMissing = (id: number) => {
+    playlistMissingCount(id)
+      .then((n) => setMissingByPlaylist((m) => ({ ...m, [id]: n })))
+      .catch(() => {});
+  };
+  const nothingToDownload = (id: number) => missingByPlaylist()[id] === 0;
+  const NOTHING_TO_DOWNLOAD = "Every game in this playlist is installed or downloading";
+  createEffect(on([() => activePlaylist()?.id, lastGameLibraryChange, downloadAll], ([id]) => {
+    if (id != null) { refreshMissing(id); }
+  }));
 
   const startImport = async () => {
     const path = await openFileDialog({
@@ -804,9 +816,16 @@ export function Library() {
                   Cancel queued
                 </Button>
               </Show>
-              <Button variant="small" data-testid="playlist-hero-download-all" onClick={() => setDownloadAll(activePlaylist())}>
-                Download all…
-              </Button>
+              <span title={nothingToDownload(activePlaylist()!.id) ? NOTHING_TO_DOWNLOAD : undefined}>
+                <Button
+                  variant="small"
+                  data-testid="playlist-hero-download-all"
+                  disabled={nothingToDownload(activePlaylist()!.id)}
+                  onClick={() => setDownloadAll(activePlaylist())}
+                >
+                  Download playlist…
+                </Button>
+              </span>
               <button
                 class="playlist-hero-clear"
                 title="Show all games"
@@ -973,6 +992,7 @@ export function Library() {
                     title="Playlist options"
                     onClick={(e) => {
                       e.stopPropagation();
+                      refreshMissing(playlist.id);
                       setShelfMenu({ playlist, x: e.clientX, y: e.clientY });
                     }}
                   >⋯</button>
@@ -1015,12 +1035,21 @@ export function Library() {
         <Portal>
           <div class="context-backdrop" onMouseDown={() => setShelfMenu(null)} onContextMenu={(e) => { e.preventDefault(); setShelfMenu(null); }} />
           <div class="context-menu" style={{ left: `${shelfMenu()!.x}px`, top: `${shelfMenu()!.y}px` }}>
-            <button class="context-menu-item" data-testid="playlist-download-all" onMouseDown={(e) => e.stopPropagation()} onClick={() => {
-              const playlist = shelfMenu()!.playlist;
-              setShelfMenu(null);
-              setDownloadAll(playlist);
-            }}>
-              Download all…
+            <button
+              class="context-menu-item"
+              data-testid="playlist-download-all"
+              disabled={nothingToDownload(shelfMenu()!.playlist.id)}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={() => {
+                const playlist = shelfMenu()!.playlist;
+                setShelfMenu(null);
+                setDownloadAll(playlist);
+              }}
+            >
+              Download playlist…
+              <Show when={nothingToDownload(shelfMenu()!.playlist.id)}>
+                <span class="context-menu-hint">{NOTHING_TO_DOWNLOAD}</span>
+              </Show>
             </button>
             <Show when={queuedCount(shelfMenu()!.playlist.id) > 0}>
               <button class="context-menu-item" onMouseDown={(e) => e.stopPropagation()} onClick={() => {

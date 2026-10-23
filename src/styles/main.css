@@ -1745,6 +1745,15 @@ body {
   cursor: default;
 }
 
+.context-menu-hint {
+  display: block;
+  max-width: 220px;
+  margin-top: 2px;
+  font-size: 11px;
+  white-space: normal;
+  color: var(--text-muted);
+}
+
 .context-menu-item {
   display: block;
   width: 100%;
