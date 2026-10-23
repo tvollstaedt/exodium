@@ -921,6 +921,13 @@ body {
   color: var(--text-secondary);
 }
 
+.playlist-hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .playlist-hero-clear {
   flex-shrink: 0;
   width: 26px;

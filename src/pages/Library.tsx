@@ -31,6 +31,7 @@ import { DownloadAllDialog } from "../components/DownloadAllDialog";
 import { cancelQueued, queuedCount } from "../stores/batchDownloads";
 import { CollectionShelf } from "../components/CollectionShelf";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { Button } from "../components/Button";
 import { Select } from "../components/Select";
 import { showToast } from "../stores/toasts";
 import { openGameRequest, setOpenGameRequest, musicUnsupported, refreshMusicIndex } from "../stores/music";
@@ -797,11 +798,21 @@ export function Library() {
                 <div class="playlist-hero-desc">{activePlaylist()!.description}</div>
               </Show>
             </div>
-            <button
-              class="playlist-hero-clear"
-              title="Show all games"
-              onClick={() => applyPlaylistFilter("")}
-            >✕</button>
+            <div class="playlist-hero-actions">
+              <Show when={queuedCount(activePlaylist()!.id) > 0}>
+                <Button variant="small" onClick={() => cancelQueued(activePlaylist()!.id)}>
+                  Cancel queued
+                </Button>
+              </Show>
+              <Button variant="small" data-testid="playlist-hero-download-all" onClick={() => setDownloadAll(activePlaylist())}>
+                Download all…
+              </Button>
+              <button
+                class="playlist-hero-clear"
+                title="Show all games"
+                onClick={() => applyPlaylistFilter("")}
+              >✕</button>
+            </div>
           </div>
         </Show>
 

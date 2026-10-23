@@ -2063,7 +2063,9 @@ narrows only when it leaves something. Export writes the same CSV with the
 FAMILY id (a GLP row exports as `eXoDOS`) and reads back to the same groups -
 a test holds that round trip.
 
-**"Download all" picks one variant per group** (`pick_variant`): `EN` means
+**"Download all"** sits in a playlist shelf's menu and in Browse's playlist
+header, so eXo's curated lists get it too (the largest, MT-32 with 893 games,
+plans in a quarter second). **It picks one variant per group** (`pick_variant`): `EN` means
 "whatever the user has", so a game installed in any language is skipped;
 any other language counts only its own variant and falls back to EN where the
 game has none. Prices are `get_game_variants`' own - overlay base included,
