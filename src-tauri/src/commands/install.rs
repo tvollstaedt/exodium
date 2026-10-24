@@ -51,6 +51,7 @@ pub async fn download_game(
     torrent_state: State<'_, TorrentState>,
     id: i64,
 ) -> Result<String, String> {
+    super::kids::ensure_unlocked()?;
     let game = {
         let conn = db_state.lock()?;
         queries::fetch_game_by_id(&conn, id)
@@ -843,6 +844,7 @@ pub async fn cancel_download(
     torrent_state: State<'_, TorrentState>,
     id: i64,
 ) -> Result<Vec<CancelledDependent>, String> {
+    super::kids::ensure_unlocked()?;
     let (game_idx, gamedata_idx, source) = {
         let conn = db_state.lock()?;
         let game = queries::fetch_game_by_id(&conn, id)
@@ -919,6 +921,7 @@ pub async fn pause_download(
     torrent_state: State<'_, TorrentState>,
     id: i64,
 ) -> Result<(), String> {
+    super::kids::ensure_unlocked()?;
     let (game_idx, gamedata_idx, source) = {
         let conn = db_state.lock()?;
         let game = queries::fetch_game_by_id(&conn, id)

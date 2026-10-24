@@ -305,6 +305,7 @@ pub async fn install_content_pack(
     collection: String,
     pack_id: String,
 ) -> Result<(), String> {
+    super::kids::ensure_unlocked()?;
     start_pack_install(&app, &collection, &pack_id).await
 }
 
@@ -971,6 +972,7 @@ pub async fn uninstall_content_pack(
     collection: String,
     pack_id: String,
 ) -> Result<(), String> {
+    super::kids::ensure_unlocked()?;
     // A running installer would race this delete (its staging rename can
     // repopulate the dir we just removed, or we can yank the dir out from
     // under its "remove old install" step).

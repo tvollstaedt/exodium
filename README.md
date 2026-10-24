@@ -61,6 +61,7 @@ eXoDOS ships with a Windows-only LaunchBox frontend and requires downloading the
 - ✅ Per-game settings - CRT shader, fullscreen, CPU cycles, and a free-form DOSBox config editor
 - ✅ Favorites, playlists, and a personal library of installed games
 - ✅ Pause and resume downloads one by one or all at once, and cancel everything in one go
+- ✅ Kids mode - a locked screen with just the games of one playlist, everything else behind a PIN
 - ✅ Select many games at once - Cmd/Ctrl- or Shift-click, drag a frame, or Select all - and add them to a playlist, download or favorite them together
 - ✅ Import a list of games as a playlist (a text file with one title per line, or a CSV with `title`, `collection`, `year`), export one the same way, and download a whole playlist in one go
 
@@ -129,6 +130,16 @@ One installer is provided: `Exodium_<version>_x64-setup.exe` (NSIS). It is curre
 If `Unblock-File` is unavailable, right-click the `.exe` → Properties → tick "Unblock" at the bottom of the General tab → OK.
 
 **If downloads are stuck at 0%**: check `%APPDATA%\Exodium\logs\exodium.log` for error details. Firewall issues are one possible cause - allow both "Private" and "Public" networks for Exodium under Windows Security → Firewall & network protection → Allow an app through firewall.
+
+### Forgot the kids mode PIN?
+
+Start Exodium once with the option `--reset-kids-mode`. It turns kids mode off and keeps the kids playlist; set a new PIN in Settings → Kids Mode.
+
+- **macOS:** `open -a Exodium --args --reset-kids-mode`
+- **Linux:** run the AppImage (or `exodium` from the `.deb`) with `--reset-kids-mode` appended
+- **Windows:** right-click Exodium in the Start menu → Open file location, then run the program from PowerShell with `--reset-kids-mode` appended
+
+If Exodium is already running, this reaches the open window as well.
 
 ---
 

@@ -46,6 +46,9 @@ import { IconMusicNote } from "./components/icons";
 import "./styles/main.css";
 import { trackWindowActivity } from "./windowActivity";
 import { Button } from "./components/Button";
+import { KidsScreen } from "./components/KidsScreen";
+import { initKidsReset, kidsEnabled, kidsLocked, loadKidsStatus, lockKids } from "./stores/kids";
+import { Lock } from "lucide-solid";
 
 type AppPhase = "loading" | "setup" | "ready";
 
@@ -133,9 +136,13 @@ function App() {
     initStartupTaskEvents().catch(() => {});
     initDependencyDownloads().catch(() => {});
     initMusic().catch(() => {});
+    initKidsReset().catch(() => {});
     try {
       const status = await getSetupStatus();
       if (status.ready) {
+        // Before the first frame of the library: a locked start shows the
+        // kids screen and nothing else, not even for a moment.
+        await loadKidsStatus();
         setPhase("ready");
         await loadNetworkMode();
         // Covers depend on the data dir, not on the torrent session: resolved
@@ -326,6 +333,7 @@ function App() {
       </Show>
 
       <Show when={phase() === "ready"}>
+        <Show when={!kidsLocked()} fallback={<KidsScreen onUnlocked={() => {}} />}>
         <div class="top-bar">
           <div class="top-bar-center">
             <SearchBar />
@@ -375,6 +383,16 @@ function App() {
               } />
               <Portal><Tooltip.Positioner><Tooltip.Content class="ark-tooltip">Support Exodium</Tooltip.Content></Tooltip.Positioner></Portal>
             </Tooltip.Root>
+            <Show when={kidsEnabled()}>
+              <Tooltip.Root openDelay={400}>
+                <Tooltip.Trigger asChild={(props) =>
+                  <button {...props()} class="icon-btn" data-testid="kids-lock" onClick={() => void lockKids()}>
+                    <Lock size={15} aria-hidden="true" />
+                  </button>
+                } />
+                <Portal><Tooltip.Positioner><Tooltip.Content class="ark-tooltip">Lock for kids</Tooltip.Content></Tooltip.Positioner></Portal>
+              </Tooltip.Root>
+            </Show>
             <Tooltip.Root openDelay={400}>
               <Tooltip.Trigger asChild={(props) =>
                 <button {...props()} class="icon-btn" data-testid="open-settings" onClick={() => openSettings()}>
@@ -520,6 +538,7 @@ function App() {
           open={showSeedingConsent()}
           onDecide={handleSeedingConsent}
         />
+        </Show>
       </Show>
 
       <ToastContainer />

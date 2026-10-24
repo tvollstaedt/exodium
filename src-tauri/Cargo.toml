@@ -87,6 +87,8 @@ tauri-plugin-single-instance = "2.4.2"
 fs4 = "1.1.0"
 # Playlist import/export: game titles carry commas and quotes.
 csv = "1.3"
+# The kids-mode PIN's salt; already in the tree through ring/rand.
+getrandom = "0.2"
 tauri-plugin-updater = "2.10.1"
 tauri-plugin-process = "2.3.1"
 

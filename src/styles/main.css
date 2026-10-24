@@ -6405,3 +6405,120 @@ body.is-marquee {
   user-select: none;
   -webkit-user-select: none;
 }
+
+/* ── Kids mode (§26) ── */
+.kids-screen {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 24px 32px 40px;
+}
+
+.kids-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 22px;
+}
+
+.kids-heading {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.4px;
+}
+
+.kids-unlock {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.kids-unlock:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.kids-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 24px;
+}
+
+.kids-card {
+  display: block;
+  padding: 0;
+  overflow: hidden;
+  text-align: left;
+  background: var(--bg-card);
+  border: none;
+  border-radius: var(--border-radius-lg);
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.kids-card:hover {
+  transform: scale(1.04);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 0 0 2px var(--accent);
+}
+
+.kids-card.is-starting {
+  opacity: 0.6;
+}
+
+.kids-card-art {
+  display: block;
+  aspect-ratio: 3 / 4;
+  background: var(--bg-secondary);
+}
+
+.kids-card-art img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.kids-card-title {
+  display: block;
+  padding: 10px 12px 12px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.kids-empty {
+  padding: 80px 20px;
+  text-align: center;
+  font-size: 18px;
+  color: var(--text-secondary);
+}
+
+.kids-pin-input {
+  text-align: center;
+  font-size: 20px;
+  letter-spacing: 6px;
+}
+
+.kids-pin-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.kids-pin-field {
+  width: 92px;
+  padding: 6px 8px;
+  background: var(--bg-primary);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 13px;
+}

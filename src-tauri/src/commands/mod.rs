@@ -13,6 +13,7 @@ pub(crate) mod lp_overlay;
 pub(crate) mod content_packs;
 mod games;
 mod playlists;
+pub(crate) mod kids;
 pub(crate) mod playlist_io;
 pub(crate) mod setup;
 pub(crate) mod shell_open;
@@ -45,6 +46,9 @@ pub use setup::{
     init_download_manager, open_log_folder,
     setup_from_local, setup_import, setup_start,
     validate_exodos_dir, TorrentState,
+};
+pub use kids::{
+    kids_change_pin, kids_disable, kids_enable, kids_games, kids_lock, kids_status, kids_unlock, kids_update,
 };
 pub use install::{cancel_download, download_game, get_download_progress, pause_download};
 pub use library::{game_name_from_app_path, reset_game_data, scan_installed_games, torrent_search_names, uninstall_game};

@@ -2124,6 +2124,34 @@ never toggled - toggling a mixed selection flips it instead of unifying it.
 Cards track their favorite flag themselves, so a bulk change is announced
 (`favoriteChange`) rather than waiting for a refetch.
 
+### 26. Kids mode: one door, held shut in the backend
+
+With kids mode on, every start is locked (`commands/kids.rs`, the static
+`LOCKED`, set in `setup` from `kids_mode`) and the shell renders only
+`KidsScreen`: the installed games of ONE user playlist (`kids_playlist`, a
+normal playlist marked by a config key, so menus, shelves, import and
+"Download playlist" all work on it unchanged), a click starts one, Unlock asks
+for the PIN. The screen has no tabs, search, top bar, panel or menus - a
+blocklist of controls would have to grow with every feature, a screen that
+shows nothing else does not. The backend holds the same line:
+`ensure_unlocked()` heads every command that downloads, deletes or writes
+settings, `set_config` refuses every `kids_*` key, and `launch_game` starts
+only kids-playlist games while locked - a control the screen forgot to hide
+still does nothing. Release builds have no devtools, so the frontend is not
+the hole; the guards are for our own mistakes.
+
+Each merged card starts the `kids_language` variant if installed, else
+English, else any installed one (`launch_variant`); not-installed games are
+not shown. The PIN (4-8 digits) is stored as `salt$sha256(salt||pin)` and is
+a child lock, not security: anyone with the DB can turn the mode off, and a
+digit PIN is brute-forced offline in no time. What makes guessing in the UI
+pointless is the wait after the fifth miss (`backoff_secs`: 30 s, doubling,
+at most 15 min), persisted in `kids_failures`/`kids_retry_at` so a restart
+does not reset it. A forgotten PIN is `--reset-kids-mode` (README); a running
+instance only hears it through the single-instance callback, which emits
+`kids-mode-reset`. Deleting the kids playlist turns the mode off - it cannot
+stay locked onto a list that is gone.
+
 ## Conventions
 
 - **Every Tauri command that touches the DB, filesystem, or network MUST be
