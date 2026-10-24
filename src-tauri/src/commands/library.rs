@@ -1029,6 +1029,7 @@ pub async fn uninstall_game(
     torrent_state: State<'_, TorrentState>,
     id: i64,
 ) -> Result<String, String> {
+    super::kids::ensure_unlocked()?;
     let (game, data_dir) = {
         let conn = db_state.lock()?;
         let game = queries::fetch_game_by_id(&conn, id)
@@ -1314,6 +1315,7 @@ pub async fn reset_game_data(
     torrent_state: State<'_, TorrentState>,
     id: i64,
 ) -> Result<ResetOutcome, String> {
+    super::kids::ensure_unlocked()?;
     let (game, data_dir) = {
         let conn = db_state.lock()?;
         let game = queries::fetch_game_by_id(&conn, id)

@@ -27,6 +27,7 @@ use tokio::sync::RwLock;
 
 use commands::{
     cancel_content_pack_install, cancel_download, pause_download,
+    kids_change_pin, kids_disable, kids_enable, kids_games, kids_lock, kids_status, kids_unlock, kids_update,
     download_game, factory_reset, get_available_collections, get_config,
     get_content_pack_progress, get_default_data_dir, get_download_progress, get_game,
     data_dir_is_empty, get_game_metadata, get_game_settings, get_log_dir, get_poster_dir,
@@ -588,8 +589,17 @@ pub fn run() {
     tauri::Builder::default()
         // A second instance would contend on the SQLite DB and corrupt the
         // torrent session; focus the existing window instead.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            use tauri::Manager;
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            use tauri::{Emitter, Manager};
+            // A running app hears the start option only here (§26).
+            if args.iter().any(|a| a == commands::kids::RESET_FLAG) {
+                if let Some(db) = app.try_state::<DbState>() {
+                    if let Ok(conn) = db.lock() {
+                        commands::kids::init(&conn, true);
+                    }
+                }
+                let _ = app.emit("kids-mode-reset", ());
+            }
             if let Some(win) = app.get_webview_window("main") {
                 let _ = win.unminimize();
                 let _ = win.set_focus();
@@ -733,6 +743,7 @@ pub fn run() {
                 commands::content_packs::cleanup_stale_content_packs(&conn, user_data_path);
             }
 
+            commands::kids::init(&conn, std::env::args().any(|a| a == commands::kids::RESET_FLAG));
             app.manage(DbState(Mutex::new(conn)));
             app.manage(TorrentState(RwLock::new(std::collections::HashMap::new())));
             app.manage(ContentPackState::new());
@@ -807,6 +818,14 @@ pub fn run() {
             download_game,
             cancel_download,
             pause_download,
+            kids_status,
+            kids_enable,
+            kids_update,
+            kids_change_pin,
+            kids_disable,
+            kids_unlock,
+            kids_lock,
+            kids_games,
             uninstall_game,
             reset_game_data,
             commands::archives::archive_usage,

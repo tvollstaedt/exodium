@@ -688,6 +688,7 @@ pub async fn factory_reset(
     media_state: State<'_, MediaTorrentState>,
     delete_game_data: bool,
 ) -> Result<(), String> {
+    super::kids::ensure_unlocked()?;
     log::info!("factory_reset called (delete_game_data={})", delete_game_data);
     // Read data_dir before clearing config (Mutex must not be held across await)
     let data_dir = if delete_game_data {

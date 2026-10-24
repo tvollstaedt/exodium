@@ -1,13 +1,14 @@
 import { createSignal, createEffect, on, Show, For, type Component } from "solid-js";
 import {
   SlidersHorizontal, HardDrive, Globe, Package, Info, FolderOpen, Gamepad2, Music, Download,
-  Network, Activity, Heart, TriangleAlert, type LucideProps,
+  Network, Activity, Heart, TriangleAlert, Lock, type LucideProps,
 } from "lucide-solid";
 import { Portal } from "solid-js/web";
 import { Dialog } from "@ark-ui/solid/dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Button } from "./Button";
 import { ContentPackSettings } from "./ContentPackSettings";
+import { KidsSettings } from "./KidsSettings";
 import { StorageTab } from "./StorageTab";
 import { SettingRow, SettingSwitch, SectionTitle } from "./SettingRow";
 import {
@@ -25,13 +26,14 @@ import {
 import { previewMuted, setPreviewMuted, ensurePreviewMutedLoaded } from "../stores/playback";
 import { setPreviewMutedNow } from "../stores/heroVideo";
 
-export type SettingsSection = "general" | "storage" | "network" | "packs" | "about";
+export type SettingsSection = "general" | "storage" | "network" | "packs" | "kids" | "about";
 
 const SECTIONS: { id: SettingsSection; label: string; icon: Component<LucideProps> }[] = [
   { id: "general", label: "General", icon: SlidersHorizontal },
   { id: "storage", label: "Storage", icon: HardDrive },
   { id: "network", label: "Network", icon: Globe },
   { id: "packs", label: "Content Packs", icon: Package },
+  { id: "kids", label: "Kids Mode", icon: Lock },
   { id: "about", label: "About", icon: Info },
 ];
 
@@ -411,6 +413,12 @@ export function SettingsDialog(props: Props) {
                   <Show when={props.section === "packs"}>
                     <div class="settings-body">
                       <ContentPackSettings />
+                    </div>
+                  </Show>
+
+                  <Show when={props.section === "kids"}>
+                    <div class="settings-body">
+                      <KidsSettings />
                     </div>
                   </Show>
 

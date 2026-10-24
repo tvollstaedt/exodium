@@ -18,6 +18,7 @@ pub async fn get_playlists(state: State<'_, DbState>) -> Result<Vec<Playlist>, S
 
 #[tauri::command]
 pub async fn create_playlist(state: State<'_, DbState>, name: String) -> Result<i64, String> {
+    super::kids::ensure_unlocked()?;
     let name = name.trim().to_string();
     if name.is_empty() {
         return Err("Playlist name cannot be empty".into());
@@ -45,6 +46,7 @@ pub async fn rename_playlist(
     id: i64,
     name: String,
 ) -> Result<(), String> {
+    super::kids::ensure_unlocked()?;
     let name = name.trim().to_string();
     if name.is_empty() {
         return Err("Playlist name cannot be empty".into());
@@ -55,8 +57,11 @@ pub async fn rename_playlist(
 
 #[tauri::command]
 pub async fn delete_playlist(state: State<'_, DbState>, id: i64) -> Result<(), String> {
+    super::kids::ensure_unlocked()?;
     let conn = state.lock()?;
-    queries::delete_playlist(&conn, id).map_err(|e| e.to_string())
+    queries::delete_playlist(&conn, id).map_err(|e| e.to_string())?;
+    super::kids::on_playlist_deleted(&conn, id);
+    Ok(())
 }
 
 #[tauri::command]
@@ -66,6 +71,7 @@ pub async fn set_playlist_membership(
     game_id: i64,
     member: bool,
 ) -> Result<(), String> {
+    super::kids::ensure_unlocked()?;
     let conn = state.lock()?;
     queries::set_playlist_membership(&conn, playlist_id, game_id, member).map_err(|e| e.to_string())
 }
@@ -78,6 +84,7 @@ pub async fn set_playlist_membership_many(
     game_ids: Vec<i64>,
     member: bool,
 ) -> Result<(), String> {
+    super::kids::ensure_unlocked()?;
     let conn = state.lock()?;
     let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     for game_id in game_ids {
@@ -122,6 +129,7 @@ pub async fn create_playlist_from(
     name: String,
     game_ids: Vec<i64>,
 ) -> Result<i64, String> {
+    super::kids::ensure_unlocked()?;
     let name = name.trim().to_string();
     if name.is_empty() {
         return Err("Playlist name cannot be empty".into());

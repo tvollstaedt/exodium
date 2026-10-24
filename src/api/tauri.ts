@@ -1104,3 +1104,52 @@ export async function installIssue(key: string): Promise<ReadingStatus> {
 export async function launchIssue(key: string): Promise<string> {
   return invoke("launch_issue", { key });
 }
+
+// ── Kids mode (§26) ──────────────────────────────────────────────────────────
+
+export interface KidsStatus {
+  enabled: boolean;
+  locked: boolean;
+  playlist_id: number | null;
+  language: string;
+  /** Seconds until the next PIN may be tried. */
+  retry_in: number;
+}
+
+export interface UnlockResult {
+  ok: boolean;
+  retry_in: number;
+}
+
+export async function kidsStatus(): Promise<KidsStatus> {
+  return invoke("kids_status");
+}
+
+/** `playlistId` null finds or creates the "Kids" playlist. */
+export async function kidsEnable(pin: string, playlistId: number | null, language: string): Promise<KidsStatus> {
+  return invoke("kids_enable", { pin, playlistId, language });
+}
+
+export async function kidsUpdate(playlistId: number, language: string): Promise<KidsStatus> {
+  return invoke("kids_update", { playlistId, language });
+}
+
+export async function kidsChangePin(oldPin: string, newPin: string): Promise<void> {
+  return invoke("kids_change_pin", { oldPin, newPin });
+}
+
+export async function kidsDisable(pin: string): Promise<KidsStatus> {
+  return invoke("kids_disable", { pin });
+}
+
+export async function kidsUnlock(pin: string): Promise<UnlockResult> {
+  return invoke("kids_unlock", { pin });
+}
+
+export async function kidsLock(): Promise<KidsStatus> {
+  return invoke("kids_lock");
+}
+
+export async function kidsGames(): Promise<Game[]> {
+  return invoke("kids_games");
+}

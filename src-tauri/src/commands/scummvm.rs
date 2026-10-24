@@ -929,6 +929,7 @@ pub async fn set_scummvm_options(
     id: i64,
     options: SvmOptions,
 ) -> Result<(), String> {
+    super::kids::ensure_unlocked()?;
     let conn = db_state.lock()?;
     let keys = [
         ("svm_variant", options.variant),

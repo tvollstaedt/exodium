@@ -702,6 +702,7 @@ pub async fn set_appleiigs_option(
     id: i64,
     option: Option<String>,
 ) -> Result<(), String> {
+    super::kids::ensure_unlocked()?;
     let conn = db_state.lock()?;
     match option.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
         Some(v) => queries::set_game_config(&conn, id, OPTION_KEY, v).map_err(|e| e.to_string()),

@@ -1447,6 +1447,7 @@ dependencies = [
  "flate2",
  "fs4",
  "futures-util",
+ "getrandom 0.2.17",
  "image",
  "junction",
  "lava_torrent",

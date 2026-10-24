@@ -526,3 +526,9 @@
 - Rejected: a "manage playlist" dialog with a checklist (rebuilds Browse's filters, does not scale to the catalogue); drag & drop onto shelves (shelves sit in another tab, and alone it is still one game at a time); Select all over the loaded cards only (smaller than the count in the header, silently).
 - Why: Thomas found picking games one by one tedious when curating playlists.
 - Gotcha: `get_game_refs` must reuse `build_where_clause` - a filter rebuilt elsewhere drifts from what the grid shows. Favorites are set, never toggled. A frame sees only rendered cards; Select all is the way past that.
+
+## 2026-10-24 - Kids mode: an own locked screen, held shut in the backend (#44)
+- Decision: With kids mode on, every start shows only `KidsScreen` - the installed games of one user playlist marked by `kids_playlist`, a click starts the `kids_language` variant (else EN, else any installed), Unlock asks for a 4-8 digit PIN (salted SHA-256, a wait from the fifth miss, persisted). Mutating commands call `kids::ensure_unlocked()`, `set_config` refuses `kids_*`, `launch_game` starts only kids games while locked. `--reset-kids-mode` turns it off, also in a running instance.
+- Rejected: hiding controls in the normal UI (a list that has to grow with every feature, each miss a way out); a playlist kind `kids` (every `kind = 'user'` filter would need it); OS authentication instead of a PIN (three implementations, and the child may know the family account); an auto-lock timer.
+- Why: #44 - a child at the computer must not download or wander through the catalogue.
+- Gotcha: A child lock, not security - the DB is the user's, and a digit PIN falls to an offline guess at once; the wait only stops guessing in the UI. The kids screen keeps no player: locking stops the music.

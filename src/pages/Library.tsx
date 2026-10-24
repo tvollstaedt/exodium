@@ -388,7 +388,10 @@ export function Library() {
   const [downloadAll, setDownloadAll] = createSignal<Playlist | null>(null);
   /** Games "Download playlist" would fetch, per playlist; 0 disables it. */
   const [missingByPlaylist, setMissingByPlaylist] = createSignal<Record<number, number>>({});
+  // The old answer goes first: SQLite hands a deleted playlist's id to the
+  // next one, which must not inherit "nothing to download" from it.
   const refreshMissing = (id: number) => {
+    setMissingByPlaylist(({ [id]: _stale, ...rest }) => rest);
     playlistMissingCount(id)
       .then((n) => setMissingByPlaylist((m) => ({ ...m, [id]: n })))
       .catch(() => {});

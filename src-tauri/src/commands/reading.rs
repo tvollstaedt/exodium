@@ -431,6 +431,7 @@ pub async fn open_issue(
     reading_state: State<'_, ReadingState>,
     key: String,
 ) -> Result<ReadingStatus, String> {
+    super::kids::ensure_unlocked()?;
     let (issue, data_dir) = {
         let conn = db_state.lock()?;
         let issue = reading_db::fetch_issue_by_key(&conn, &key)
@@ -577,6 +578,7 @@ pub async fn open_game_extra(
     id: i64,
     name: String,
 ) -> Result<ReadingStatus, String> {
+    super::kids::ensure_unlocked()?;
     let (game, data_dir, entry, size) = game_extra(&db_state, id, &name)?;
     // An imported eXo tree carries the extras already; the archive entry IS
     // the path under the game root.
@@ -742,6 +744,7 @@ pub async fn launch_issue(
     db_state: State<'_, DbState>,
     key: String,
 ) -> Result<String, String> {
+    super::kids::ensure_unlocked()?;
     let (issue, data_dir) = issue_and_data_dir(&db_state, &key)?;
     let launch_dir = runnable_launch_dir(&issue)?;
     if !issue.installed {

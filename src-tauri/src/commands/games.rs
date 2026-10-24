@@ -110,6 +110,7 @@ pub async fn get_game_refs(
 
 #[tauri::command]
 pub async fn set_favorites(state: State<'_, DbState>, ids: Vec<i64>, favorited: bool) -> Result<(), String> {
+    super::kids::ensure_unlocked()?;
     let conn = state.lock()?;
     queries::set_favorites(&conn, &ids, favorited).map_err(|e| e.to_string())
 }
@@ -276,6 +277,7 @@ pub async fn get_library_fingerprint(state: State<'_, DbState>) -> Result<String
 
 #[tauri::command]
 pub async fn toggle_favorite(state: State<'_, DbState>, id: i64) -> Result<bool, String> {
+    super::kids::ensure_unlocked()?;
     let conn = state.lock()?;
     queries::toggle_favorite(&conn, id).map_err(|e| e.to_string())
 }
@@ -308,6 +310,10 @@ pub async fn set_config(
     key: String,
     value: String,
 ) -> Result<(), String> {
+    super::kids::ensure_unlocked()?;
+    if super::kids::is_kids_key(&key) {
+        return Err(format!("{key} is set through the kids mode settings"));
+    }
     {
         let conn = state.lock()?;
         queries::set_config(&conn, &key, &value).map_err(|e| e.to_string())?;
@@ -1854,6 +1860,7 @@ pub async fn set_game_settings(
     cycles: Option<String>,
     custom_conf: Option<String>,
 ) -> Result<(), String> {
+    super::kids::ensure_unlocked()?;
     let conn = state.lock()?;
     // For each key: Some(value) = set, None = delete (inherit global)
     let pairs: &[(&str, &Option<String>)] = &[
@@ -1939,6 +1946,7 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
     // DOSBox path resolution + process spawning below.
     let (game, data_dir, crt_auto_enabled, fullscreen_enabled, keyboard_layout, per_game_config) = {
         let conn = db_state.lock()?;
+        super::kids::ensure_launch_allowed(&conn, id)?;
         let game = queries::fetch_game_by_id(&conn, id)
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("Game with id {} not found", id))?;
