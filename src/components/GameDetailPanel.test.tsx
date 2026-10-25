@@ -487,6 +487,86 @@ describe("GameDetailPanel", () => {
     dispose();
     host.remove();
   });
+
+  /** Fullscreen is a class on the same nodes (§12): the strip must survive
+   *  the toggle in both directions with its elements intact. */
+  it("keeps the same gallery elements when fullscreen is toggled", async () => {
+    vi.useFakeTimers();
+    const META = {
+      manual_path: null, manual_kind: null,
+      images: ["/pack/Magic Carpet-01.png", "/pack/Magic Carpet-02.png"],
+      thumbnails: ["/cache/1.png", "/cache/2.png"],
+    };
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_game_metadata") { return META; }
+      if (cmd === "get_game_variants") { return []; }
+      return null;
+    });
+    const { dispose } = mount(makeGame({ installed: true, in_library: true }));
+    await vi.advanceTimersByTimeAsync(3200);
+
+    const panel = document.body.querySelector<HTMLElement>('[data-testid="game-detail"]')!;
+    const toggle = document.body.querySelector<HTMLButtonElement>('[data-testid="game-detail-fullscreen"]')!;
+    const before = Array.from(document.body.querySelectorAll("img.gallery-thumb"));
+    expect(before.length).toBe(2);
+
+    toggle.click();
+    await vi.advanceTimersByTimeAsync(50);
+    expect(panel.dataset.fullscreen).toBe("true");
+    expect(panel.classList.contains("is-fullscreen")).toBe(true);
+    const during = Array.from(document.body.querySelectorAll("img.gallery-thumb"));
+    expect(during[0]).toBe(before[0]);
+    expect(during[1]).toBe(before[1]);
+
+    toggle.click();
+    await vi.advanceTimersByTimeAsync(50);
+    expect(panel.dataset.fullscreen).toBe("false");
+    const after = Array.from(document.body.querySelectorAll("img.gallery-thumb"));
+    expect(after[0]).toBe(before[0]);
+    expect(after[1]).toBe(before[1]);
+    dispose();
+  });
+
+  it("Escape with the panel closed leaves the fullscreen preference alone", async () => {
+    const { setPanelFullscreen, panelFullscreen } = await import("../stores/detailPanel");
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const dispose = render(() => <GameDetailPanel game={null} onClose={() => {}} />, host);
+    await setPanelFullscreen(true);
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(panelFullscreen()).toBe(true);
+    await setPanelFullscreen(false);
+    dispose();
+    host.remove();
+  });
+
+  it("Escape leaves fullscreen first and closes the panel second", async () => {
+    vi.useFakeTimers();
+    const onClose = vi.fn();
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const dispose = render(() => <GameDetailPanel game={makeGame()} onClose={onClose} />, host);
+    await vi.advanceTimersByTimeAsync(3200);
+
+    const panel = document.body.querySelector<HTMLElement>('[data-testid="game-detail"]')!;
+    document.body.querySelector<HTMLButtonElement>('[data-testid="game-detail-fullscreen"]')!.click();
+    await vi.advanceTimersByTimeAsync(50);
+    expect(panel.dataset.fullscreen).toBe("true");
+
+    const escape = () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    escape();
+    expect(panel.dataset.fullscreen).toBe("false");
+    expect(onClose).not.toHaveBeenCalled();
+    // The preference is written, so the next open is not fullscreen either.
+    expect(mockInvoke.mock.calls.some((c) => c[0] === "set_config"
+      && (c[1] as { key: string; value: string }).key === "detail_panel_fullscreen"
+      && (c[1] as { key: string; value: string }).value === "0")).toBe(true);
+
+    escape();
+    expect(onClose).toHaveBeenCalledTimes(1);
+    dispose();
+    host.remove();
+  });
 });
 
 describe("GameDetailPanel articles", () => {

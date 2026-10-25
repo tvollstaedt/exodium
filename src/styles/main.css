@@ -46,7 +46,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 28px;
+  height: var(--titlebar-h);
   background: var(--bg-primary);
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
   flex-shrink: 0;
@@ -3192,10 +3192,9 @@ body {
   top: 0;
   right: 0;
   bottom: 0;
-  /* The description now runs the full width instead of sharing it with the
-     field table, so this only has to be a comfortable reading measure - it no
-     longer has to be wide enough for two columns at once. */
-  width: clamp(380px, 40vw, 560px);
+  /* A comfortable reading measure by default; the resizer sets the variable
+     (a window fraction, clamped in detailPanelLayout.ts), fullscreen ignores it. */
+  width: var(--detail-panel-w, clamp(380px, 40vw, 560px));
   z-index: 150;
   background: var(--bg-secondary);
   border-left: 1px solid rgba(255, 255, 255, 0.08);
@@ -3214,7 +3213,42 @@ body {
   to   { transform: translateX(0);    opacity: 1; }
 }
 
-.game-detail-close {
+/* Drag handle on the panel's left edge. Inside the panel (overflow: hidden
+   would clip anything hanging outside), wide enough to grab, visible only
+   under the pointer. */
+.game-detail-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 8px;
+  z-index: 2;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.game-detail-resizer::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.game-detail-resizer:hover::after,
+body.is-resizing-panel .game-detail-resizer::after {
+  opacity: 0.8;
+}
+
+body.is-resizing-panel {
+  user-select: none;
+  cursor: col-resize;
+}
+
+.game-detail-close,
+.game-detail-fullscreen {
   position: absolute;
   top: 12px;
   right: 12px;
@@ -3238,11 +3272,23 @@ body {
   color: var(--danger);
 }
 
+.game-detail-fullscreen {
+  right: 48px;
+  font-size: 14px;
+}
+
+.game-detail-fullscreen:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: var(--text-primary);
+}
+
 /* ── Hover controls over the artwork ─────────────────────────────────────────
-   Close, sound, replay and the zoom hint all sit ON the cover. At rest the
-   panel opens on the artwork alone; the controls arrive with the pointer.
-   Focus counts as hover, or a keyboard user tabs to buttons they cannot see. */
+   Close, fullscreen, sound, replay and the zoom hint all sit ON the cover. At
+   rest the panel opens on the artwork alone; the controls arrive with the
+   pointer. Focus counts as hover, or a keyboard user tabs to buttons they
+   cannot see. */
 .game-detail-close,
+.game-detail-fullscreen,
 .game-detail-video-sound,
 .game-detail-video-replay,
 .game-detail-zoom-hint {
@@ -3250,9 +3296,11 @@ body {
 }
 
 .game-detail-hero:hover .game-detail-close,
+.game-detail-hero:hover .game-detail-fullscreen,
 .game-detail-hero:hover .game-detail-video-replay,
 .game-detail-hero:hover .game-detail-zoom-hint,
-.game-detail-close:focus-visible {
+.game-detail-close:focus-visible,
+.game-detail-fullscreen:focus-visible {
   opacity: 1;
 }
 
@@ -3329,8 +3377,9 @@ body {
   background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
 }
 
+/* First child of the body, which carries the horizontal padding. */
 .game-detail-hero-info {
-  padding: 12px 16px 8px;
+  padding: 4px 0 2px;
 }
 
 .game-detail-title {
@@ -3343,15 +3392,15 @@ body {
 
 
 .game-detail-body {
-  padding: 8px 16px 12px;
+  padding: 8px 16px 10px;
   display: flex;
   flex-direction: column;
   gap: 10px;
   flex: 1;
   min-height: 0; /* required for nested .game-detail-scroll to size + scroll */
-  /* Escape hatch for very short windows: once the pinned blocks (actions or
-     Versions list + media strip) plus the scroll region's min-height exceed
-     the panel, the body scrolls instead of clipping the gallery. */
+  /* Escape hatch for very short windows: once the pinned blocks (title,
+     actions or Versions list) plus the scroll region's min-height exceed the
+     space above the media strip, the body scrolls instead of clipping. */
   overflow-y: auto;
 }
 
@@ -3886,6 +3935,8 @@ body {
   color: var(--text-secondary);
   line-height: 1.6;
   white-space: pre-wrap;
+  /* A reading measure: a panel dragged wide must not run the text across it. */
+  max-width: 75ch;
 }
 
 .game-detail-notes {
@@ -3908,9 +3959,9 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-top: 4px;
+  margin: 0 16px;
   flex-shrink: 0;
-  padding-top: 8px;
+  padding: 8px 0 12px;
   border-top: 1px solid rgba(255, 255, 255, 0.04);
 }
 
@@ -5283,6 +5334,9 @@ html.app-inactive .net-badge-dot.is-active {
    the bar reachable while a game is open. */
 :root {
   --player-h: 0px;
+  /* The custom title bar; the fullscreen detail panel starts below it so the
+     window controls stay reachable. */
+  --titlebar-h: 28px;
 }
 
 body.has-player {
@@ -5464,6 +5518,101 @@ body.has-player {
 .game-detail-backdrop,
 .game-detail-panel {
   bottom: var(--player-h);
+}
+
+/* ── Fullscreen ──────────────────────────────────────────────────────────────
+   The same nodes in a two-column grid: artwork over the gallery on the left,
+   the text column on the right. A class, never a remount - the gallery keeps
+   its elements across the toggle (§12). Starts below the title bar so the
+   window controls stay usable; the backdrop follows, or a click on them
+   closes the panel instead. */
+.game-detail-backdrop.is-fullscreen {
+  top: var(--titlebar-h);
+}
+
+.game-detail-panel.is-fullscreen {
+  top: var(--titlebar-h);
+  left: 0;
+  width: auto;
+  border-left: none;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(380px, 40%);
+  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "art  body"
+    "gallery body";
+}
+
+.game-detail-panel.is-fullscreen .game-detail-resizer {
+  display: none;
+}
+
+/* Static, so the buttons position against the panel's corner, not the art's. */
+.game-detail-panel.is-fullscreen .game-detail-hero {
+  grid-area: art;
+  position: static;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.game-detail-panel.is-fullscreen .game-detail-close,
+.game-detail-panel.is-fullscreen .game-detail-fullscreen {
+  opacity: 1;
+}
+
+.game-detail-panel.is-fullscreen .game-detail-hero-art {
+  flex: 1;
+  min-height: 0;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.game-detail-panel.is-fullscreen .game-detail-thumb,
+.game-detail-panel.is-fullscreen .game-detail-thumb-placeholder {
+  height: 100%;
+  aspect-ratio: auto;
+  max-height: none;
+}
+
+.game-detail-panel.is-fullscreen .game-detail-hero-video {
+  max-height: none;
+}
+
+.game-detail-panel.is-fullscreen .game-detail-body {
+  grid-area: body;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 14px;
+}
+
+/* Room for the two buttons in the panel's corner. */
+.game-detail-panel.is-fullscreen .game-detail-hero-info {
+  padding-right: 72px;
+}
+
+.game-detail-panel.is-fullscreen .game-detail-title {
+  font-size: 18px;
+}
+
+.game-detail-panel.is-fullscreen .game-detail-media {
+  grid-area: gallery;
+  max-height: 40vh;
+  overflow-y: auto;
+  padding: 10px 16px 12px;
+  margin: 0;
+}
+
+.game-detail-panel.is-fullscreen .game-detail-gallery-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+  overflow: visible;
+  padding-bottom: 0;
+}
+
+.game-detail-panel.is-fullscreen .gallery-thumb {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 4 / 3;
 }
 
 /* Theme row in the detail panel: sits with the Information block. */

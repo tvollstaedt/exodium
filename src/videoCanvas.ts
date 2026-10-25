@@ -101,14 +101,20 @@ export function attachCanvasPainter(
   } else {
     armRaf();
   }
-  // A paused element still owes its current frame (first open, seek).
+  // A paused element still owes its current frame (first open, seek) - and
+  // again after the canvas changes size, or a panel resize leaves it stale.
   video.addEventListener("loadeddata", paint);
   video.addEventListener("seeked", paint);
+  const resize = typeof ResizeObserver === "function"
+    ? new ResizeObserver(() => { if (video.paused || video.ended) { paint(); } })
+    : null;
+  resize?.observe(canvas);
 
   return () => {
     disposed = true;
     if (raf) { cancelAnimationFrame(raf); }
     video.removeEventListener("loadeddata", paint);
     video.removeEventListener("seeked", paint);
+    resize?.disconnect();
   };
 }

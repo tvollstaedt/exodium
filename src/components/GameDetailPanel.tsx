@@ -32,6 +32,8 @@ import { ensurePreviewMutedLoaded, previewMuted, setPreviewMuted } from "../stor
 import { attachCanvasPainter, ensureVideoMirrorKnown, needsCanvasVideo } from "../videoCanvas";
 import { musicJobs, getMusicState, requestTheme, playTheme, withdrawAutoTheme, pauseForGame, resumeFromGame, runningGameIds, togglePlay, currentTrack, wantedTrack, musicPlaying, musicAutoplay, musicUserPaused, playerHidden, ensureMusicAutoplayLoaded, musicUnsupported, MUSIC_QUEUED, isTimeoutError } from "../stores/music";
 import { attachVideo, showPreview, clearPreview, replayPreview, setPreviewMutedNow, setLightbox, stopForGame, heroPlayingFor, heroGameId, heroError, type VideoPort } from "../stores/heroVideo";
+import { ensureDetailPanelPrefsLoaded, panelFullscreen, setPanelFullscreen, panelWidthFraction, setPanelWidthFraction } from "../stores/detailPanel";
+import { clampPanelWidth, fractionFromPointer, snapFraction } from "../detailPanelLayout";
 
 interface Props {
   game: Game | null;
@@ -625,18 +627,62 @@ export function GameDetailPanel(props: Props) {
     // Consumed here: the selection's window handler must not act on it too.
     e.preventDefault();
     if (moreMenu()) { setMoreMenu(null); return; }
+    if (panelFullscreen()) { void setPanelFullscreen(false); return; }
     props.onClose();
   };
+
+  // ── Width and fullscreen ───────────────────────────────────────────────
+  // Both are a CSS variable and a class on the same nodes - nothing remounts,
+  // so the gallery keeps its elements across a drag or a toggle (§12).
+  const [windowWidth, setWindowWidth] = createSignal(window.innerWidth);
+  /** The fraction under the pointer while a drag is in progress. */
+  const [dragFraction, setDragFraction] = createSignal<number | null>(null);
+  let dragging = false;
+  const panelWidthPx = (): number | null => {
+    const f = dragFraction() ?? panelWidthFraction();
+    return f == null ? null : clampPanelWidth(f, windowWidth());
+  };
+  const onResizeStart = (e: PointerEvent & { currentTarget: HTMLElement }) => {
+    if (e.button !== 0) { return; }
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    document.body.classList.add("is-resizing-panel");
+    dragging = true;
+  };
+  const onResizeMove = (e: PointerEvent) => {
+    if (!dragging) { return; }
+    // A release the handle never saw (focus lost mid-drag) ends the drag here.
+    if (e.buttons === 0) { onResizeEnd(); return; }
+    setDragFraction(snapFraction(fractionFromPointer(e.clientX, windowWidth())));
+  };
+  const onResizeEnd = () => {
+    if (!dragging) { return; }
+    dragging = false;
+    document.body.classList.remove("is-resizing-panel");
+    // A click without a move keeps the CSS default instead of pinning it.
+    const f = dragFraction();
+    if (f == null) { return; }
+    setDragFraction(null);
+    // Store what is shown, so a drag past the clamp does not persist a width
+    // the next window size would read differently.
+    const ww = windowWidth();
+    void setPanelWidthFraction(clampPanelWidth(f, ww) / ww);
+  };
+  const toggleFullscreen = () => { void setPanelFullscreen(!panelFullscreen()); };
 
   // Register once for the lifetime of the component - the handler reads props.onClose()
   // reactively through the Proxy so it always calls the current callback.
   onMount(() => {
     ensureDismissedNotesLoaded();
     ensurePreviewMutedLoaded();
+    ensureDetailPanelPrefsLoaded();
     // Capture phase: the overlay-open guard must read the signals BEFORE
     // Ark's document-level handler closes the overlay in the same keypress.
     window.addEventListener("keydown", handleKeyDown, true);
     onCleanup(() => window.removeEventListener("keydown", handleKeyDown, true));
+    const onResize = () => setWindowWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    onCleanup(() => window.removeEventListener("resize", onResize));
   });
 
   // Own candidates, then the primary row's: an LP key with no file behind
@@ -1064,20 +1110,43 @@ export function GameDetailPanel(props: Props) {
   return (
     <Show when={props.game}>
       <Portal>
-        <div class="game-detail-backdrop" onClick={props.onClose} />
+        <div class={`game-detail-backdrop${panelFullscreen() ? " is-fullscreen" : ""}`} onClick={props.onClose} />
         {/* animationend bubbles, so only the panel's own slide-in counts -
             a child's spinner or badge burst must not settle the panel early. */}
         <div
-          class="game-detail-panel"
+          class={`game-detail-panel${panelFullscreen() ? " is-fullscreen" : ""}`}
           data-testid="game-detail"
+          data-fullscreen={panelFullscreen() ? "true" : "false"}
+          style={{ "--detail-panel-w": panelWidthPx() != null ? `${panelWidthPx()}px` : undefined }}
           onAnimationEnd={(e) => { if (e.target === e.currentTarget) { markSettled(); } }}
         >
-          {/* Hero: thumbnail + title. The close button lives INSIDE it so the
-              hover that reveals it survives the pointer reaching the button -
-              as a sibling, moving onto it left the hero un-hovered and the
-              control faded out from under the cursor. */}
+          {/* Pointer capture keeps the drag alive over the backdrop and the
+              video; a double-click returns to the CSS default. */}
+          <div
+            class="game-detail-resizer"
+            data-testid="game-detail-resizer"
+            title="Drag to resize, double-click to reset"
+            onPointerDown={onResizeStart}
+            onPointerMove={onResizeMove}
+            onPointerUp={onResizeEnd}
+            onPointerCancel={onResizeEnd}
+            onLostPointerCapture={onResizeEnd}
+            onDblClick={() => { void setPanelWidthFraction(null); }}
+          />
+          {/* Hero: the artwork. The buttons live INSIDE it so the hover that
+              reveals them survives the pointer reaching a button - as a
+              sibling, moving onto it left the hero un-hovered and the control
+              faded out from under the cursor. */}
           <div class="game-detail-hero">
             <button class="game-detail-close" onClick={props.onClose} title="Close">✕</button>
+            <button
+              class="game-detail-fullscreen"
+              data-testid="game-detail-fullscreen"
+              onClick={toggleFullscreen}
+              title={panelFullscreen() ? "Exit full screen" : "Full screen"}
+              aria-label={panelFullscreen() ? "Exit full screen" : "Full screen"}
+              aria-pressed={panelFullscreen()}
+            >{panelFullscreen() ? "⤡" : "⤢"}</button>
             <div class="game-detail-hero-art">
             <Show when={thumbSrc() && !imgError()}>
               <img class="game-detail-thumb-backdrop" src={thumbSrc()!} alt="" aria-hidden="true" />
@@ -1180,7 +1249,11 @@ export function GameDetailPanel(props: Props) {
               ><IconPlay size={22} /></button>
             </Show>
             </div>
+          </div>
 
+          {/* The body is the text column: in fullscreen it sits beside the
+              hero, so the title block belongs here rather than under the art. */}
+          <div class="game-detail-body">
             {/* Title, then who made it, then what kind of thing it is. The
                 three sit in that order because that is the order they answer
                 "what am I looking at" - and none of them competes with the
@@ -1207,9 +1280,7 @@ export function GameDetailPanel(props: Props) {
                 <Tag kind="emulator" value={emulatorName()} title="Emulator" />
               </div>
             </div>
-          </div>
 
-          <div class="game-detail-body">
             {/* Status message */}
             <Show when={currentStatus()}>
               <div class="game-detail-status">{currentStatus()}</div>
@@ -1563,47 +1634,48 @@ export function GameDetailPanel(props: Props) {
                 </div>
               </Show>
             </div>
-
-            {/* Media: screenshots/art - only renders if the metadata content
-                pack has assets for this game. Pinned to the bottom of the
-                panel so it's always visible. */}
-            <Show when={!metadataLoading() && metadata() && metadata()!.images.length > 0}>
-              <div class="game-detail-media">
-                {(() => {
-                  const visible = () => (metadata()?.images ?? []).filter((_, i) => !brokenImages().has(i));
-                  return (
-                    <Show when={metadata()!.images.length > 0 && visible().length > 0}>
-                      <div class="game-detail-section-label">
-                        Screenshots &amp; Art
-                        <span class="section-count">{visible().length}</span>
-                      </div>
-                      <div class="game-detail-gallery-strip">
-                        <For each={metadata()!.images}>
-                          {(path, i) => (
-                            <img
-                              // Strip shows the cached 160px copy; the lightbox
-                              // opens the full-resolution file behind it.
-                              src={convertFileSrc(metadata()!.thumbnails[i()] ?? path)}
-                              class="gallery-thumb"
-                              loading="lazy"
-                              alt=""
-                              onClick={() => {
-                                const vi = visible().indexOf(path);
-                                setLightboxStart(lightboxIndexOfImage(vi >= 0 ? vi : 0));
-                                setLightboxOpen(true);
-                              }}
-                              onError={() => setBrokenImages((prev) => new Set(prev).add(i()))}
-                              style={{ display: brokenImages().has(i()) ? "none" : undefined }}
-                            />
-                          )}
-                        </For>
-                      </div>
-                    </Show>
-                  );
-                })()}
-              </div>
-            </Show>
           </div>
+
+          {/* Media: screenshots/art - only renders if the metadata content
+              pack has assets for this game. A child of the panel, not the
+              body: pinned to the bottom beside the panel, the hero's column
+              in fullscreen. */}
+          <Show when={!metadataLoading() && metadata() && metadata()!.images.length > 0}>
+            <div class="game-detail-media">
+              {(() => {
+                const visible = () => (metadata()?.images ?? []).filter((_, i) => !brokenImages().has(i));
+                return (
+                  <Show when={metadata()!.images.length > 0 && visible().length > 0}>
+                    <div class="game-detail-section-label">
+                      Screenshots &amp; Art
+                      <span class="section-count">{visible().length}</span>
+                    </div>
+                    <div class="game-detail-gallery-strip">
+                      <For each={metadata()!.images}>
+                        {(path, i) => (
+                          <img
+                            // Strip shows the cached 160px copy; the lightbox
+                            // opens the full-resolution file behind it.
+                            src={convertFileSrc(metadata()!.thumbnails[i()] ?? path)}
+                            class="gallery-thumb"
+                            loading="lazy"
+                            alt=""
+                            onClick={() => {
+                              const vi = visible().indexOf(path);
+                              setLightboxStart(lightboxIndexOfImage(vi >= 0 ? vi : 0));
+                              setLightboxOpen(true);
+                            }}
+                            onError={() => setBrokenImages((prev) => new Set(prev).add(i()))}
+                            style={{ display: brokenImages().has(i()) ? "none" : undefined }}
+                          />
+                        )}
+                      </For>
+                    </div>
+                  </Show>
+                );
+              })()}
+            </div>
+          </Show>
         </div>
 
         <Lightbox

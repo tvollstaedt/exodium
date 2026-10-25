@@ -532,3 +532,9 @@
 - Rejected: hiding controls in the normal UI (a list that has to grow with every feature, each miss a way out); a playlist kind `kids` (every `kind = 'user'` filter would need it); OS authentication instead of a PIN (three implementations, and the child may know the family account); an auto-lock timer.
 - Why: #44 - a child at the computer must not download or wander through the catalogue.
 - Gotcha: A child lock, not security - the DB is the user's, and a digit PIN falls to an offline guess at once; the wait only stops guessing in the UI. The kids screen keeps no player: locking stops the music.
+
+## 2026-10-25 - Detail panel: a draggable width and a fullscreen mode on the same nodes (#46)
+- Decision: The panel stays an overlay. A handle on its left edge sets `--detail-panel-w` from a window FRACTION (`detail_panel_width`; snaps at 1/3, 1/2, 2/3; double-click resets), and `detail_panel_fullscreen` switches the same DOM into a two-column grid below the title bar (hero plus gallery grid left, text right). Escape leaves fullscreen before it closes the panel.
+- Rejected: fixed buttons for thirds (less flexible than a handle with snap points); shrinking the grid beside the panel (every drag would reflow the whole grid, and grid layout is already the expensive part).
+- Why: A 560px cap wastes a wide display, and the 48px screenshot strip cannot be read.
+- Gotcha: Width and fullscreen are a variable and a class on nodes that never remount, which is what keeps the gallery-identity guard (§12) true across the toggle. The text column never drops below the 380px panel minimum, so the field grid's two columns hold at every width and its breakpoint stays a viewport query - a container query at the same 470px made the default panel one-column below a 1255px window.

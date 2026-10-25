@@ -50,4 +50,49 @@ describe("detail panel", () => {
     // The panel is one component for every variant (§12): it must still be there.
     await expect($('[data-testid="game-detail"]')).toBeDisplayed();
   });
+
+  it("toggles fullscreen on and off again", async () => {
+    const panel = $('[data-testid="game-detail"]');
+    const toggle = panel.$('[data-testid="game-detail-fullscreen"]');
+    const windowWidth = await browser.execute(() => window.innerWidth);
+    const before = (await panel.getSize()).width;
+    expect(before).toBeLessThan(windowWidth);
+
+    // Hover-revealed over the hero; moving onto it is what makes it clickable.
+    await toggle.moveTo();
+    await toggle.click();
+    await browser.waitUntil(async () => (await panel.getAttribute("data-fullscreen")) === "true", {
+      timeoutMsg: "the panel did not enter fullscreen",
+    });
+    expect((await panel.getSize()).width).toBe(windowWidth);
+    // The title block stays in the same panel (nothing remounts).
+    await expect(panel.$('[data-testid="game-detail-title"]')).toBeDisplayed();
+
+    await toggle.click();
+    await browser.waitUntil(async () => (await panel.getAttribute("data-fullscreen")) === "false", {
+      timeoutMsg: "the panel did not leave fullscreen",
+    });
+    expect((await panel.getSize()).width).toBe(before);
+  });
+
+  it("drags the handle to widen the panel and double-clicks it to reset", async () => {
+    const panel = $('[data-testid="game-detail"]');
+    const handle = $('[data-testid="game-detail-resizer"]');
+    const before = (await panel.getSize()).width;
+
+    await browser.action("pointer")
+      .move({ origin: handle })
+      .down()
+      .move({ origin: "pointer", x: -200, y: 0, duration: 100 })
+      .up()
+      .perform();
+    await browser.waitUntil(async () => (await panel.getSize()).width > before + 100, {
+      timeoutMsg: "dragging the handle did not widen the panel",
+    });
+
+    await handle.doubleClick();
+    await browser.waitUntil(async () => (await panel.getSize()).width === before, {
+      timeoutMsg: "double-clicking the handle did not reset the width",
+    });
+  });
 });
