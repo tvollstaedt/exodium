@@ -822,11 +822,25 @@ So `field()` falls back to the EN row per field, `descriptionSource()` falls
 back to EN text with a visible "English description - no German text" note, and
 the Manual button appends the language of the manual it will actually open.
 
-Layout: the panel is `clamp(380px, 40vw, 560px)` and `.game-detail-columns`
-wraps fields and description side by side via flex-basis (no media query), so
-the screenshot strip stays on screen. Never give the flexible middle region
-`min-height: 0` again - that let the flex solver collapse the description to
-an invisible 0px and clip the gallery.
+Layout: the panel is an overlay on the right edge, `clamp(380px, 40vw, 560px)`
+wide until the handle on its left edge is dragged. The width is stored as a
+FRACTION of the window (`detail_panel_width`, `stores/detailPanel.ts`) and
+applied through `--detail-panel-w`, clamped to 380px and to the window minus
+the grid's 240px, snapping at 1/3, 1/2 and 2/3 (`detailPanelLayout.ts`, pure,
+tested); a double-click on the handle clears the key and the CSS default is
+back. A pixel value would read wrong on the next display or window size.
+`detail_panel_fullscreen` puts the panel between the title bar
+(`--titlebar-h`) and the player bar and switches the SAME nodes into a
+two-column grid (`.is-fullscreen`: hero over the gallery grid on the left,
+`.game-detail-body` with title, notes, chips, actions and text on the right).
+Both are a variable and a class, never a remount - the gallery-identity guard
+below covers the toggle too. Escape peels one layer at a time: lightbox or
+manual, the actions menu, fullscreen, then the panel. The text column is
+never narrower than the 380px panel minimum, fullscreen included, so the
+field grid keeps its two columns and its viewport breakpoint; the
+description is capped at `75ch`. Never give the flexible middle region `min-height: 0`
+again - that let the flex solver collapse the description to an invisible 0px
+and clip the gallery.
 
 **Every effect in the panel keys on an id, never on `props.game`** - the grid
 hands over a fresh object for the same row on every library refresh, and an
@@ -837,9 +851,10 @@ refreshes the row` (`GameDetailPanel.test.tsx`) is that guard - it asserts
 NODE IDENTITY, because a remounted strip decodes its images again.
 
 **What moves the gallery is the PANEL's height, not the panel's content.**
-The strip sits below `.game-detail-scroll`, which is `flex: 1` with a
-`min-height: 120px` floor, so content growing inside that region (the "On
-disk" row landing late, a note, the articles block) only makes it scroll.
+The strip is the panel's last child, below `.game-detail-body`, whose
+`.game-detail-scroll` is `flex: 1` with a `min-height: 120px` floor, so
+content growing inside that region (the "On disk" row landing late, a note,
+the articles block) only makes it scroll.
 Anything that changes the panel's own height drags the strip instead - which
 is how the player bar's 56 px (`body.has-player`) became a visible flicker
 when a theme probe opened and closed it (§14, DECISIONS 2026-09-20). Measure
