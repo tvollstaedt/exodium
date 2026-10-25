@@ -6,13 +6,14 @@ import {
 import { Portal } from "solid-js/web";
 import { Dialog } from "@ark-ui/solid/dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { open as openFolderDialog } from "@tauri-apps/plugin-dialog";
 import { Button } from "./Button";
 import { ContentPackSettings } from "./ContentPackSettings";
 import { KidsSettings } from "./KidsSettings";
 import { StorageTab } from "./StorageTab";
 import { SettingRow, SettingSwitch, SectionTitle } from "./SettingRow";
 import {
-  getConfig, setConfig, setRateLimits, scanInstalledGames, openLogFolder,
+  getConfig, setConfig, setRateLimits, scanInstalledGames, openLogFolder, listMidiOutputs,
   win9xNetworkStatus, enableWin9xNetwork, disableWin9xNetwork, type Win9xNetworkStatus,
 } from "../api/tauri";
 import { applyNetworkMode, isOffline, loadNetworkMode } from "../stores/network";
@@ -66,6 +67,26 @@ const KEYBOARD_LAYOUTS: [string, string][] = [
   ["tr", "Turkish"],
 ];
 
+/** Nuked SC-55 needs Staging's CLAP plugin in a `plugins/` folder, which the
+ *  staged build does not ship - the backend takes the value, the UI hides it. */
+const SOUNDCANVAS_AVAILABLE = false;
+const MIDI_PORT_PREFIX = "port:";
+
+const GM_OUTPUTS: [string, string][] = [
+  ["", "Standard"],
+  ["fluidsynth", "FluidSynth"],
+  ...(SOUNDCANVAS_AVAILABLE ? [["soundcanvas", "Nuked SC-55"] as [string, string]] : []),
+];
+
+/** The listed ports plus the stored one when it is unplugged, so the select
+ *  still shows what will be written. */
+function midiPortOptions(ports: string[], current: string): [string, string][] {
+  const names = [...ports];
+  const stored = current.startsWith(MIDI_PORT_PREFIX) ? current.slice(MIDI_PORT_PREFIX.length) : "";
+  if (stored && !names.includes(stored)) { names.push(stored); }
+  return names.map((n) => [`${MIDI_PORT_PREFIX}${n}`, `Device: ${n}`]);
+}
+
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -88,6 +109,10 @@ export function SettingsDialog(props: Props) {
   const [crtAuto, setCrtAuto] = createSignal(true);
   const [defaultFullscreen, setDefaultFullscreen] = createSignal(false);
   const [keyboardLayout, setKeyboardLayout] = createSignal("");
+  const [midiGm, setMidiGm] = createSignal("");
+  const [midiMt32, setMidiMt32] = createSignal("");
+  const [midiRomDir, setMidiRomDir] = createSignal("");
+  const [midiPorts, setMidiPorts] = createSignal<string[]>([]);
   const [scanning, setScanning] = createSignal(false);
   const [scanResult, setScanResult] = createSignal("");
   const [logOpenError, setLogOpenError] = createSignal("");
@@ -110,17 +135,24 @@ export function SettingsDialog(props: Props) {
     loadNetworkMode();
     loadSeeding();
     win9xNetworkStatus().then(setNetStatus).catch(() => {});
+    listMidiOutputs().then(setMidiPorts).catch(() => setMidiPorts([]));
     try {
-      const [shader, fs, layout, down, up] = await Promise.all([
+      const [shader, fs, layout, gm, mt32, romDir, down, up] = await Promise.all([
         getConfig("global_glshader"),
         getConfig("default_fullscreen"),
         getConfig("keyboard_layout"),
+        getConfig("midi_gm_output"),
+        getConfig("midi_mt32_output"),
+        getConfig("midi_rom_dir"),
         getConfig("rate_limit_down_kbps"),
         getConfig("rate_limit_up_kbps"),
       ]);
       setCrtAuto(shader == null || shader === "crt-auto");
       setDefaultFullscreen(fs === "fullscreen");
       setKeyboardLayout(layout ?? "");
+      setMidiGm(gm ?? "");
+      setMidiMt32(mt32 ?? "");
+      setMidiRomDir(romDir ?? "");
       setLimitDown(down ?? "");
       setLimitUp(up ?? "");
     } catch (e) {
@@ -147,6 +179,27 @@ export function SettingsDialog(props: Props) {
     } catch (e) {
       console.error("[settings] failed to save keyboard_layout:", e);
       setKeyboardLayout(prev);
+    }
+  };
+
+  const saveChoice = (key: string, current: () => string, set: (v: string) => void) => async (next: string) => {
+    const prev = current();
+    set(next);
+    try {
+      await setConfig(key, next);
+    } catch (e) {
+      console.error(`[settings] failed to save ${key}:`, e);
+      set(prev);
+    }
+  };
+  const saveMidiGm = saveChoice("midi_gm_output", midiGm, setMidiGm);
+  const saveMidiMt32 = saveChoice("midi_mt32_output", midiMt32, setMidiMt32);
+  const saveMidiRomDir = saveChoice("midi_rom_dir", midiRomDir, setMidiRomDir);
+
+  const chooseMidiRomDir = async () => {
+    const picked = await openFolderDialog({ directory: true, multiple: false, defaultPath: midiRomDir() || undefined });
+    if (typeof picked === "string" && picked) {
+      await saveMidiRomDir(picked);
     }
   };
 
@@ -315,6 +368,36 @@ export function SettingsDialog(props: Props) {
                           >
                             <For each={KEYBOARD_LAYOUTS}>{([code, label]) => <option value={code}>{label}</option>}</For>
                           </select>
+                        </SettingRow>
+                        <SettingRow htmlFor="midi-gm" label="General MIDI" hint="Where General MIDI music goes. Standard is each game's own setup, played through FluidSynth on macOS and Linux; a MIDI device plays it on your hardware.">
+                          <select
+                            id="midi-gm"
+                            class="game-settings-select"
+                            value={midiGm()}
+                            onChange={(e) => void saveMidiGm(e.currentTarget.value)}
+                          >
+                            <For each={[...GM_OUTPUTS, ...midiPortOptions(midiPorts(), midiGm())]}>{([code, label]) => <option value={code} selected={code === midiGm()}>{label}</option>}</For>
+                          </select>
+                        </SettingRow>
+                        <SettingRow htmlFor="midi-mt32" label="MT-32" hint="Games set up for a Roland MT-32. Standard is the built-in MT-32 emulation; a MIDI device sends the music to your own module.">
+                          <select
+                            id="midi-mt32"
+                            class="game-settings-select"
+                            value={midiMt32()}
+                            onChange={(e) => void saveMidiMt32(e.currentTarget.value)}
+                          >
+                            <For each={[["", "Standard"] as [string, string], ...midiPortOptions(midiPorts(), midiMt32())]}>{([code, label]) => <option value={code} selected={code === midiMt32()}>{label}</option>}</For>
+                          </select>
+                        </SettingRow>
+                        <SettingRow
+                          label="MIDI ROM folder"
+                          value={midiRomDir() || "Not set"}
+                          hint="Your own MT-32 ROMs and soundfonts, in the subfolders mt32-roms and soundfonts."
+                        >
+                          <Button id="midi-rom-change" variant="small" onClick={() => void chooseMidiRomDir()}>Change…</Button>
+                          <Show when={midiRomDir()}>
+                            <Button id="midi-rom-clear" variant="small" onClick={() => void saveMidiRomDir("")}>Clear</Button>
+                          </Show>
                         </SettingRow>
                       </section>
 

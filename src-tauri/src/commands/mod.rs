@@ -21,6 +21,9 @@ pub(crate) mod updates;
 pub(crate) mod scummvm;
 pub(crate) mod appleiigs;
 pub(crate) mod win9x;
+pub(crate) mod midi;
+
+pub use midi::list_midi_outputs;
 
 pub use content_packs::{
     cancel_content_pack_install, get_content_pack_progress, install_content_pack,

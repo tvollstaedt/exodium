@@ -55,6 +55,7 @@ eXoDOS ships with a Windows-only LaunchBox frontend and requires downloading the
 - ✅ Stream individual games on demand - no full collection download required
 - ✅ Launch via bundled DOSBox Staging with no external dependencies
 - ✅ MT-32 and General MIDI music - Roland ROMs and the SoundCanvas soundfont are fetched from the collection and eXoDOS' DOSBox-ECE configs are translated for DOSBox Staging automatically
+- ✅ Your own MIDI hardware - pick a General MIDI and an MT-32 output device in Settings and each game's own setup decides which one it uses; your own ROMs and soundfonts come from a folder you choose
 - ✅ Game manuals and per-game media galleries - box scans, in-game screenshots, and ads
 - ✅ Preview videos read straight out of the collection's archives, without downloading the game first
 - ✅ A theme player - a game's theme streams from its archive when you open its details, and Browse doubles as a jukebox over the games that have one

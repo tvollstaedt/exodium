@@ -903,6 +903,7 @@ pub(crate) async fn launch_win9x_game(
     id: i64,
     data_dir: &str,
     fullscreen: bool,
+    midi: &super::midi::MidiPrefs,
     per_game_config: &std::collections::HashMap<String, String>,
 ) -> Result<String, String> {
     let source = game.torrent_source.as_deref().unwrap_or("eXoWin9x");
@@ -984,6 +985,7 @@ pub(crate) async fn launch_win9x_game(
             &exo_dir,
             &conf_dir,
             fullscreen,
+            midi,
             per_game_config,
         )
     }
@@ -999,6 +1001,7 @@ fn launch_dosbox_x(
     exo_dir: &Path,
     conf_dir: &Path,
     fullscreen: bool,
+    midi: &super::midi::MidiPrefs,
     per_game_config: &std::collections::HashMap<String, String>,
 ) -> Result<String, String> {
     let Some(engine) = resolve_dosbox_x(app, torrent_root, data_dir) else {
@@ -1069,6 +1072,15 @@ fn launch_dosbox_x(
         fullscreen,
         ne2000_override()
     );
+    // Every play.conf says `mididevice = default`, so only the General MIDI
+    // output applies here (§9).
+    let exo_soundfont = exo_dir.join("mt32/SoundCanvas.sf2");
+    frag.push_str(&super::midi::dosbox_frag(
+        super::midi::DosboxEngine::DosboxX,
+        None,
+        midi,
+        exo_soundfont.is_file().then_some(exo_soundfont.as_path()),
+    ));
     if let Some(custom) = per_game_config.get("custom_conf") {
         let trimmed = custom.trim();
         if !trimmed.is_empty() {

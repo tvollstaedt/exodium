@@ -52,11 +52,16 @@ pub async fn download_game(
     id: i64,
 ) -> Result<String, String> {
     super::kids::ensure_unlocked()?;
-    let game = {
+    let (game, midi_config) = {
         let conn = db_state.lock()?;
-        queries::fetch_game_by_id(&conn, id)
+        let game = queries::fetch_game_by_id(&conn, id)
             .map_err(|e| e.to_string())?
-            .ok_or_else(|| format!("Game {} not found", id))?
+            .ok_or_else(|| format!("Game {} not found", id))?;
+        (game, super::midi::MidiConfig::load(&conn)?)
+    };
+    let fluidsynth_without_font = {
+        let midi = midi_config.resolve();
+        midi.gm == super::midi::GmOutput::FluidSynth && midi.roms.soundfont.is_none()
     };
 
     if game.installed {
@@ -273,10 +278,12 @@ pub async fn download_game(
         }
 
         // MT-32 ROMs and soundfont (util.zip, ~630 MB) fetched once, with
-        // the first game whose conf requests MIDI.
+        // the first game whose conf requests MIDI - or with any game once
+        // the user chose FluidSynth and has no soundfont of their own.
         let mt32_dir = main_mgr.torrent_root().join("eXo/mt32");
         let needs_midi_assets = !mt32_dir.exists()
-            && game_requests_midi(&main_mgr.torrent_root(), game.dosbox_conf.as_deref());
+            && (fluidsynth_without_font
+                || game_requests_midi(&main_mgr.torrent_root(), game.dosbox_conf.as_deref()));
         let needs_ece = cfg!(windows)
             && game
                 .dosbox_variant

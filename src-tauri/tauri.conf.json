@@ -86,14 +86,16 @@
       "deb": {
         "depends": [
           "gstreamer1.0-plugins-good",
-          "gstreamer1.0-libav"
+          "gstreamer1.0-libav",
+          "libasound2"
         ]
       },
       "rpm": {
         "depends": [
           "gstreamer1-plugins-base",
           "gstreamer1-plugins-good",
-          "gstreamer1-plugins-ugly-free"
+          "gstreamer1-plugins-ugly-free",
+          "alsa-lib"
         ]
       }
     }
