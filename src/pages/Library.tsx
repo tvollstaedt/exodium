@@ -764,7 +764,10 @@ export function Library() {
   ));
   onMount(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && (selectMode() || selectionCount() > 0)) { exitSelection(); }
+      if (e.key !== "Escape" || e.defaultPrevented) { return; }
+      // Ark marks the Escape it dismisses on; a dialog that keeps it (closing, closeOnEscape off) still owns it.
+      if (e.target instanceof Element && e.target.closest('[role="dialog"]')) { return; }
+      if (selectMode() || selectionCount() > 0) { exitSelection(); }
     };
     window.addEventListener("keydown", onKey);
     let marqueeBase: ReturnType<typeof selectedRefs> = [];

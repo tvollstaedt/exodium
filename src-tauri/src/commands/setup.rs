@@ -848,6 +848,7 @@ pub async fn setup_start(
 ) -> Result<String, String> {
     use tauri::Manager;
 
+    super::kids::ensure_unlocked()?;
     // Save data_dir to config. A fresh install keeps the historical root
     // name, so nothing existing has to move.
     {
@@ -993,6 +994,7 @@ pub async fn setup_import(
     db_state: State<'_, DbState>,
     torrent_state: State<'_, TorrentState>,
 ) -> Result<usize, String> {
+    super::kids::ensure_unlocked()?;
     // Clone the Arc and drop the read guard immediately (same pattern as
     // get_setup_status) - holding it across the multi-second import blocks
     // factory_reset's write lock into its 5s timeout.
@@ -1084,6 +1086,7 @@ pub async fn setup_from_local(
     media_state: State<'_, MediaTorrentState>,
     exodos_path: String,
 ) -> Result<usize, String> {
+    super::kids::ensure_unlocked()?;
     // A media manager from a previous run holds the session this replaces.
     media_state.clear().await;
     let root = PathBuf::from(&exodos_path);

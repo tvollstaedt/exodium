@@ -2134,10 +2134,13 @@ normal playlist marked by a config key, so menus, shelves, import and
 for the PIN. The screen has no tabs, search, top bar, panel or menus - a
 blocklist of controls would have to grow with every feature, a screen that
 shows nothing else does not. The backend holds the same line:
-`ensure_unlocked()` heads every command that downloads, deletes or writes
-settings, `set_config` refuses every `kids_*` key, and `launch_game` starts
-only kids-playlist games while locked - a control the screen forgot to hide
-still does nothing. Release builds have no devtools, so the frontend is not
+`ensure_unlocked()` heads every command that downloads, deletes, writes
+settings or user state, or changes the setup (the startup scan runs locked,
+adoption does not), `set_config` refuses every `kids_*` key, and `launch_game`
+starts only kids-playlist games while locked - a control the screen forgot to
+hide still does nothing. The download queue (`batchDownloads.ts`) starts
+nothing while locked and goes on when the lock lifts; what is already
+running finishes, which is why the kids screen reloads on library changes. Release builds have no devtools, so the frontend is not
 the hole; the guards are for our own mistakes.
 
 Each merged card starts the `kids_language` variant if installed, else

@@ -922,6 +922,10 @@ pub async fn pause_download(
     id: i64,
 ) -> Result<(), String> {
     super::kids::ensure_unlocked()?;
+    // The marker and the deselection must not interleave with a resume, which
+    // deletes the marker at its end under the same lock.
+    let op_lock = game_op_lock(id);
+    let _op_guard = op_lock.lock().await;
     let (game_idx, gamedata_idx, source) = {
         let conn = db_state.lock()?;
         let game = queries::fetch_game_by_id(&conn, id)
@@ -941,8 +945,6 @@ pub async fn pause_download(
             game.torrent_source.unwrap_or_else(|| "eXoDOS".to_string()),
         )
     };
-    let op_lock = game_op_lock(id);
-    let _op_guard = op_lock.lock().await;
     let manager = { torrent_state.0.read().await.get(&source).cloned() };
     if let Some(manager) = manager {
         for idx in [game_idx, gamedata_idx].into_iter().flatten() {

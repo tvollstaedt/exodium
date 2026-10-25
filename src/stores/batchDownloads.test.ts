@@ -70,6 +70,46 @@ describe("download-all queue", () => {
     expect(getDownloadState(602)?.downloading).toBe(true);
   });
 
+  it("cancels every queued game of a playlist, not every second one", async () => {
+    const { enqueueDownloads, cancelQueued, queuedCount, MAX_ACTIVE } = await import("./batchDownloads");
+    const { getDownloadState } = await import("./downloads");
+    const ids = [611, 612, 613, 614, 615, 616, 617, 618];
+    enqueueDownloads(11, ids.map((gameId) => ({ gameId, title: `Game ${gameId}` })));
+    const queued = ids.slice(MAX_ACTIVE);
+    expect(queuedCount(11)).toBe(queued.length);
+
+    cancelQueued(11);
+    expect(queuedCount(11)).toBe(0);
+    expect(queued.map((id) => getDownloadState(id))).toEqual(queued.map(() => undefined));
+
+    finished.add(611);
+    finished.add(612);
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(started()).toEqual(ids.slice(0, MAX_ACTIVE));
+  });
+
+  it("holds the queue while kids mode is locked and goes on when it unlocks", async () => {
+    const { enqueueDownloads, queuedCount } = await import("./batchDownloads");
+    const { getDownloadState } = await import("./downloads");
+    const { setKidsStatus } = await import("./kids");
+    const status = (locked: boolean) => ({ enabled: true, locked, playlist_id: 1, language: "EN", retry_in: 0 });
+    const ids = [621, 622, 623, 624, 625, 626];
+    enqueueDownloads(12, ids.map((gameId) => ({ gameId, title: `Game ${gameId}` })));
+    expect(started()).toEqual(ids.slice(0, 4));
+
+    // A running download finishes under the lock: its slot stays empty.
+    setKidsStatus(status(true));
+    finished.add(621);
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(started()).toEqual(ids.slice(0, 4));
+    expect(getDownloadState(625)?.status).toBe("Queued");
+    expect(queuedCount(12)).toBe(2);
+
+    setKidsStatus(status(false));
+    expect(started()).toEqual([...ids.slice(0, 4), 625]);
+    expect(queuedCount(12)).toBe(1);
+  });
+
   it("frees a paused game's slot, and resuming puts it back in front", async () => {
     const { enqueueDownloads, resumeGameDownload, queuedCount } = await import("./batchDownloads");
     const { getDownloadState, pauseGameDownload } = await import("./downloads");

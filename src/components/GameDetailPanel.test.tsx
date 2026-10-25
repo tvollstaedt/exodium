@@ -96,6 +96,34 @@ describe("GameDetailPanel", () => {
     vi.useRealTimers();
   });
 
+  /** One Escape closes one layer: the panel marks the keypress consumed so
+   *  the selection's window handler does not exit the selection as well. */
+  it("marks the Escape it closes on as handled", async () => {
+    const onClose = vi.fn();
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const dispose = render(() => <GameDetailPanel game={makeGame()} onClose={onClose} />, host);
+    await new Promise((r) => setTimeout(r, 0));
+    const escape = new KeyboardEvent("keydown", { key: "Escape", cancelable: true, bubbles: true });
+    window.dispatchEvent(escape);
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(escape.defaultPrevented).toBe(true);
+    dispose();
+  });
+
+  it("leaves Escape alone while no game is open", async () => {
+    const onClose = vi.fn();
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const dispose = render(() => <GameDetailPanel game={null} onClose={onClose} />, host);
+    await new Promise((r) => setTimeout(r, 0));
+    const escape = new KeyboardEvent("keydown", { key: "Escape", cancelable: true, bubbles: true });
+    window.dispatchEvent(escape);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(escape.defaultPrevented).toBe(false);
+    dispose();
+  });
+
   /** The footprint row lives in the Information grid: a separate block under
    *  it rendered its label and no field in the live webview. */
   it("shows what an installed game costs on disk", async () => {

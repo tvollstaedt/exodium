@@ -619,9 +619,11 @@ export function GameDetailPanel(props: Props) {
   });
 
   const handleKeyDown = (e: KeyboardEvent) => {
-    if (e.key !== "Escape") { return; }
+    if (e.key !== "Escape" || !props.game) { return; }
     // One Escape closes one layer; the actions menu covers its dialogs.
     if (lightboxOpen() || manualOpen()) { return; }
+    // Consumed here: the selection's window handler must not act on it too.
+    e.preventDefault();
     if (moreMenu()) { setMoreMenu(null); return; }
     props.onClose();
   };

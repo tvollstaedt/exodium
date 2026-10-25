@@ -640,6 +640,7 @@ pub async fn win9x_multiplayer_info(
 pub async fn dismiss_win9x_network_prompt(
     db_state: State<'_, super::DbState>,
 ) -> Result<(), String> {
+    super::kids::ensure_unlocked()?;
     let conn = db_state.lock()?;
     crate::db::queries::set_config(&conn, "win9x_network_prompt", "off").map_err(|e| e.to_string())
 }
@@ -649,6 +650,7 @@ pub async fn dismiss_win9x_network_prompt(
 /// PolicyKit's. Nothing here runs without that dialog being accepted.
 #[tauri::command]
 pub async fn enable_win9x_network(app: AppHandle) -> Result<Win9xNetworkStatus, String> {
+    super::kids::ensure_unlocked()?;
     #[cfg(target_os = "macos")]
     {
         let _ = &app;
@@ -670,6 +672,7 @@ pub async fn enable_win9x_network(app: AppHandle) -> Result<Win9xNetworkStatus, 
 /// grant the user cannot revoke from the same place they made it is a trap.
 #[tauri::command]
 pub async fn disable_win9x_network(app: AppHandle) -> Result<Win9xNetworkStatus, String> {
+    super::kids::ensure_unlocked()?;
     #[cfg(target_os = "macos")]
     {
         let _ = &app;

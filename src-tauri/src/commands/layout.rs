@@ -125,6 +125,7 @@ fn dir_size_shallow(root: &Path) -> u64 {
 /// Remember that the user does not want the folders merged.
 #[tauri::command]
 pub async fn skip_layout_migration(db_state: State<'_, DbState>) -> Result<(), String> {
+    super::kids::ensure_unlocked()?;
     let conn = db_state.lock()?;
     queries::set_config(&conn, "layout_migration", "skip").map_err(|e| e.to_string())
 }
@@ -138,6 +139,7 @@ pub async fn migrate_layout(
     torrent_state: State<'_, TorrentState>,
     media_state: State<'_, MediaTorrentState>,
 ) -> Result<MergeTally, String> {
+    super::kids::ensure_unlocked()?;
     // Managers first: a live session re-creates every selected file the
     // moment the merge empties the old tree - the reading room's included,
     // since they all hold that one session (§19).

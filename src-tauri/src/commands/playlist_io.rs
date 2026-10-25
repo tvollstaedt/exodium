@@ -110,9 +110,24 @@ fn parse_lines(text: &str) -> Vec<ListEntry> {
         .collect()
 }
 
+/// Excel writes `;` in many locales, and a quoted title may carry commas of
+/// its own - only separators outside double quotes count.
+fn csv_delimiter(first_line: &str) -> u8 {
+    let (mut semicolons, mut commas, mut quoted) = (0, 0, false);
+    for c in first_line.chars() {
+        match c {
+            '"' => quoted = !quoted,
+            ';' if !quoted => semicolons += 1,
+            ',' if !quoted => commas += 1,
+            _ => {}
+        }
+    }
+    if semicolons > commas { b';' } else { b',' }
+}
+
 fn parse_csv(text: &str) -> Vec<ListEntry> {
     let first = text.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
-    let delimiter = if first.contains(';') && !first.contains(',') { b';' } else { b',' };
+    let delimiter = csv_delimiter(first);
     let mut reader = csv::ReaderBuilder::new()
         .has_headers(false)
         .flexible(true)
@@ -419,6 +434,17 @@ mod tests {
         assert_eq!(excel[1].title, "Myst");
         assert_eq!(excel[1].collection.as_deref(), Some("Win3x"));
         assert_eq!(excel[1].year, Some(1993));
+    }
+
+    #[test]
+    fn a_comma_inside_a_quoted_title_does_not_pick_the_delimiter() {
+        let parsed = parse_list(b"\"Secret of Monkey Island, The\";DOS\nDoom;DOS;1993\n", true);
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].title, "Secret of Monkey Island, The");
+        assert_eq!(parsed[0].collection.as_deref(), Some("DOS"));
+        assert_eq!(parsed[1].title, "Doom");
+        assert_eq!(parsed[1].year, Some(1993));
+        assert_eq!(csv_delimiter("\"A, B\",1994"), b',');
     }
 
     #[test]

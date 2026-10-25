@@ -368,6 +368,7 @@ pub async fn set_seeding_enabled(
     torrent_state: State<'_, TorrentState>,
     enabled: bool,
 ) -> Result<(), String> {
+    super::kids::ensure_unlocked()?;
     {
         let conn = db_state.lock()?;
         queries::set_config(&conn, "seeding_enabled", if enabled { "1" } else { "0" })
@@ -386,6 +387,7 @@ pub async fn set_rate_limits(
     up_kbps: Option<u32>,
     down_kbps: Option<u32>,
 ) -> Result<(), String> {
+    super::kids::ensure_unlocked()?;
     {
         let conn = db_state.lock()?;
         // Store "" for unlimited rather than deleting the row: the reader

@@ -394,6 +394,7 @@ fn remove_children(dir: &Path, keep: impl Fn(&Path) -> bool, freed: &mut Freed) 
 /// one cost a torrent piece to learn (§14).
 #[tauri::command]
 pub async fn clear_media_caches(db_state: State<'_, DbState>) -> Result<Freed, String> {
+    super::kids::ensure_unlocked()?;
     let data_dir = {
         let conn = db_state.lock()?;
         configured_data_dir(&conn)?
@@ -417,6 +418,7 @@ pub async fn clear_media_caches(db_state: State<'_, DbState>) -> Result<Freed, S
 /// that holds a whole game folder (marked by `whole_dir_marker`).
 #[tauri::command]
 pub async fn delete_save_backups(db_state: State<'_, DbState>) -> Result<Freed, String> {
+    super::kids::ensure_unlocked()?;
     let (root, keep_rel) = {
         let conn = db_state.lock()?;
         let root = game_root(&configured_data_dir(&conn)?);

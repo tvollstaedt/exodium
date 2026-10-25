@@ -135,11 +135,11 @@ If `Unblock-File` is unavailable, right-click the `.exe` → Properties → tick
 
 Start Exodium once with the option `--reset-kids-mode`. It turns kids mode off and keeps the kids playlist; set a new PIN in Settings → Kids Mode.
 
-- **macOS:** `open -a Exodium --args --reset-kids-mode`
+- **macOS:** quit Exodium first, then `open -a Exodium --args --reset-kids-mode` - a running app only comes to the front, the option is dropped
 - **Linux:** run the AppImage (or `exodium` from the `.deb`) with `--reset-kids-mode` appended
 - **Windows:** right-click Exodium in the Start menu → Open file location, then run the program from PowerShell with `--reset-kids-mode` appended
 
-If Exodium is already running, this reaches the open window as well.
+On Linux and Windows a second start reaches an already open window as well.
 
 ---
 

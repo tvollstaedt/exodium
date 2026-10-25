@@ -16,12 +16,19 @@ export function KidsPinDialog(props: { open: boolean; onClose: () => void; onUnl
   let inputRef: HTMLInputElement | undefined;
 
   const waitSecs = () => Math.max(0, Math.ceil((waitUntil() - now()) / 1000));
+  // `now` ticks every 500 ms; a deadline set against a fresher clock would
+  // read as a second of wait that is not there.
+  const waitFor = (secs: number) => {
+    const t = Date.now();
+    setNow(t);
+    setWaitUntil(secs > 0 ? t + secs * 1000 : 0);
+  };
 
   createEffect(on(() => props.open, (open) => {
     if (!open) { return; }
     setPin("");
     setError("");
-    setWaitUntil(Date.now() + (kidsStatus()?.retry_in ?? 0) * 1000);
+    waitFor(kidsStatus()?.retry_in ?? 0);
     requestAnimationFrame(() => inputRef?.focus());
   }));
 
@@ -34,7 +41,7 @@ export function KidsPinDialog(props: { open: boolean; onClose: () => void; onUnl
     }
     setPin("");
     setError("Wrong PIN");
-    if (r.retryIn > 0) { setWaitUntil(Date.now() + r.retryIn * 1000); }
+    waitFor(r.retryIn);
     inputRef?.focus();
   };
 

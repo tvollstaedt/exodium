@@ -1033,6 +1033,7 @@ pub async fn cancel_content_pack_install(
     collection: String,
     pack_id: String,
 ) -> Result<(), String> {
+    super::kids::ensure_unlocked()?;
     let key = format!("{}:{}", collection, pack_id);
     let jobs = state.0.read().await;
     if let Some(job) = jobs.get(&key) {

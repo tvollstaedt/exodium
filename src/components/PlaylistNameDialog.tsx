@@ -2,8 +2,8 @@ import { createSignal, createEffect, onCleanup, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 import { Dialog } from "@ark-ui/solid/dialog";
 import {
-  playlistDialog, setPlaylistDialog, createPlaylist, renamePlaylist,
-  togglePlaylistMembership, setMembershipMany,
+  playlistDialog, setPlaylistDialog, createPlaylist, importPlaylist, renamePlaylist,
+  togglePlaylistMembership,
 } from "../stores/playlists";
 import { showToast } from "../stores/toasts";
 import { Button } from "./Button";
@@ -58,16 +58,19 @@ export function PlaylistNameDialog() {
     setError("");
     try {
       if (req.mode === "create") {
-        const id = await createPlaylist(trimmed);
         if (req.gameIds?.length) {
-          await setMembershipMany(id, req.gameIds, true);
+          // One transaction: a failure must not leave an empty playlist behind.
+          await importPlaylist(trimmed, req.gameIds);
           const n = req.gameIds.length;
           showToast(`Created "${trimmed}" with ${n} ${n === 1 ? "game" : "games"}`, "success");
-        } else if (req.gameId != null) {
-          await togglePlaylistMembership(id, req.gameId, true);
-          showToast(`Created "${trimmed}" and added the game`, "success");
         } else {
-          showToast(`Playlist "${trimmed}" created`, "success");
+          const id = await createPlaylist(trimmed);
+          if (req.gameId != null) {
+            await togglePlaylistMembership(id, req.gameId, true);
+            showToast(`Created "${trimmed}" and added the game`, "success");
+          } else {
+            showToast(`Playlist "${trimmed}" created`, "success");
+          }
         }
       } else {
         await renamePlaylist(req.playlist.id, trimmed);

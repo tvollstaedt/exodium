@@ -266,6 +266,7 @@ pub async fn set_issue_favorited(
     key: String,
     favorited: bool,
 ) -> Result<(), String> {
+    super::kids::ensure_unlocked()?;
     let conn = db_state.lock()?;
     reading_db::set_issue_flag(&conn, &key, "favorited", favorited).map_err(|e| e.to_string())
 }
@@ -276,6 +277,7 @@ pub async fn set_issue_page(
     key: String,
     page: i64,
 ) -> Result<(), String> {
+    super::kids::ensure_unlocked()?;
     let conn = db_state.lock()?;
     reading_db::set_last_page(&conn, &key, page).map_err(|e| e.to_string())
 }
@@ -323,6 +325,7 @@ pub async fn remove_issue(
     reading_state: State<'_, ReadingState>,
     key: String,
 ) -> Result<(), String> {
+    super::kids::ensure_unlocked()?;
     let (issue, data_dir) = issue_and_data_dir(&db_state, &key)?;
     // A fetch still running would rename its result back into place after the
     // removal, so it is stopped and forgotten before anything is deleted.
@@ -622,6 +625,7 @@ pub async fn open_game_extra(
 /// Delete a fetched extra; it stays until removed, like an issue (§19).
 #[tauri::command]
 pub async fn remove_game_extra(db_state: State<'_, DbState>, id: i64, name: String) -> Result<(), String> {
+    super::kids::ensure_unlocked()?;
     let (_, data_dir, entry, _) = game_extra(&db_state, id, &name)?;
     let path = extra_cache_file(&data_dir, &entry);
     match std::fs::remove_file(&path) {
@@ -646,6 +650,7 @@ pub async fn install_issue(
     reading_state: State<'_, ReadingState>,
     key: String,
 ) -> Result<ReadingStatus, String> {
+    super::kids::ensure_unlocked()?;
     let (issue, data_dir) = issue_and_data_dir(&db_state, &key)?;
     let launch_dir = runnable_launch_dir(&issue)?;
     let torrent_root = super::paths::game_root(&data_dir);
