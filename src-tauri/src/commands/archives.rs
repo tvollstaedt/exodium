@@ -156,6 +156,7 @@ pub async fn remove_installed_archives(
     db_state: State<'_, DbState>,
     torrent_state: State<'_, TorrentState>,
 ) -> Result<ArchiveUsage, String> {
+    super::kids::ensure_unlocked()?;
     let (list, data_dir) = {
         let conn = db_state.lock()?;
         let data_dir = configured_data_dir(&conn)?;

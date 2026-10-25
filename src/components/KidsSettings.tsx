@@ -90,13 +90,13 @@ export function KidsSettings() {
 
   const PlaylistSelect = (p: { allowNew: boolean; onChange: (v: string) => void }) => (
     <select class="game-settings-select" data-testid="kids-playlist" value={playlist()} onChange={(e) => p.onChange(e.currentTarget.value)}>
-      <Show when={p.allowNew}><option value="">New playlist "Kids"</option></Show>
-      <For each={userPlaylists()}>{(pl) => <option value={String(pl.id)}>{pl.name}</option>}</For>
+      <Show when={p.allowNew}><option value="" selected={playlist() === ""}>New playlist "Kids"</option></Show>
+      <For each={userPlaylists()}>{(pl) => <option value={String(pl.id)} selected={String(pl.id) === playlist()}>{pl.name}</option>}</For>
     </select>
   );
   const LanguageSelect = (p: { onChange: (v: string) => void }) => (
     <select class="game-settings-select" data-testid="kids-language" value={language()} onChange={(e) => p.onChange(e.currentTarget.value)}>
-      <For each={LANGUAGES}>{(l) => <option value={l}>{languageName(l)}</option>}</For>
+      <For each={LANGUAGES}>{(l) => <option value={l} selected={l === language()}>{languageName(l)}</option>}</For>
     </select>
   );
 

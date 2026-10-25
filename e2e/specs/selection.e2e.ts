@@ -21,10 +21,19 @@ describe("multi-select", () => {
     await expect($('[data-testid="selection-count"]')).toHaveText("2 games selected");
     await expect($('[data-testid="game-detail"]')).not.toBeDisplayed();
 
+    // Escape in the dialog closes the dialog, not the selection.
+    await $('[data-testid="selection-add"]').click();
+    await $('[data-testid="selection-new-playlist"]').click();
+    await $('[data-testid="playlist-name-input"]').waitForDisplayed();
+    await browser.keys("Escape");
+    await $('[data-testid="playlist-name-input"]').waitForExist({ reverse: true });
+    await expect($('[data-testid="selection-count"]')).toHaveText("2 games selected");
+
     await $('[data-testid="selection-add"]').click();
     await $('[data-testid="selection-new-playlist"]').click();
     await $('[data-testid="playlist-name-input"]').setValue("E2E selection");
     await $('[data-testid="playlist-name-save"]').click();
+    await $('[data-testid="playlist-name-input"]').waitForExist({ reverse: true });
     await browser.keys("Escape");
     await $('[data-testid="selection-bar"]').waitForExist({ reverse: true });
     await $(".search-clear").click();

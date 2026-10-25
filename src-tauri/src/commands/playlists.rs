@@ -146,6 +146,7 @@ pub async fn create_playlist_from(
 
 #[tauri::command]
 pub async fn export_playlist(state: State<'_, DbState>, id: i64, path: String) -> Result<(), String> {
+    super::kids::ensure_unlocked()?;
     let bytes = {
         let conn = state.lock()?;
         playlist_io::export_csv(&conn, id)?

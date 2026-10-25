@@ -1,8 +1,9 @@
-import { createEffect, createRoot, createSignal } from "solid-js";
+import { batch, createEffect, createRoot, createSignal, on } from "solid-js";
 import {
   downloads, markQueued, startGameDownload, unmarkQueued, cancelGameDownload, isPausable,
   pauseGameDownload, type DownloadCover,
 } from "./downloads";
+import { kidsLocked } from "./kids";
 
 /** "Download playlist" runs at most this many at once: every download polls once
  *  a second and every start re-selects the torrent's files, so a list started
@@ -35,8 +36,10 @@ function publish() {
   setWaitingByPlaylist(counts);
 }
 
+/** Nothing starts while kids mode is locked: `download_game` refuses there
+ *  (§26), and a refused start would drop the job with an error toast. */
 function pump() {
-  while (!halted() && active.size < MAX_ACTIVE && waiting.length > 0) {
+  while (!halted() && !kidsLocked() && active.size < MAX_ACTIVE && waiting.length > 0) {
     const job = waiting.shift()!;
     active.add(job.gameId);
     startGameDownload(job.gameId, job.title, job.cover);
@@ -48,20 +51,26 @@ function pump() {
  *  is downloading or queued already keeps its place. */
 export function enqueueDownloads(playlistId: number, items: BatchItem[]) {
   const dl = downloads();
-  for (const item of items) {
-    if (active.has(item.gameId) || waiting.some((j) => j.gameId === item.gameId)) { continue; }
-    if (dl[item.gameId]?.downloading) { continue; }
-    waiting.push({ ...item, playlistId });
-    markQueued(item.gameId, item.title, item.cover);
-  }
+  const known = new Set([...active, ...waiting.map((j) => j.gameId)]);
+  batch(() => {
+    for (const item of items) {
+      if (known.has(item.gameId) || dl[item.gameId]?.downloading) { continue; }
+      known.add(item.gameId);
+      waiting.push({ ...item, playlistId });
+      markQueued(item.gameId, item.title, item.cover);
+    }
+  });
   pump();
 }
 
 /** Drop what has not started yet; running downloads finish. */
 export function cancelQueued(playlistId: number) {
-  for (const job of waiting) {
-    if (job.playlistId === playlistId) { unmarkQueued(job.gameId); }
+  const dropped: Job[] = [];
+  for (let i = waiting.length - 1; i >= 0; i--) {
+    if (waiting[i].playlistId === playlistId) { dropped.push(...waiting.splice(i, 1)); }
   }
+  publish();
+  for (const job of dropped) { unmarkQueued(job.gameId); }
 }
 
 export const queuedCount = (playlistId: number) => waitingByPlaylist()[playlistId] ?? 0;
@@ -143,4 +152,5 @@ createRoot(() => {
     }
     if (changed) { pump(); }
   });
+  createEffect(on(kidsLocked, (locked) => { if (!locked) { pump(); } }, { defer: true }));
 });

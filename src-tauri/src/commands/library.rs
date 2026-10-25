@@ -670,6 +670,10 @@ pub async fn scan_installed_games(
     torrent_state: State<'_, super::TorrentState>,
     adopt: Option<bool>,
 ) -> Result<usize, String> {
+    // Only adoption changes the library; the startup scan runs locked too.
+    if adopt == Some(true) {
+        super::kids::ensure_unlocked()?;
+    }
     let data_dir = {
         let conn = db_state.lock()?;
         crate::commands::games::configured_data_dir(&conn)?
