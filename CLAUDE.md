@@ -478,6 +478,48 @@ and ECE has them compiled in. The config key was renamed to
 `global_override_frag`: `keyboard_layout` for Staging, `keyboardlayout` for
 ECE, with the classic two-letter codes both accept (`gr`, `sp`, `su`).
 
+**Two global MIDI outputs, and the game's conf decides which one a launch
+gets** (#51, `commands/midi.rs`). `midi_gm_output` (Standard · `fluidsynth` ·
+`soundcanvas` · `port:<name>`) and `midi_mt32_output` (Standard ·
+`port:<name>`) are appended to the same global override frag;
+`conf_midi_device` reads the PATCHED conf's `[midi] mididevice` - `mt32`
+means the game's own SETUP chose MT-32 patches, and sending those to a
+General MIDI device (or GM music to a real MT-32) is the wrong instrument
+set, so one output for everything was rejected.
+
+**Standard General MIDI is FluidSynth off Windows** (`standard_is_fluidsynth`):
+Staging's `port` (what eXo's `auto`/`default` and every keyless conf end on)
+opens CoreMIDI even with no destination - measured on macOS 2026-10-25,
+`MIDI: Opened device 'coremidi'` beside `MIXER /LISTMIDI` "No available
+ports" - so eXo's GM setups played no music off Windows, where ECE and
+Staging reach the GS Wavetable synth instead. Standard replaces only devices
+that go to the host port (`routes_to_port`); a conf that names a synth keeps
+it, because eXo's FluidSynth confs pick their own soundfont (Sigil2:
+`AWE64_Gold_4MB_GM.sf2`). It needs a soundfont on disk (the user's, else
+eXo's `eXo/mt32/SoundCanvas.sf2` from util.zip, 0.3 s to load); without one
+nothing is written, because Staging answers a font-less `fluidsynth` with
+`port` anyway. Choosing FluidSynth explicitly fetches util.zip with the next
+game.
+
+Spelling is per engine like the layout key: Staging `mididevice =
+port|fluidsynth|soundcanvas` with `[mt32]` / `[fluidsynth]` / `[soundcanvas]`
+sections, ECE the classic `win32` and dotted `mt32.romdir` /
+`fluid.soundfont`, DOSBox-X (Win9x, whose confs all say `default`, so only
+the GM output applies) the platform device `coremidi|alsa|win32`. Ports are
+stored by NAME from `list_midi_outputs` (midir) - Staging matches a
+substring, ALSA alone wants the numeric `client:port`, which `port_config`
+resolves from the live listing at launch. ScummVM takes
+`--music-driver=<driver>_<name>` (`coremidi_`, `alsa_<client name>`,
+`windows_`) plus `--native-mt32` or `--enable-gs`. Sound Canvas is Staging's
+Nuked SC-55 CLAP plugin, which the staged build does not ship, so the UI
+hides that value (`SOUNDCANVAS_AVAILABLE`). `midi_rom_dir` is the user's own
+folder in Staging's layout (`mt32-roms/`, `soundfonts/`, and
+`soundcanvas-roms/` for the hidden Sound Canvas); it wins over eXo's files
+for DOS and ScummVM alike, and it is resolved only after the DB lock is
+released (`MidiConfig::resolve`), since it may sit on a share (§22). ROMs are
+never bundled or downloaded. Nothing here has run against a real MIDI device
+yet.
+
 **`resolve_engine` is the ONLY place that decides ECE vs Staging** - the
 launcher picks the binary from it, the detail panel labels the engine from it,
 and the printing and shader notes state their limitation from it. The answer

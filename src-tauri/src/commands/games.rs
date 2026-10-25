@@ -1946,7 +1946,7 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
     let _op_guard = op_lock.lock().await;
     // Read everything we need from the DB and drop the lock before the heavy
     // DOSBox path resolution + process spawning below.
-    let (game, data_dir, crt_auto_enabled, fullscreen_enabled, keyboard_layout, per_game_config) = {
+    let (game, data_dir, crt_auto_enabled, fullscreen_enabled, keyboard_layout, midi_config, per_game_config) = {
         let conn = db_state.lock()?;
         super::kids::ensure_launch_allowed(&conn, id)?;
         let game = queries::fetch_game_by_id(&conn, id)
@@ -1954,13 +1954,15 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
             .ok_or_else(|| format!("Game with id {} not found", id))?;
         let data_dir = configured_data_dir(&conn)?;
         let (crt_auto, fullscreen, keyboard_layout) = global_launch_prefs(&conn)?;
+        let midi_config = super::midi::MidiConfig::load(&conn)?;
         let per_game_config = queries::get_all_game_config(&conn, id).map_err(|e| e.to_string())?;
         // Record the launch timestamp for "Recently Played" shelf.
         if let Err(e) = queries::set_last_played(&conn, id) {
             log::warn!("Failed to update last_played for {}: {}", game.title, e);
         }
-        (game, data_dir, crt_auto, fullscreen, keyboard_layout, per_game_config)
+        (game, data_dir, crt_auto, fullscreen, keyboard_layout, midi_config, per_game_config)
     }; // lock dropped here - before path resolution + DOSBox spawning
+    let midi_prefs = midi_config.resolve();
 
     if !game.installed {
         return Err(format!("{} is not installed. Download it first.", game.title));
@@ -1990,6 +1992,7 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
                 id,
                 &data_dir,
                 fullscreen_enabled,
+                &midi_prefs,
                 &per_game_config,
             )
             .await;
@@ -2001,6 +2004,7 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
                 id,
                 &data_dir,
                 fullscreen_enabled,
+                &midi_prefs,
                 &per_game_config,
             )
             .await;
@@ -2140,12 +2144,24 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
     // User preferences, applied LAST and written for both states: Staging
     // defaults glshader to crt-auto, so "off" has to be an explicit value.
     {
-        let frag = global_override_frag(
+        let mut frag = global_override_frag(
             use_ece,
             crt_auto_enabled,
             fullscreen_enabled,
             keyboard_layout.as_deref(),
         );
+        // The patched conf says which output applies (§9).
+        let conf_device = std::fs::read_to_string(&patched_conf)
+            .ok()
+            .and_then(|c| super::midi::conf_midi_device(&c));
+        let engine = if use_ece { super::midi::DosboxEngine::Ece } else { super::midi::DosboxEngine::Staging };
+        let exo_soundfont = main_torrent_root.join("eXo/mt32/SoundCanvas.sf2");
+        frag.push_str(&super::midi::dosbox_frag(
+            engine,
+            conf_device.as_deref(),
+            &midi_prefs,
+            exo_soundfont.is_file().then_some(exo_soundfont.as_path()),
+        ));
         let conf_path = launch_conf_dir(&app)?.join(format!("global_overrides_{}.conf", id));
         std::fs::write(&conf_path, &frag)
             .map_err(|e| format!("Failed to write global override conf: {e}"))?;

@@ -9,6 +9,7 @@ use std::sync::OnceLock;
 use serde::Serialize;
 use tauri::{AppHandle, State};
 
+use super::midi::{scummvm_device_id, GmOutput, MidiConfig, MidiPrefs, Mt32Output};
 use super::win9x::{binary_exists_on_path, pack_candidate, EngineCmd};
 use super::DbState;
 use crate::db::queries;
@@ -302,6 +303,7 @@ pub(crate) fn select_variant(
     game_dir: &Path,
     torrent_root: &Path,
     cfg: &HashMap<String, String>,
+    midi: &MidiPrefs,
 ) -> Result<Variant, String> {
     let level1 = subdirs(game_dir);
     if level1.is_empty() {
@@ -369,27 +371,53 @@ pub(crate) fn select_variant(
             .cloned()
             .unwrap_or_else(|| sound_menu[0].clone());
         let rev0 = probe(&dirs, "mt32_rev0.txt").is_some();
-        let (prefix, flags): (&str, Vec<String>) = match choice.as_str() {
-            "Tandy" => ("T_", vec!["--opl-driver=nuked".into(), "-epcjr".into(), "--output-rate=44100".into()]),
-            "Creative Music System (CMS)" => ("CMS_", vec!["--opl-driver=nuked".into(), "-ecms".into(), "--output-rate=44100".into()]),
-            "Roland MT32" if mt32_dir.is_dir() => {
-                let roms = if rev0 { mt32_dir.join("rev0") } else { mt32_dir.clone() };
-                ("mt32_", vec![
-                    "--opl-driver=nuked".into(),
-                    "-emt32".into(),
-                    "--multi-midi".into(),
-                    format!("--extrapath={}", roms.display()),
-                    "--output-rate=44100".into(),
-                ])
-            }
-            "Sound Canvas" if mt32_dir.join("SoundCanvas.sf2").is_file() => ("sc_", vec![
+        // A host port replaces the emulated synth; the user's ROM folder wins
+        // over eXo's, as it does for DOS games (§9).
+        let mt32_port = match &midi.mt32 {
+            Mt32Output::Port(name) => Some(name),
+            Mt32Output::Default => None,
+        };
+        let gm_port = match &midi.gm {
+            GmOutput::Port(name) => Some(name),
+            _ => None,
+        };
+        let mt32_roms = midi.roms.mt32.clone().or_else(|| {
+            mt32_dir.is_dir().then(|| if rev0 { mt32_dir.join("rev0") } else { mt32_dir.clone() })
+        });
+        let soundfont = midi
+            .roms
+            .soundfont
+            .clone()
+            .or_else(|| Some(mt32_dir.join("SoundCanvas.sf2")).filter(|p| p.is_file()));
+        let port_flags = |name: &str, mode: &str| -> Vec<String> {
+            vec![
+                "--opl-driver=nuked".into(),
+                format!("--music-driver={}", scummvm_device_id(name)),
+                mode.into(),
+                "--multi-midi".into(),
+                "--output-rate=44100".into(),
+            ]
+        };
+        let (prefix, flags): (&str, Vec<String>) = match (choice.as_str(), mt32_port, gm_port) {
+            ("Tandy", ..) => ("T_", vec!["--opl-driver=nuked".into(), "-epcjr".into(), "--output-rate=44100".into()]),
+            ("Creative Music System (CMS)", ..) => ("CMS_", vec!["--opl-driver=nuked".into(), "-ecms".into(), "--output-rate=44100".into()]),
+            ("Roland MT32", Some(port), _) => ("mt32_", port_flags(port, "--native-mt32")),
+            ("Roland MT32", None, _) if mt32_roms.is_some() => ("mt32_", vec![
+                "--opl-driver=nuked".into(),
+                "-emt32".into(),
+                "--multi-midi".into(),
+                format!("--extrapath={}", mt32_roms.unwrap_or_default().display()),
+                "--output-rate=44100".into(),
+            ]),
+            ("Sound Canvas" | "General MIDI", _, Some(port)) => ("sc_", port_flags(port, "--enable-gs")),
+            ("Sound Canvas" | "General MIDI", _, None) if soundfont.is_some() => ("sc_", vec![
                 "--opl-driver=nuked".into(),
                 "-efluidsynth".into(),
                 "--multi-midi".into(),
-                format!("--soundfont={}", mt32_dir.join("SoundCanvas.sf2").display()),
+                format!("--soundfont={}", soundfont.unwrap_or_default().display()),
                 "--output-rate=44100".into(),
             ]),
-            "Roland MT32" | "Sound Canvas" => {
+            ("Roland MT32" | "Sound Canvas" | "General MIDI", ..) => {
                 log::warn!(
                     "scummvm: '{}' needs the MT-32 ROMs / soundfont under {}, which are not \
                      installed - falling back to Sound Blaster",
@@ -398,7 +426,7 @@ pub(crate) fn select_variant(
                 );
                 ("sb_", base.iter().map(|s| s.to_string()).collect())
             }
-            "James Woodcock's Enhanced Music" => ("eh_", base.iter().map(|s| s.to_string()).collect()),
+            ("James Woodcock's Enhanced Music", ..) => ("eh_", base.iter().map(|s| s.to_string()).collect()),
             _ => ("sb_", base.iter().map(|s| s.to_string()).collect()),
         };
         audio_prefix = prefix.to_string();
@@ -583,10 +611,11 @@ pub(crate) async fn launch_scummvm_game(
     id: i64,
     data_dir: &str,
     fullscreen: bool,
+    midi: &MidiPrefs,
     per_game_config: &HashMap<String, String>,
 ) -> Result<String, String> {
     let title = game.title.clone();
-    launch_inner(app, game, id, data_dir, fullscreen, per_game_config)
+    launch_inner(app, game, id, data_dir, fullscreen, midi, per_game_config)
         .await
         .inspect_err(|e| log::error!("launch_scummvm_game({}): {}", title, e))
 }
@@ -597,12 +626,13 @@ async fn launch_inner(
     id: i64,
     data_dir: &str,
     fullscreen: bool,
+    midi: &MidiPrefs,
     per_game_config: &HashMap<String, String>,
 ) -> Result<String, String> {
     let source = game.torrent_source.as_deref().unwrap_or("eXoScummVM");
     let torrent_root = crate::commands::paths::game_root(data_dir);
     let game_dir = super::install::extract_before_launch(app, &game, id, source, &torrent_root).await?;
-    let variant = select_variant(&game_dir, &torrent_root, per_game_config)?;
+    let variant = select_variant(&game_dir, &torrent_root, per_game_config, midi)?;
     if let Some(note) = &variant.note {
         log::info!("eXo note for {}: {}", game.title, note);
     }
@@ -845,15 +875,17 @@ pub async fn scummvm_variants(
     db_state: State<'_, DbState>,
     id: i64,
 ) -> Result<Option<ScummVmVariants>, String> {
-    let (game, data_dir, cfg) = {
+    let (game, data_dir, cfg, midi) = {
         let conn = db_state.lock()?;
         let game = queries::fetch_game_by_id(&conn, id)
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("Game with id {} not found", id))?;
         let data_dir = queries::get_config(&conn, "data_dir").map_err(|e| e.to_string())?;
         let cfg = queries::get_all_game_config(&conn, id).unwrap_or_default();
-        (game, data_dir, cfg)
+        let midi = MidiConfig::load(&conn)?;
+        (game, data_dir, cfg, midi)
     };
+    let midi = midi.resolve();
     let source = game.torrent_source.as_deref().unwrap_or("");
     let is_svm = crate::commands::collections::collection_def(source)
         .is_some_and(|c| c.launcher == crate::commands::collections::Launcher::ScummVm);
@@ -870,7 +902,7 @@ pub async fn scummvm_variants(
         return Ok(None);
     }
     let variants = list_variants(&game_dir);
-    let Ok(chosen) = select_variant(&game_dir, &root, &cfg) else {
+    let Ok(chosen) = select_variant(&game_dir, &root, &cfg, &midi) else {
         return Ok(None);
     };
     let (sub, variant) = match chosen.names.as_slice() {
@@ -989,7 +1021,7 @@ mod tests {
         write(&game.join("Maniac Mansion (NES, English, USA)/platform.txt"), "nes\n");
         write(&game.join("note.txt"), "Audio is off in this port.\n");
 
-        let v = select_variant(&game, &root, &HashMap::new()).unwrap();
+        let v = select_variant(&game, &root, &HashMap::new(), &MidiPrefs::default()).unwrap();
         assert_eq!(v.run_dir, game.join("Maniac Mansion (Amiga)"));
         assert_eq!(v.platform.as_deref(), Some("amiga"));
         assert_eq!(v.names, vec!["Maniac Mansion (Amiga)".to_string()]);
@@ -998,7 +1030,7 @@ mod tests {
 
         let mut cfg = HashMap::new();
         cfg.insert("svm_variant".to_string(), "Maniac Mansion (DOS v1)".to_string());
-        let v = select_variant(&game, &root, &cfg).unwrap();
+        let v = select_variant(&game, &root, &cfg, &MidiPrefs::default()).unwrap();
         assert_eq!(v.run_dir, game.join("Maniac Mansion (DOS v1)/Maniac Mansion CGA"));
         assert_eq!(v.names[0], "Maniac Mansion CGA");
         assert_eq!(v.names[1], "Maniac Mansion (DOS v1)");
@@ -1006,7 +1038,7 @@ mod tests {
         assert!(v.platform.is_none());
 
         cfg.insert("svm_sub".to_string(), "Maniac Mansion EGA".to_string());
-        let v = select_variant(&game, &root, &cfg).unwrap();
+        let v = select_variant(&game, &root, &cfg, &MidiPrefs::default()).unwrap();
         assert_eq!(v.run_dir, game.join("Maniac Mansion (DOS v1)/Maniac Mansion EGA"));
         assert!(!v.extra_args.iter().any(|a| a.starts_with("--render-mode")));
     }
@@ -1021,19 +1053,84 @@ mod tests {
         write(&game.join("Out of this World (DOS)/sound.txt"), "Sound Blaster:Roland MT32\n");
         write(&game.join("Out of this World (DOS)/mt32_audio.txt"), "--midi-gain=50\n");
 
-        let v = select_variant(&game, &root, &HashMap::new()).unwrap();
+        let v = select_variant(&game, &root, &HashMap::new(), &MidiPrefs::default()).unwrap();
         assert!(!v.extra_args.contains(&"-emt32".to_string()));
 
         let mut cfg = HashMap::new();
         cfg.insert("svm_sound".to_string(), "Roland MT32".to_string());
-        let v = select_variant(&game, &root, &cfg).unwrap();
+        let v = select_variant(&game, &root, &cfg, &MidiPrefs::default()).unwrap();
         assert!(!v.extra_args.contains(&"-emt32".to_string()), "no ROMs -> no MT-32");
 
         std::fs::create_dir_all(root.join("eXo/mt32")).unwrap();
-        let v = select_variant(&game, &root, &cfg).unwrap();
+        let v = select_variant(&game, &root, &cfg, &MidiPrefs::default()).unwrap();
         assert!(v.extra_args.contains(&"-emt32".to_string()));
         assert!(v.extra_args.iter().any(|a| a.starts_with("--extrapath=")));
         assert!(v.extra_args.contains(&"--midi-gain=50".to_string()));
+    }
+
+    /// A host port replaces the emulated synth: the MT-32 choice becomes the
+    /// MT-32 device, Sound Canvas the General MIDI device with GS on.
+    #[test]
+    fn midi_ports_replace_the_emulated_synths() {
+        let tmp = tempfile::tempdir().unwrap();
+        let game = tmp.path().join("Monkey Island (Multi-Platform)");
+        let root = tmp.path().join("root");
+        write(&game.join("Monkey Island (DOS)/sound.txt"), "Sound Blaster:Roland MT32:Sound Canvas\n");
+        std::fs::create_dir_all(root.join("eXo/mt32")).unwrap();
+        write(&root.join("eXo/mt32/SoundCanvas.sf2"), "");
+        let midi = MidiPrefs {
+            gm: GmOutput::Port("GM Box".into()),
+            mt32: Mt32Output::Port("UM-ONE".into()),
+            roms: Default::default(),
+        };
+        let mut cfg = HashMap::new();
+
+        cfg.insert("svm_sound".to_string(), "Roland MT32".to_string());
+        let v = select_variant(&game, &root, &cfg, &midi).unwrap();
+        assert!(v.extra_args.contains(&format!("--music-driver={}", scummvm_device_id("UM-ONE"))));
+        assert!(v.extra_args.contains(&"--native-mt32".to_string()));
+        assert!(!v.extra_args.contains(&"-emt32".to_string()));
+        assert!(!v.extra_args.iter().any(|a| a.starts_with("--extrapath=")));
+
+        cfg.insert("svm_sound".to_string(), "Sound Canvas".to_string());
+        let v = select_variant(&game, &root, &cfg, &midi).unwrap();
+        assert!(v.extra_args.contains(&format!("--music-driver={}", scummvm_device_id("GM Box"))));
+        assert!(v.extra_args.contains(&"--enable-gs".to_string()));
+        assert!(!v.extra_args.contains(&"-efluidsynth".to_string()));
+
+        // FluidSynth as the GM output keeps eXo's soundfont road.
+        let fluid = MidiPrefs { gm: GmOutput::FluidSynth, ..midi.clone() };
+        let v = select_variant(&game, &root, &cfg, &fluid).unwrap();
+        assert!(v.extra_args.contains(&"-efluidsynth".to_string()));
+
+        // Sound Blaster never touches MIDI.
+        cfg.insert("svm_sound".to_string(), "Sound Blaster".to_string());
+        let v = select_variant(&game, &root, &cfg, &midi).unwrap();
+        assert!(!v.extra_args.iter().any(|a| a.starts_with("--music-driver=")));
+    }
+
+    /// The user's own folder serves the MT-32 choice, eXo's ROMs present or not.
+    #[test]
+    fn own_rom_folder_wins_over_the_collections() {
+        let tmp = tempfile::tempdir().unwrap();
+        let game = tmp.path().join("Loom (Multi-Platform)");
+        let root = tmp.path().join("root");
+        write(&game.join("Loom (DOS)/sound.txt"), "Sound Blaster:Roland MT32\n");
+        let roms = tmp.path().join("mt32-roms");
+        std::fs::create_dir_all(&roms).unwrap();
+        let midi = MidiPrefs {
+            roms: super::super::midi::MidiRoms { mt32: Some(roms.clone()), ..Default::default() },
+            ..Default::default()
+        };
+        let mut cfg = HashMap::new();
+        cfg.insert("svm_sound".to_string(), "Roland MT32".to_string());
+        let v = select_variant(&game, &root, &cfg, &midi).unwrap();
+        assert!(v.extra_args.contains(&"-emt32".to_string()));
+        assert!(v.extra_args.contains(&format!("--extrapath={}", roms.display())));
+
+        std::fs::create_dir_all(root.join("eXo/mt32")).unwrap();
+        let v = select_variant(&game, &root, &cfg, &midi).unwrap();
+        assert!(v.extra_args.contains(&format!("--extrapath={}", roms.display())), "{:?}", v.extra_args);
     }
 
     /// `findstr /b` semantics: exact directory first, then the first line

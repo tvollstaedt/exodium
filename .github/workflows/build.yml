@@ -65,6 +65,7 @@ jobs:
             patchelf \
             libssl-dev \
             libglib2.0-dev \
+            libasound2-dev \
             gstreamer1.0-plugins-base \
             gstreamer1.0-plugins-good \
             gstreamer1.0-libav \

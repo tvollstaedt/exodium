@@ -539,6 +539,11 @@ export async function setConfig(key: string, value: string): Promise<void> {
   return invoke("set_config", { key, value });
 }
 
+/** The host's MIDI output ports by name; the emulators match on the name. */
+export async function listMidiOutputs(): Promise<string[]> {
+  return invoke("list_midi_outputs");
+}
+
 // Opens a manual in the system viewer. Path validation happens in Rust
 // (must be under the data dir), so no broad opener capability is needed.
 export async function openDocument(path: string): Promise<void> {
