@@ -7,6 +7,14 @@ import { KidsScreen } from "./KidsScreen";
 import { KidsPinDialog } from "./KidsPinDialog";
 import { setKidsStatus } from "../stores/kids";
 
+const listeners = new Map<string, () => void>();
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn(async (event: string, handler: () => void) => {
+    listeners.set(event, handler);
+    return () => listeners.delete(event);
+  }),
+}));
+
 const mockInvoke = vi.mocked(invoke);
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
@@ -37,6 +45,20 @@ describe("KidsScreen", () => {
     await flush();
     expect(mockInvoke).toHaveBeenCalledWith("launch_game", { id: 5 });
     dispose();
+  });
+
+  it("asks for the order again when a game quits, so it comes back in front", async () => {
+    mockInvoke.mockResolvedValue([]);
+    const dispose = mount(() => <KidsScreen onUnlocked={() => {}} />);
+    await flush();
+    mockInvoke.mockClear();
+
+    listeners.get("game-exited")!();
+    await flush();
+    expect(mockInvoke).toHaveBeenCalledWith("kids_games");
+    dispose();
+    await flush();
+    expect(listeners.has("game-exited")).toBe(false);
   });
 });
 
