@@ -1073,6 +1073,29 @@ pub(crate) fn rewrite_bat_host_paths(game_dir: &Path, working_dir: &Path) {
     }
 }
 
+/// Send the game's own sound-menu choices to the user's MIDI ports, or put
+/// eXo's lines back when no port is chosen (§9). Runs before every launch.
+pub(crate) fn redirect_bat_midi_menus(game_dir: &Path, ports: &super::midi::MenuPorts) {
+    // Three levels: some confs `cd` two folders in before `call run`
+    // (AcesotD: `DYNAMIX\AODCD`).
+    for bat in bat_files(game_dir, 3) {
+        let Ok(bytes) = std::fs::read(&bat) else { continue };
+        if !bytes.windows(10).any(|w| w.eq_ignore_ascii_case(b"mididevice")) {
+            continue;
+        }
+        let content: String = bytes.iter().map(|&b| b as char).collect();
+        let rewritten = super::midi::redirect_menu_devices(&content, ports, &bat.display().to_string());
+        if rewritten == content {
+            continue;
+        }
+        let out: Vec<u8> = rewritten.chars().map(|c| c as u8).collect();
+        match std::fs::write(&bat, out) {
+            Ok(()) => log::info!("Updated the MIDI lines of the sound menu in {}", bat.display()),
+            Err(e) => log::warn!("Cannot update the MIDI lines in {}: {}", bat.display(), e),
+        }
+    }
+}
+
 fn bat_files(dir: &Path, depth: usize) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let Ok(entries) = std::fs::read_dir(dir) else { return out };
@@ -2070,12 +2093,12 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
         let dir = torrent_root.join(format!("{}/{}/{}", src_game_prefix, ld, shortcode));
         (shortcode, ld, game_folder, dir)
     });
-    if !shortcode.is_empty() && !cfg!(windows) {
-        let game_dir = match &lp_info {
-            Some((_, _, _, dir)) => dir.clone(),
-            None => torrent_root.join(src_game_prefix).join(shortcode),
-        };
-        rewrite_bat_host_paths(&game_dir, &working_dir);
+    let game_dir = (!shortcode.is_empty()).then(|| match &lp_info {
+        Some((_, _, _, dir)) => dir.clone(),
+        None => torrent_root.join(src_game_prefix).join(shortcode),
+    });
+    if let Some(dir) = game_dir.as_deref().filter(|_| !cfg!(windows)) {
+        rewrite_bat_host_paths(dir, &working_dir);
     }
 
     let ece_bin = resolve_engine(
@@ -2100,6 +2123,10 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
         }
     }
     let use_ece = ece_bin.is_some();
+    let midi_engine = if use_ece { super::midi::DosboxEngine::Ece } else { super::midi::DosboxEngine::Staging };
+    if let Some(dir) = &game_dir {
+        redirect_bat_midi_menus(dir, &super::midi::MenuPorts::new(midi_engine, &midi_prefs));
+    }
 
     let patched_conf = patch_dosbox_conf(
         &game_conf,
@@ -2154,10 +2181,9 @@ pub async fn launch_game(app: AppHandle, db_state: State<'_, DbState>, id: i64) 
         let conf_device = std::fs::read_to_string(&patched_conf)
             .ok()
             .and_then(|c| super::midi::conf_midi_device(&c));
-        let engine = if use_ece { super::midi::DosboxEngine::Ece } else { super::midi::DosboxEngine::Staging };
         let exo_soundfont = main_torrent_root.join("eXo/mt32/SoundCanvas.sf2");
         frag.push_str(&super::midi::dosbox_frag(
-            engine,
+            midi_engine,
             conf_device.as_deref(),
             &midi_prefs,
             exo_soundfont.is_file().then_some(exo_soundfont.as_path()),
@@ -2838,6 +2864,29 @@ mod tests {
         let mtime = fs::metadata(&run_bat).unwrap().modified().unwrap();
         rewrite_bat_host_paths(&game_dir, working_dir);
         assert_eq!(fs::metadata(&run_bat).unwrap().modified().unwrap(), mtime);
+    }
+
+    /// A port rewrites the menu two folders down (AcesotD's shape); Standard
+    /// writes eXo's bytes back, CP437 included.
+    #[test]
+    fn bat_midi_menus_follow_the_ports_and_come_back_unchanged() {
+        use crate::commands::midi::{DosboxEngine, MenuPorts, MidiPrefs, Mt32Output};
+        let tmp = tempfile::tempdir().unwrap();
+        let game_dir = tmp.path().join("AcesotD");
+        fs::create_dir_all(game_dir.join("DYNAMIX/AODCD")).unwrap();
+        let run_bat = game_dir.join("DYNAMIX/AODCD/run.bat");
+        let original = b"echo \xC9\xCD\xBB Men\x81\r\nCONFIG -set \"mididevice=mt32\"\r\n".to_vec();
+        fs::write(&run_bat, &original).unwrap();
+        let prefs = MidiPrefs { mt32: Mt32Output::Port("UM-ONE".into()), ..Default::default() };
+
+        redirect_bat_midi_menus(&game_dir, &MenuPorts::new(DosboxEngine::Staging, &prefs));
+        let out = fs::read(&run_bat).unwrap();
+        let has = |needle: &[u8]| out.windows(needle.len()).any(|w| w == needle);
+        assert!(has(b"\r\nCONFIG -set \"midiconfig=UM-ONE\"\r\nCONFIG -set \"mididevice=port\"\r\n"));
+        assert!(has(b"\xC9\xCD\xBB Men\x81\r\n"));
+
+        redirect_bat_midi_menus(&game_dir, &MenuPorts::default());
+        assert_eq!(fs::read(&run_bat).unwrap(), original);
     }
 
     #[test]
