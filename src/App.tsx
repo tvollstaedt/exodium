@@ -47,7 +47,7 @@ import "./styles/main.css";
 import { trackWindowActivity } from "./windowActivity";
 import { Button } from "./components/Button";
 import { KidsScreen } from "./components/KidsScreen";
-import { initKidsReset, kidsEnabled, kidsLocked, loadKidsStatus, lockKids } from "./stores/kids";
+import { initKidsReset, kidsEnabled, kidsLocked, loadKidsStatus, lockKids, requestKidsPlaylist } from "./stores/kids";
 import { Lock } from "lucide-solid";
 
 type AppPhase = "loading" | "setup" | "ready";
@@ -268,6 +268,11 @@ function App() {
     setShowSettings(true);
   };
 
+  const useForKids = (playlistId: number) => {
+    requestKidsPlaylist(playlistId);
+    openSettings("kids");
+  };
+
   /** The answer from the one-time consent dialog. Errors propagate so the
    *  dialog can stay open and say so - a failed write here would otherwise
    *  leave the key unset and ask again on the next start. */
@@ -450,7 +455,7 @@ function App() {
         </Dialog.Root>
         </Show>
 
-        <Library />
+        <Library onUseForKids={useForKids} />
 
         {/* Last flex child on purpose: it becomes the bottom row of the shell
             without any fixed positioning, and the panel steps aside for it. */}
