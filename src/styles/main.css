@@ -6665,18 +6665,23 @@ body.is-marquee {
   letter-spacing: 6px;
 }
 
-.kids-pin-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+/* The spacing is for the dots; a spaced-out "Repeat new PIN" reads as noise. */
+.kids-pin-input::placeholder {
+  font-size: 13px;
+  letter-spacing: normal;
 }
 
-.kids-pin-field {
-  width: 92px;
-  padding: 6px 8px;
-  background: var(--bg-primary);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 4px;
-  color: var(--text-primary);
-  font-size: 13px;
+.kids-status-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+}
+
+.kids-status-badge.is-on {
+  background: rgba(74, 222, 128, 0.15);
+  color: #4ade80;
 }

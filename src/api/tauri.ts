@@ -1121,7 +1121,8 @@ export interface KidsStatus {
   retry_in: number;
 }
 
-export interface UnlockResult {
+/** A wrong PIN carries the wait the backend set; every PIN check shares it. */
+export interface PinResult {
   ok: boolean;
   retry_in: number;
 }
@@ -1139,15 +1140,15 @@ export async function kidsUpdate(playlistId: number, language: string): Promise<
   return invoke("kids_update", { playlistId, language });
 }
 
-export async function kidsChangePin(oldPin: string, newPin: string): Promise<void> {
+export async function kidsChangePin(oldPin: string, newPin: string): Promise<PinResult> {
   return invoke("kids_change_pin", { oldPin, newPin });
 }
 
-export async function kidsDisable(pin: string): Promise<KidsStatus> {
+export async function kidsDisable(pin: string): Promise<PinResult> {
   return invoke("kids_disable", { pin });
 }
 
-export async function kidsUnlock(pin: string): Promise<UnlockResult> {
+export async function kidsUnlock(pin: string): Promise<PinResult> {
   return invoke("kids_unlock", { pin });
 }
 

@@ -1,41 +1,36 @@
 import { createEffect, createSignal, For, on, onMount, Show } from "solid-js";
-import { kidsChangePin, kidsDisable, kidsEnable, kidsUpdate } from "../api/tauri";
-import { kidsEnabled, kidsStatus, loadKidsStatus, setKidsStatus, takeRequestedKidsPlaylist } from "../stores/kids";
+import { kidsEnable, kidsUpdate } from "../api/tauri";
+import {
+  changeKidsPin, disableKids, kidsEnabled, kidsStatus, loadKidsStatus, setKidsStatus, takeRequestedKidsPlaylist,
+} from "../stores/kids";
 import { loadPlaylists, userPlaylists } from "../stores/playlists";
 import { showToast } from "../stores/toasts";
 import { languageName } from "../util";
 import { Button } from "./Button";
+import { PinDialog, pinAnswer, type PinAnswer } from "./PinDialog";
 import { SettingRow } from "./SettingRow";
 
 const LANGUAGES = ["EN", "DE", "ES", "PL", "FR", "IT"];
-const PIN_RULE = /^\d{4,8}$/;
+const RESET_HINT = "Forgot it? Start Exodium once with --reset-kids-mode.";
 
-function PinInput(props: { value: string; onInput: (v: string) => void; placeholder: string; testId: string }) {
-  return (
-    <input
-      class="kids-pin-field"
-      data-testid={props.testId}
-      type="password"
-      inputMode="numeric"
-      autocomplete="off"
-      maxLength={8}
-      placeholder={props.placeholder}
-      value={props.value}
-      onInput={(e) => props.onInput(e.currentTarget.value.replace(/\D/g, ""))}
-    />
-  );
-}
+const ON_FIELDS = [
+  { testId: "kids-pin-new", placeholder: "PIN" },
+  { testId: "kids-pin-repeat", placeholder: "Repeat PIN" },
+];
+const CHANGE_FIELDS = [
+  { testId: "kids-pin-current", placeholder: "Current PIN" },
+  { testId: "kids-pin-new", placeholder: "New PIN" },
+  { testId: "kids-pin-repeat", placeholder: "Repeat new PIN" },
+];
+const OFF_FIELDS = [{ testId: "kids-pin-current", placeholder: "PIN" }];
 
 /** Settings → Kids mode (§26). Reachable only unlocked, so playlist and
- *  language change without the PIN; turning it off or a new PIN need it. */
-export function KidsSettings() {
+ *  language change without the PIN; turning it off or a new PIN need it.
+ *  `onLock` is the lock button's path: Settings closes and the app locks. */
+export function KidsSettings(props: { onLock: () => void }) {
   const [playlist, setPlaylist] = createSignal("");
   const [language, setLanguage] = createSignal("EN");
-  const [pin, setPin] = createSignal("");
-  const [pin2, setPin2] = createSignal("");
-  const [oldPin, setOldPin] = createSignal("");
-  const [newPin, setNewPin] = createSignal("");
-  const [offPin, setOffPin] = createSignal("");
+  const [dialog, setDialog] = createSignal<"on" | "change" | "off" | null>(null);
   const [error, setError] = createSignal("");
 
   createEffect(on(kidsStatus, (s) => {
@@ -45,31 +40,23 @@ export function KidsSettings() {
     }
   }));
 
-  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
-
-  const enable = async () => {
-    setError("");
-    if (!PIN_RULE.test(pin())) { setError("The PIN must be 4 to 8 digits"); return; }
-    if (pin() !== pin2()) { setError("The two PINs differ"); return; }
-    try {
-      setKidsStatus(await kidsEnable(pin(), playlist() ? Number(playlist()) : null, language()));
-      void loadPlaylists();
-      setPin("");
-      setPin2("");
-      showToast("Kids mode is on - it locks at every start, or now with the lock in the top bar", "success");
-    } catch (e) { fail(e); }
-  };
-
   const update = async (nextPlaylist: string, nextLanguage: string) => {
     setError("");
     try {
       setKidsStatus(await kidsUpdate(Number(nextPlaylist), nextLanguage));
-    } catch (e) { fail(e); }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
   };
 
   const choosePlaylist = (v: string) => {
     setPlaylist(v);
     if (kidsEnabled()) { void update(v, language()); }
+  };
+
+  const chooseLanguage = (v: string) => {
+    setLanguage(v);
+    if (kidsEnabled()) { void update(playlist(), v); }
   };
 
   // After the status: its effect would otherwise overwrite the requested pick.
@@ -80,24 +67,30 @@ export function KidsSettings() {
     if (requested != null) { choosePlaylist(String(requested)); }
   });
 
-  const changePin = async () => {
-    setError("");
-    if (!PIN_RULE.test(newPin())) { setError("The new PIN must be 4 to 8 digits"); return; }
-    try {
-      await kidsChangePin(oldPin(), newPin());
-      setOldPin("");
-      setNewPin("");
-      showToast("PIN changed", "success");
-    } catch (e) { fail(e); }
+  const turnOn = async ([pin]: string[]): Promise<PinAnswer> => {
+    setKidsStatus(await kidsEnable(pin, playlist() ? Number(playlist()) : null, language()));
+    void loadPlaylists();
+    setDialog(null);
+    props.onLock();
+    return { ok: true };
   };
 
-  const disable = async () => {
-    setError("");
-    try {
-      setKidsStatus(await kidsDisable(offPin()));
-      setOffPin("");
+  const changePin = async ([current, next]: string[]): Promise<PinAnswer> => {
+    const check = await changeKidsPin(current, next);
+    if (check.ok) {
+      setDialog(null);
+      showToast("PIN changed", "success");
+    }
+    return pinAnswer(check);
+  };
+
+  const turnOff = async ([pin]: string[]): Promise<PinAnswer> => {
+    const check = await disableKids(pin);
+    if (check.ok) {
+      setDialog(null);
       showToast("Kids mode is off", "success");
-    } catch (e) { fail(e); }
+    }
+    return pinAnswer(check);
   };
 
   const PlaylistSelect = (p: { allowNew: boolean; onChange: (v: string) => void }) => (
@@ -117,46 +110,75 @@ export function KidsSettings() {
       <h3 class="settings-section-title">Kids mode</h3>
       <p class="settings-section-hint">
         A locked screen with only the installed games of one playlist - no downloads, no settings, nothing else.
-        Every start locks; the PIN opens the rest. A child lock, not a safe: it keeps kids from wandering off, not
-        someone determined.
+        It locks when turned on, at every start and with Lock now; the PIN opens the rest. A child lock, not a
+        safe: it keeps kids from wandering off, not someone determined.
       </p>
 
+      <SettingRow
+        label="Kids mode"
+        value={
+          <span class={`kids-status-badge${kidsEnabled() ? " is-on" : ""}`} data-testid="kids-status">
+            {kidsEnabled() ? "On" : "Off"}
+          </span>
+        }
+      >
+        <Show
+          when={kidsEnabled()}
+          fallback={<Button variant="small" data-testid="kids-turn-on" onClick={() => setDialog("on")}>Turn on…</Button>}
+        >
+          <Button variant="small" data-testid="kids-lock-now" onClick={props.onLock}>Lock now</Button>
+          <Button variant="small" data-testid="kids-turn-off" onClick={() => setDialog("off")}>Turn off…</Button>
+        </Show>
+      </SettingRow>
       <SettingRow label="Playlist" hint="Its installed games are what the kids screen shows.">
         <PlaylistSelect allowNew={!kidsEnabled()} onChange={choosePlaylist} />
       </SettingRow>
       <SettingRow label="Language" hint="The version a click starts, where installed - otherwise English.">
-        <LanguageSelect onChange={(v) => { setLanguage(v); if (kidsEnabled()) { void update(playlist(), v); } }} />
+        <LanguageSelect onChange={chooseLanguage} />
       </SettingRow>
-
-      <Show
-        when={kidsEnabled()}
-        fallback={
-          <SettingRow label="PIN" hint="4 to 8 digits, twice.">
-            <div class="kids-pin-row">
-              <PinInput value={pin()} onInput={setPin} placeholder="PIN" testId="kids-pin-new" />
-              <PinInput value={pin2()} onInput={setPin2} placeholder="Repeat" testId="kids-pin-repeat" />
-              <Button variant="small" data-testid="kids-enable" onClick={() => void enable()}>Turn on</Button>
-            </div>
-          </SettingRow>
-        }
-      >
-        <SettingRow label="Change PIN">
-          <div class="kids-pin-row">
-            <PinInput value={oldPin()} onInput={setOldPin} placeholder="Current" testId="kids-pin-old" />
-            <PinInput value={newPin()} onInput={setNewPin} placeholder="New" testId="kids-pin-changed" />
-            <Button variant="small" onClick={() => void changePin()}>Change</Button>
-          </div>
-        </SettingRow>
-        <SettingRow label="Turn off" hint="Forgot the PIN? Start Exodium once with --reset-kids-mode.">
-          <div class="kids-pin-row">
-            <PinInput value={offPin()} onInput={setOffPin} placeholder="PIN" testId="kids-pin-off" />
-            <Button variant="small" data-testid="kids-disable" onClick={() => void disable()}>Turn off</Button>
-          </div>
+      <Show when={kidsEnabled()}>
+        <SettingRow label="PIN" hint={RESET_HINT}>
+          <Button variant="small" data-testid="kids-change-pin" onClick={() => setDialog("change")}>Change PIN…</Button>
         </SettingRow>
       </Show>
       <Show when={error()}>
         <div class="playlist-name-error" data-testid="kids-settings-error">{error()}</div>
       </Show>
+
+      <PinDialog
+        open={dialog() === "on"}
+        title="Turn on kids mode"
+        description="Choose a PIN of 4 to 8 digits. Exodium locks right away and at every start; the PIN unlocks it."
+        fields={ON_FIELDS}
+        mismatch="The two PINs differ"
+        submitLabel="Turn on and lock"
+        testId="kids-turn-on-dialog"
+        submitTestId="kids-enable"
+        onSubmit={turnOn}
+        onClose={() => setDialog(null)}
+      />
+      <PinDialog
+        open={dialog() === "change"}
+        title="Change PIN"
+        fields={CHANGE_FIELDS}
+        mismatch="The two new PINs differ"
+        submitLabel="Change PIN"
+        testId="kids-change-pin-dialog"
+        submitTestId="kids-change-pin-submit"
+        onSubmit={changePin}
+        onClose={() => setDialog(null)}
+      />
+      <PinDialog
+        open={dialog() === "off"}
+        title="Turn off kids mode"
+        description={`Exodium stops locking; the playlist stays. ${RESET_HINT}`}
+        fields={OFF_FIELDS}
+        submitLabel="Turn off"
+        testId="kids-turn-off-dialog"
+        submitTestId="kids-disable"
+        onSubmit={turnOff}
+        onClose={() => setDialog(null)}
+      />
     </section>
   );
 }
