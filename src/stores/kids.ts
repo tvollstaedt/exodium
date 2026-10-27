@@ -9,6 +9,21 @@ export { status as kidsStatus, setStatus as setKidsStatus };
 
 export const kidsLocked = () => status()?.locked === true;
 export const kidsEnabled = () => status()?.enabled === true;
+/** The playlist the kids screen shows; null while kids mode is off. */
+export const activeKidsPlaylist = () => (kidsEnabled() ? status()?.playlist_id ?? null : null);
+
+let requestedPlaylist: number | null = null;
+
+/** "Use for kids mode…" on a playlist: Settings → Kids mode picks it up once. */
+export function requestKidsPlaylist(id: number) {
+  requestedPlaylist = id;
+}
+
+export function takeRequestedKidsPlaylist(): number | null {
+  const id = requestedPlaylist;
+  requestedPlaylist = null;
+  return id;
+}
 
 export async function loadKidsStatus() {
   try {

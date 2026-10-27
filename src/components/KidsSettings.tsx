@@ -1,6 +1,6 @@
 import { createEffect, createSignal, For, on, onMount, Show } from "solid-js";
 import { kidsChangePin, kidsDisable, kidsEnable, kidsUpdate } from "../api/tauri";
-import { kidsEnabled, kidsStatus, loadKidsStatus, setKidsStatus } from "../stores/kids";
+import { kidsEnabled, kidsStatus, loadKidsStatus, setKidsStatus, takeRequestedKidsPlaylist } from "../stores/kids";
 import { loadPlaylists, userPlaylists } from "../stores/playlists";
 import { showToast } from "../stores/toasts";
 import { languageName } from "../util";
@@ -38,7 +38,6 @@ export function KidsSettings() {
   const [offPin, setOffPin] = createSignal("");
   const [error, setError] = createSignal("");
 
-  onMount(() => { void loadKidsStatus(); void loadPlaylists(); });
   createEffect(on(kidsStatus, (s) => {
     if (s?.enabled) {
       setPlaylist(s.playlist_id != null ? String(s.playlist_id) : "");
@@ -67,6 +66,19 @@ export function KidsSettings() {
       setKidsStatus(await kidsUpdate(Number(nextPlaylist), nextLanguage));
     } catch (e) { fail(e); }
   };
+
+  const choosePlaylist = (v: string) => {
+    setPlaylist(v);
+    if (kidsEnabled()) { void update(v, language()); }
+  };
+
+  // After the status: its effect would otherwise overwrite the requested pick.
+  onMount(async () => {
+    void loadPlaylists();
+    await loadKidsStatus();
+    const requested = takeRequestedKidsPlaylist();
+    if (requested != null) { choosePlaylist(String(requested)); }
+  });
 
   const changePin = async () => {
     setError("");
@@ -110,10 +122,7 @@ export function KidsSettings() {
       </p>
 
       <SettingRow label="Playlist" hint="Its installed games are what the kids screen shows.">
-        <PlaylistSelect
-          allowNew={!kidsEnabled()}
-          onChange={(v) => { setPlaylist(v); if (kidsEnabled()) { void update(v, language()); } }}
-        />
+        <PlaylistSelect allowNew={!kidsEnabled()} onChange={choosePlaylist} />
       </SettingRow>
       <SettingRow label="Language" hint="The version a click starts, where installed - otherwise English.">
         <LanguageSelect onChange={(v) => { setLanguage(v); if (kidsEnabled()) { void update(playlist(), v); } }} />

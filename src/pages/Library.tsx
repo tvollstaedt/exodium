@@ -45,6 +45,7 @@ import { matchesLibraryQuery, jumpBarDisplayLabel, jumpBarIsWide } from "../util
 import { createLibraryPoll } from "../libraryPoll";
 import { ReadingRoom } from "../components/ReadingRoom";
 import { ViewToggle } from "../components/ViewToggle";
+import { activeKidsPlaylist } from "../stores/kids";
 
 type Tab = "library" | "browse" | "reading";
 
@@ -91,7 +92,7 @@ const listColumns: { label: string; cls: string; asc?: string; desc?: string }[]
   { label: "Status", cls: "row-status" },
 ];
 
-export function Library() {
+export function Library(props: { onUseForKids: (playlistId: number) => void }) {
   let sentinelRef: HTMLDivElement | undefined;
   let libraryRef: HTMLDivElement | undefined;
   // The jump bar is a layout column beside the scroller, never an overlay:
@@ -1203,6 +1204,20 @@ export function Library() {
             }}>
               Rename
             </button>
+            <Show
+              when={activeKidsPlaylist() === shelfMenu()!.playlist.id}
+              fallback={
+                <button class="context-menu-item" data-testid="playlist-use-for-kids" onMouseDown={(e) => e.stopPropagation()} onClick={() => {
+                  const playlist = shelfMenu()!.playlist;
+                  setShelfMenu(null);
+                  props.onUseForKids(playlist.id);
+                }}>
+                  Use for kids mode…
+                </button>
+              }
+            >
+              <div class="context-menu-item is-note" data-testid="playlist-kids-active">Used for kids mode</div>
+            </Show>
             <button class="context-menu-item danger" data-testid="playlist-delete" onMouseDown={(e) => e.stopPropagation()} onClick={() => {
               const playlist = shelfMenu()!.playlist;
               setShelfMenu(null);

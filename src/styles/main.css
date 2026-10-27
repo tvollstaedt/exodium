@@ -1802,6 +1802,15 @@ body {
   color: var(--danger);
 }
 
+.context-menu-item.is-note {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.context-menu-item.is-note:hover {
+  background: transparent;
+}
+
 /* ── Playlist picker (context-menu variant with membership checkmarks) ── */
 /* Opens from the game detail panel too (panel z 150, its backdrop 149) -
    the default context-menu layer (60/61) would put it BEHIND the panel,
