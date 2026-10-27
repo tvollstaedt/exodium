@@ -51,6 +51,15 @@ const NOTE_CLOSE_MS = 240;
  *  so it may sit a little past the animation without costing anything. */
 const SETTLE_FALLBACK_MS = 350;
 
+/** How long a closed panel stays mounted; matches the `.is-closing`
+ *  animations in main.css. A timer, not `animationend`: reduced motion and
+ *  jsdom never fire it. */
+const CLOSE_MS = 200;
+
+const prefersReducedMotion = () =>
+  typeof window.matchMedia === "function"
+  && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
 /** A credit line under the title: pictogram, then the value. The pictogram
  *  replaces the label, so `title` carries it for anyone who needs it spelled
  *  out (tooltip and screen readers both). */
@@ -94,7 +103,38 @@ const Field = (props: {
 const isWindows = typeof navigator !== "undefined"
   && /Win/i.test(navigator.platform || navigator.userAgent || "");
 
+/** Keeps the last game rendered, unchanged, while the exit animation plays
+ *  (`closing`); a game arriving meanwhile - the same one included - cancels
+ *  it. A memo rather than an effect, so the view never sees the null in
+ *  between and nothing remounts. */
 export function GameDetailPanel(props: Props) {
+  const [exitDone, setExitDone] = createSignal(false);
+  let last: Game | null = null;
+  const shown = createMemo<Game | null>(() => {
+    const g = props.game;
+    if (g) { last = g; return g; }
+    if (exitDone() || prefersReducedMotion()) { last = null; }
+    return last;
+  });
+  const closing = createMemo(() => props.game == null && shown() != null);
+  let exitTimer: ReturnType<typeof setTimeout> | undefined;
+  createEffect(() => {
+    clearTimeout(exitTimer);
+    if (!closing()) { setExitDone(false); return; }
+    exitTimer = setTimeout(() => setExitDone(true), CLOSE_MS);
+  });
+  onCleanup(() => clearTimeout(exitTimer));
+  return (
+    <DetailPanelView
+      game={shown()}
+      closing={closing()}
+      onClose={props.onClose}
+      onDownloadStart={props.onDownloadStart}
+    />
+  );
+}
+
+function DetailPanelView(props: Props & { closing: boolean }) {
   const [variants, setVariants] = createSignal<Game[]>([]);
   const [status, setStatus] = createSignal("");
   const [imgError, setImgError] = createSignal(false);
@@ -407,6 +447,8 @@ export function GameDetailPanel(props: Props) {
   // which stutters on a software renderer (§17). `animationend` is the
   // signal, the timeout the fallback. Layout-defining data stays immediate.
   const [panelSettled, setPanelSettled] = createSignal(false);
+  /** Fullscreen as of the last open; picks the entry (main.css, .enters-zoom). */
+  const [entersZoom, setEntersZoom] = createSignal(false);
   let settleTimer: ReturnType<typeof setTimeout> | undefined;
   // Guarded on open/closed rather than on props.game itself: the prop is
   // replaced with a fresh object on every library refresh, and re-arming the
@@ -417,12 +459,17 @@ export function GameDetailPanel(props: Props) {
     setPanelSettled(true);
   };
   createEffect(() => {
-    const open = props.game != null;
+    // Closing counts as closed, so a game opened during the exit slides in
+    // and settles like any other.
+    const open = props.game != null && !props.closing;
     if (open === panelOpen) { return; }
     panelOpen = open;
     clearTimeout(settleTimer);
     setPanelSettled(false);
-    if (open) { settleTimer = setTimeout(markSettled, SETTLE_FALLBACK_MS); }
+    if (open) {
+      setEntersZoom(untrack(panelFullscreen));
+      settleTimer = setTimeout(markSettled, SETTLE_FALLBACK_MS);
+    }
   });
   onCleanup(() => clearTimeout(settleTimer));
   const win9x = createWin9xStatus(() => props.game, panelSettled);
@@ -620,8 +667,11 @@ export function GameDetailPanel(props: Props) {
     }).catch(() => {});
   });
 
+  /** A closing panel has already been closed; its last frames take no input. */
+  const close = () => { if (!props.closing) { props.onClose(); } };
+
   const handleKeyDown = (e: KeyboardEvent) => {
-    if (e.key !== "Escape" || !props.game) { return; }
+    if (e.key !== "Escape" || !props.game || props.closing) { return; }
     // One Escape closes one layer; the actions menu covers its dialogs.
     if (lightboxOpen() || manualOpen()) { return; }
     // Consumed here: the selection's window handler must not act on it too.
@@ -764,7 +814,7 @@ export function GameDetailPanel(props: Props) {
   // card, and each one can pull tens of megabytes.
   createEffect(() => {
     const id = selected()?.id;
-    if (id == null) { return; }
+    if (id == null || props.closing) { return; }
     setForegroundVideo(id);
     const timer = window.setTimeout(() => requestVideo(id), 400);
     onCleanup(() => {
@@ -789,7 +839,7 @@ export function GameDetailPanel(props: Props) {
   createEffect(() => {
     const g = themeOwner();
     const id = g?.id;
-    if (g == null || id == null || musicUnsupported()) { return; }
+    if (props.closing || g == null || id == null || musicUnsupported()) { return; }
     const timer = window.setTimeout(() => {
       // Already the active track (e.g. started from the Browse list, or the
       // owner resolved while playing): leave the player alone - re-issuing
@@ -809,7 +859,7 @@ export function GameDetailPanel(props: Props) {
   const dropAutoTheme = () => {
     if (autoThemeFor != null) { withdrawAutoTheme(autoThemeFor); autoThemeFor = null; }
   };
-  createEffect(() => { if (!props.game) { dropAutoTheme(); } });
+  createEffect(() => { if (!props.game || props.closing) { dropAutoTheme(); } });
   onCleanup(dropAutoTheme);
   const musicState = () => {
     const id = themeOwner()?.id;
@@ -846,11 +896,12 @@ export function GameDetailPanel(props: Props) {
 
   // The hero follows the selected row and its source, nothing else: a row
   // with a ready video is shown (the controller waits out the cover beat),
-  // anything else clears it. The mute preference is read at start time.
+  // anything else - a closing panel too - clears it. The mute preference is
+  // read at start time.
   createEffect(() => {
     const id = selected()?.id;
     const url = videoSrc();
-    if (id == null || !url) {
+    if (props.closing || id == null || !url) {
       clearPreview();
       return;
     }
@@ -1110,15 +1161,19 @@ export function GameDetailPanel(props: Props) {
   return (
     <Show when={props.game}>
       <Portal>
-        <div class={`game-detail-backdrop${panelFullscreen() ? " is-fullscreen" : ""}`} onClick={props.onClose} />
-        {/* animationend bubbles, so only the panel's own slide-in counts -
-            a child's spinner or badge burst must not settle the panel early. */}
         <div
-          class={`game-detail-panel${panelFullscreen() ? " is-fullscreen" : ""}`}
+          class={`game-detail-backdrop${panelFullscreen() ? " is-fullscreen" : ""}${props.closing ? " is-closing" : ""}`}
+          onClick={close}
+        />
+        {/* animationend bubbles, so only the panel's own entry counts - a
+            child's spinner or badge burst must not settle the panel early,
+            and neither may the exit. */}
+        <div
+          class={`game-detail-panel${panelFullscreen() ? " is-fullscreen" : ""}${entersZoom() ? " enters-zoom" : ""}${props.closing ? " is-closing" : ""}`}
           data-testid="game-detail"
           data-fullscreen={panelFullscreen() ? "true" : "false"}
           style={{ "--detail-panel-w": panelWidthPx() != null ? `${panelWidthPx()}px` : undefined }}
-          onAnimationEnd={(e) => { if (e.target === e.currentTarget) { markSettled(); } }}
+          onAnimationEnd={(e) => { if (e.target === e.currentTarget && !props.closing) { markSettled(); } }}
         >
           {/* Pointer capture keeps the drag alive over the backdrop and the
               video; a double-click returns to the CSS default. */}
@@ -1143,7 +1198,7 @@ export function GameDetailPanel(props: Props) {
               sibling, moving onto it left the hero un-hovered and the control
               faded out from under the cursor. */}
           <div class="game-detail-hero">
-            <button class="game-detail-close" onClick={props.onClose} title="Close">✕</button>
+            <button class="game-detail-close" onClick={close} title="Close">✕</button>
             <button
               class="game-detail-fullscreen"
               data-testid="game-detail-fullscreen"

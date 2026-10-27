@@ -3222,6 +3222,54 @@ body {
   to   { transform: translateX(0);    opacity: 1; }
 }
 
+/* Fullscreen covers the grid it would slide over, so it fades and settles
+   instead. `enters-zoom` is fixed when the panel opens: keyed on
+   `.is-fullscreen`, every toggle would replay the entry. */
+.game-detail-panel.enters-zoom {
+  animation: panelZoomIn 0.22s cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+/* The exit: mounted for CLOSE_MS (GameDetailPanel.tsx) in this state, the
+   last game unchanged, and from its first frame the clicks fall through to
+   the grid. */
+.game-detail-backdrop.is-closing {
+  animation: modalBackdropOut 0.2s ease forwards;
+  pointer-events: none;
+}
+
+.game-detail-panel.is-closing {
+  animation: slideOutRight 0.2s cubic-bezier(0.7, 0, 0.8, 0.3) forwards;
+  pointer-events: none;
+}
+
+.game-detail-panel.is-fullscreen.is-closing {
+  animation: panelZoomOut 0.2s ease forwards;
+}
+
+@keyframes slideOutRight {
+  from { transform: translateX(0);    opacity: 1; }
+  to   { transform: translateX(100%); opacity: 0; }
+}
+
+@keyframes panelZoomIn {
+  from { transform: scale(0.98); opacity: 0; }
+  to   { transform: scale(1);    opacity: 1; }
+}
+
+@keyframes panelZoomOut {
+  from { transform: scale(1);    opacity: 1; }
+  to   { transform: scale(0.98); opacity: 0; }
+}
+
+/* No entry either way; the exit never starts, the panel unmounts at once. */
+@media (prefers-reduced-motion: reduce) {
+  .game-detail-backdrop,
+  .game-detail-panel,
+  .game-detail-panel.enters-zoom {
+    animation: none;
+  }
+}
+
 /* Plain flex columns below the wide tier, so the panel's column reaches the
    hero, body and gallery unchanged. Size containment makes the frame the
    containing block for absolute and fixed descendants: in fullscreen and the
