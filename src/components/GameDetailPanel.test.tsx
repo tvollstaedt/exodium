@@ -3,6 +3,8 @@ import { createSignal } from "solid-js";
 import { render } from "solid-js/web";
 import { invoke } from "@tauri-apps/api/core";
 import type { Game } from "../api/tauri";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { GameDetailPanel } from "./GameDetailPanel";
 
 const mockInvoke = vi.mocked(invoke);
@@ -527,6 +529,64 @@ describe("GameDetailPanel", () => {
     dispose();
   });
 
+  /** The wide tier (main.css) queries the frame and lays out the layout, head
+   *  and side groups. All four are static: a refresh or the fullscreen toggle
+   *  must find the same nodes, or the strip under them remounts. */
+  it("keeps the layout wrappers across a row refresh and the fullscreen toggle", async () => {
+    vi.useFakeTimers();
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_game_metadata") {
+        return { manual_path: null, manual_kind: null, images: ["/pack/a.png"], thumbnails: ["/cache/a.png"] };
+      }
+      if (cmd === "get_game_variants") { return []; }
+      if (cmd === "game_disk_usage") { return { game_bytes: 463_000, archive_bytes: 0, save_bytes: 0 }; }
+      return null;
+    });
+    const [game, setGame] = createSignal(makeGame({ installed: true, in_library: true }));
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const dispose = render(() => <GameDetailPanel game={game()} onClose={() => {}} />, host);
+    await vi.advanceTimersByTimeAsync(3200);
+
+    const panel = document.body.querySelector<HTMLElement>('[data-testid="game-detail"]')!;
+    const frame = panel.querySelector<HTMLElement>(":scope > .game-detail-frame");
+    expect(frame, "the query container is a child of the panel, not the panel").not.toBeNull();
+    const layout = frame!.querySelector(":scope > .game-detail-layout")!;
+    const parts = () => ({
+      hero: layout.querySelector(":scope > .game-detail-hero"),
+      head: layout.querySelector(":scope > .game-detail-body > .game-detail-head"),
+      side: layout.querySelector(":scope > .game-detail-body > .game-detail-scroll > .game-detail-side"),
+      media: layout.querySelector(":scope > .game-detail-media"),
+    });
+    const before = parts();
+    expect(before.hero).not.toBeNull();
+    expect(before.head?.querySelector(".game-detail-title")).not.toBeNull();
+    expect(before.head?.querySelector(".game-detail-actions")).not.toBeNull();
+    expect(before.side?.querySelector(".game-detail-info")).not.toBeNull();
+    expect(before.media).not.toBeNull();
+
+    setGame(makeGame({ installed: true, in_library: true }));
+    await vi.advanceTimersByTimeAsync(3200);
+    expect(panel.querySelector(".game-detail-frame")).toBe(frame);
+    const after = parts();
+    for (const key of Object.keys(before) as (keyof typeof before)[]) {
+      expect(after[key], `${key} must not be rebuilt`).toBe(before[key]);
+    }
+
+    document.body.querySelector<HTMLButtonElement>('[data-testid="game-detail-fullscreen"]')!.click();
+    await vi.advanceTimersByTimeAsync(50);
+    expect(panel.classList.contains("is-fullscreen")).toBe(true);
+    expect(panel.querySelector(".game-detail-layout")).toBe(layout);
+    const during = parts();
+    expect(during.head).toBe(before.head);
+    expect(during.media).toBe(before.media);
+
+    document.body.querySelector<HTMLButtonElement>('[data-testid="game-detail-fullscreen"]')!.click();
+    await vi.advanceTimersByTimeAsync(50);
+    dispose();
+    host.remove();
+  });
+
   it("Escape with the panel closed leaves the fullscreen preference alone", async () => {
     const { setPanelFullscreen, panelFullscreen } = await import("../stores/detailPanel");
     const host = document.createElement("div");
@@ -566,6 +626,42 @@ describe("GameDetailPanel", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
     dispose();
     host.remove();
+  });
+});
+
+/** jsdom has no container queries, so the two rules that keep the wide tier
+ *  honest are read from the stylesheet: it never reaches fullscreen, which has
+ *  its own grid, and the container is the frame - an element cannot restyle
+ *  itself from its own query. Read from disk: vitest blanks CSS imports,
+ *  `?raw` included. */
+describe("GameDetailPanel wide tier stylesheet", () => {
+  const css = readFileSync(resolve(__dirname, "../styles/main.css"), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "");
+
+  const blockAfter = (marker: string): string => {
+    const open = css.indexOf("{", css.indexOf(marker));
+    let depth = 0;
+    for (let i = open; i < css.length; i++) {
+      if (css[i] === "{") { depth++; }
+      if (css[i] === "}" && --depth === 0) { return css.slice(open + 1, i); }
+    }
+    throw new Error(`unterminated block after ${marker}`);
+  };
+
+  it("scopes every rule of the tier away from fullscreen", () => {
+    expect(css).toContain("@container detail-panel (min-width: 760px)");
+    const selectors = [...blockAfter("@container detail-panel (min-width: 760px)").matchAll(/([^{}]+)\{[^{}]*\}/g)]
+      .flatMap((m) => m[1].split(",").map((s) => s.trim()));
+    expect(selectors.length).toBeGreaterThan(5);
+    for (const s of selectors) {
+      expect(s.startsWith(".game-detail-panel:not(.is-fullscreen) "), s).toBe(true);
+    }
+  });
+
+  it("makes the frame the only query container", () => {
+    const owners = [...css.matchAll(/([^{}]+)\{[^{}]*\bcontainer(?:-type|-name)?\s*:[^{}]*\}/g)]
+      .map((m) => m[1].trim());
+    expect(owners).toEqual([".game-detail-frame"]);
   });
 });
 

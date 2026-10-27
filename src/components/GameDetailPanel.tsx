@@ -1133,6 +1133,11 @@ export function GameDetailPanel(props: Props) {
             onLostPointerCapture={onResizeEnd}
             onDblClick={() => { void setPanelWidthFraction(null); }}
           />
+          {/* The wide tier's query container and the element it turns into a
+              grid - two, since a container cannot restyle itself from its own
+              query. Both static (§12). */}
+          <div class="game-detail-frame" data-testid="game-detail-frame">
+          <div class="game-detail-layout">
           {/* Hero: the artwork. The buttons live INSIDE it so the hover that
               reveals them survives the pointer reaching a button - as a
               sibling, moving onto it left the hero un-hovered and the control
@@ -1254,6 +1259,8 @@ export function GameDetailPanel(props: Props) {
           {/* The body is the text column: in fullscreen it sits beside the
               hero, so the title block belongs here rather than under the art. */}
           <div class="game-detail-body">
+            {/* Beside the hero in the wide tier; elsewhere `display: contents`. */}
+            <div class="game-detail-head">
             {/* Title, then who made it, then what kind of thing it is. The
                 three sit in that order because that is the order they answer
                 "what am I looking at" - and none of them competes with the
@@ -1484,16 +1491,13 @@ export function GameDetailPanel(props: Props) {
                 </Show>
               )}
             </Show>
+            </div>
 
-            {/* Two columns side by side on a wide panel, stacked when it's
-                narrow (flex-wrap, no breakpoint) - the pair is what keeps the
-                screenshots on screen without scrolling. */}
             <div class="game-detail-scroll">
-              {/* One column. Fields beside the description gave each of them
-                  half of a 560 px panel: the field table wrapped company names
-                  over three lines and the text ran at ~40 characters, half a
-                  comfortable measure. Neither needed the other's company - a
-                  reader takes them in sequence, not side by side. */}
+              {/* One column below the wide tier: beside the description, half
+                  of a 560 px panel wrapped company names over three lines and
+                  ran the text at ~40 characters. From 760 px the side blocks
+                  get a column of their own next to the text's full measure. */}
               <div class="game-detail-text">
                 <Show when={descriptionSource()}>
                   {(src) => (
@@ -1523,10 +1527,12 @@ export function GameDetailPanel(props: Props) {
                 </Show>
               </div>
 
+              {/* What is looked up rather than read: below the description
+                  (`display: contents`), beside it in the wide tier. */}
+              <div class="game-detail-side">
               {/* The long tail: everything not already answered by the credits
-                  or the tag row. Full width, so two pairs fit per line and
-                  nothing wraps - and below the description, because these are
-                  looked up rather than read. */}
+                  or the tag row. Full width below the wide tier, so two pairs
+                  fit per line and nothing wraps. */}
               <Show when={hasInformation()}>
                 <div class="game-detail-info">
                   <div class="game-detail-section-label">Information</div>
@@ -1633,13 +1639,13 @@ export function GameDetailPanel(props: Props) {
                   </div>
                 </div>
               </Show>
+              </div>
             </div>
           </div>
 
           {/* Media: screenshots/art - only renders if the metadata content
-              pack has assets for this game. A child of the panel, not the
-              body: pinned to the bottom beside the panel, the hero's column
-              in fullscreen. */}
+              pack has assets for this game. A child of the layout, not the
+              body: pinned to the bottom, the hero's column in fullscreen. */}
           <Show when={!metadataLoading() && metadata() && metadata()!.images.length > 0}>
             <div class="game-detail-media">
               {(() => {
@@ -1676,6 +1682,8 @@ export function GameDetailPanel(props: Props) {
               })()}
             </div>
           </Show>
+          </div>
+          </div>
         </div>
 
         <Lightbox

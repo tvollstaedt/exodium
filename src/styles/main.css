@@ -3222,6 +3222,34 @@ body {
   to   { transform: translateX(0);    opacity: 1; }
 }
 
+/* Plain flex columns below the wide tier, so the panel's column reaches the
+   hero, body and gallery unchanged. Size containment makes the frame the
+   containing block for absolute and fixed descendants: in fullscreen and the
+   wide tier the corner buttons resolve against it (the panel's own box), and
+   nothing fixed may live inside - menus, dialogs and the lightbox are
+   portaled siblings of the panel. */
+.game-detail-frame {
+  container: detail-panel / inline-size;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.game-detail-layout {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Groups only the wide tier lays out; elsewhere their children stay items
+   of the body's and the scroll region's columns. */
+.game-detail-head,
+.game-detail-side {
+  display: contents;
+}
+
 /* Drag handle on the panel's left edge. Inside the panel (overflow: hidden
    would clip anything hanging outside), wide enough to grab, visible only
    under the pointer. */
@@ -5529,6 +5557,106 @@ body.has-player {
   bottom: var(--player-h);
 }
 
+/* ── Wide panel ──────────────────────────────────────────────────────────────
+   From 760 px of PANEL width - only a drag gets there, the default tops out
+   at 560 - and never in fullscreen, which has its own grid. The body
+   dissolves, so its head and scroll region become grid items of the layout. */
+@container detail-panel (min-width: 760px) {
+  .game-detail-panel:not(.is-fullscreen) .game-detail-layout {
+    display: grid;
+    /* The art grows to 16:9 at 360 px before the head takes the rest. */
+    grid-template-columns: minmax(0, 640px) minmax(300px, 1fr);
+    /* The scroll region's 120 px floor (see .game-detail-scroll) as a track
+       minimum - with 0 the item would spill over the gallery row. */
+    grid-template-rows: auto minmax(120px, 1fr) auto;
+    grid-template-areas:
+      "art     head"
+      "content content"
+      "gallery gallery";
+    /* The short-window escape hatch the body carries below this tier. */
+    overflow-y: auto;
+  }
+
+  /* Static, so close and fullscreen sit in the panel's corner as in
+     fullscreen - on the art they would hang in the middle of the panel. */
+  .game-detail-panel:not(.is-fullscreen) .game-detail-hero {
+    grid-area: art;
+    position: static;
+    align-self: start;
+  }
+
+  .game-detail-panel:not(.is-fullscreen) .game-detail-close,
+  .game-detail-panel:not(.is-fullscreen) .game-detail-fullscreen {
+    opacity: 1;
+  }
+
+  .game-detail-panel:not(.is-fullscreen) .game-detail-thumb,
+  .game-detail-panel:not(.is-fullscreen) .game-detail-hero-video {
+    max-height: 360px;
+  }
+
+  .game-detail-panel:not(.is-fullscreen) .game-detail-body {
+    display: contents;
+  }
+
+  .game-detail-panel:not(.is-fullscreen) .game-detail-head {
+    grid-area: head;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+    padding: 14px 16px 12px 20px;
+  }
+
+  /* Clear of the two corner buttons. */
+  .game-detail-panel:not(.is-fullscreen) .game-detail-title {
+    font-size: 18px;
+    padding-right: 64px;
+  }
+
+  /* 12 px is the description's own size, so 75ch here is its measure: the
+     side column starts where the text ends. Every child sets its own size. */
+  .game-detail-panel:not(.is-fullscreen) .game-detail-scroll {
+    grid-area: content;
+    display: grid;
+    grid-template-columns: minmax(0, 75ch) minmax(240px, 1fr);
+    align-content: start;
+    align-items: start;
+    gap: 8px 32px;
+    padding: 12px 16px 10px;
+    font-size: 12px;
+  }
+
+  .game-detail-panel:not(.is-fullscreen) .game-detail-side {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+    max-width: 440px;
+  }
+
+  /* Level with the description: the first block's rule separates it from
+     nothing here. */
+  .game-detail-panel:not(.is-fullscreen) .game-detail-side > :first-child {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+  }
+
+  .game-detail-panel:not(.is-fullscreen) .game-detail-fields {
+    grid-template-columns: 13px auto minmax(0, 1fr);
+  }
+
+  .game-detail-panel:not(.is-fullscreen) .game-detail-media {
+    grid-area: gallery;
+  }
+
+  .game-detail-panel:not(.is-fullscreen) .gallery-thumb {
+    width: 128px;
+    height: 96px;
+  }
+}
+
 /* ── Fullscreen ──────────────────────────────────────────────────────────────
    The same nodes in a two-column grid: artwork over the gallery on the left,
    the text column on the right. A class, never a remount - the gallery keeps
@@ -5544,6 +5672,9 @@ body.has-player {
   left: 0;
   width: auto;
   border-left: none;
+}
+
+.game-detail-panel.is-fullscreen .game-detail-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(380px, 40%);
   grid-template-rows: minmax(0, 1fr) auto;
