@@ -1,4 +1,5 @@
-import { createEffect, createSignal, For, on, onMount, Show } from "solid-js";
+import { createEffect, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
+import { listen } from "@tauri-apps/api/event";
 import { Lock } from "lucide-solid";
 import { kidsGames, launchGame, type Game } from "../api/tauri";
 import { lastGameLibraryChange } from "../stores/games";
@@ -38,7 +39,12 @@ export function KidsScreen(props: { onUnlocked: () => void }) {
       setLoaded(true);
     }
   };
-  onMount(() => void load());
+  onMount(() => {
+    void load();
+    // The order is by last play: the game just quit moves to the front.
+    const unlisten = listen("game-exited", () => void load());
+    onCleanup(() => { void unlisten.then((stop) => stop()); });
+  });
   // A download a parent started finishes while the screen is locked.
   createEffect(on(lastGameLibraryChange, () => void load(), { defer: true }));
 

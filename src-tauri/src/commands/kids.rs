@@ -8,6 +8,7 @@
 //! or write settings refuse while it is set, so a control the kids screen
 //! forgot to hide still does nothing.
 
+use std::cmp::Reverse;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -309,16 +310,21 @@ fn launch_variant(variants: &[Game], language: &str) -> Option<Game> {
 }
 
 /// What the kids screen shows: the playlist's installed games, one per group,
-/// in the order they were added.
+/// the most recently played first (a play of any variant counts), then the
+/// never played in the order they were added.
+fn screen_games(conn: &Connection) -> Result<Vec<Game>, String> {
+    let Some(playlist) = playlist_id(conn) else { return Ok(Vec::new()) };
+    let language = config(conn, LANGUAGE).unwrap_or_else(|| "EN".into());
+    let mut groups = super::playlist_io::playlist_groups(conn, playlist, false)?;
+    // A stable sort, so the never played keep the playlist order.
+    groups.sort_by_cached_key(|group| Reverse(group.iter().filter_map(|v| v.last_played.clone()).max()));
+    Ok(groups.iter().filter_map(|group| launch_variant(group, &language)).collect())
+}
+
 #[tauri::command]
 pub async fn kids_games(state: State<'_, DbState>) -> Result<Vec<Game>, String> {
     let conn = state.lock()?;
-    let Some(playlist) = playlist_id(&conn) else { return Ok(Vec::new()) };
-    let language = config(&conn, LANGUAGE).unwrap_or_else(|| "EN".into());
-    Ok(super::playlist_io::playlist_groups(&conn, playlist, false)?
-        .iter()
-        .filter_map(|group| launch_variant(group, &language))
-        .collect())
+    screen_games(&conn)
 }
 
 /// While locked, only the kids playlist's games start.
@@ -395,6 +401,39 @@ mod tests {
         assert_eq!(pick(&[v("EN", true), v("DE", false)], "DE").as_deref(), Some("EN"));
         assert_eq!(pick(&[v("EN", false), v("ES", true)], "DE").as_deref(), Some("ES"));
         assert_eq!(pick(&[v("EN", false)], "EN"), None, "nothing installed: not shown");
+    }
+
+    #[test]
+    fn the_kids_screen_puts_the_latest_played_first_then_the_playlist_order() {
+        let conn = db();
+        let rows = [
+            ("Commander Keen 4", "EN", "eXoDOS", "Keen4", true, None),
+            ("Doom", "EN", "eXoDOS", "Doom", true, Some("2026-10-01 10:00:00")),
+            ("The Settlers", "EN", "eXoDOS", "Settlers", true, None),
+            ("Die Siedler", "DE", "eXoDOS_GLP", "Settlers", false, Some("2026-10-02 09:00:00")),
+            ("The Oregon Trail", "EN", "eXoDOS", "Oregon", true, None),
+        ];
+        for (title, lang, source, sc, installed, played) in rows {
+            conn.execute(
+                "INSERT INTO games (title, platform, language, torrent_source, shortcode, installed, last_played) \
+                 VALUES (?1, 'MS-DOS', ?2, ?3, ?4, ?5, ?6)",
+                params![title, lang, source, sc, installed, played],
+            )
+            .unwrap();
+        }
+        let pid = queries::create_playlist(&conn, DEFAULT_PLAYLIST).unwrap();
+        for title in ["Commander Keen 4", "Doom", "The Settlers", "The Oregon Trail"] {
+            let id: i64 = conn.query_row("SELECT id FROM games WHERE title = ?1", params![title], |r| r.get(0)).unwrap();
+            queries::set_playlist_membership(&conn, pid, id, true).unwrap();
+        }
+        set(&conn, PLAYLIST, &pid.to_string()).unwrap();
+
+        let titles: Vec<String> = screen_games(&conn).unwrap().into_iter().map(|g| g.title).collect();
+        assert_eq!(
+            titles,
+            ["The Settlers", "Doom", "Commander Keen 4", "The Oregon Trail"],
+            "the German play puts the merged game in front; the never played keep the playlist order"
+        );
     }
 
     #[test]
