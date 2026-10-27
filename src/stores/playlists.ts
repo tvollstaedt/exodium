@@ -3,6 +3,7 @@ import {
   getPlaylists, createPlaylist as apiCreate, createPlaylistFrom, renamePlaylist as apiRename,
   deletePlaylist as apiDelete, setPlaylistMembership, setPlaylistMembershipMany, type Playlist,
 } from "../api/tauri";
+import { forgetShelf } from "./shelves";
 
 const [playlists, setPlaylists] = createSignal<Playlist[]>([]);
 export { playlists };
@@ -67,6 +68,7 @@ export async function renamePlaylist(id: number, name: string): Promise<void> {
 
 export async function deletePlaylist(id: number): Promise<void> {
   await apiDelete(id);
+  forgetShelf(`pl-${id}`);
   refreshInBackground();
 }
 

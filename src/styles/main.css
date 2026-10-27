@@ -2318,6 +2318,59 @@ body {
   letter-spacing: 0;
 }
 
+/* ── Foldable shelves (My Library) ── */
+.shelf-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* Reaches into the title's padding: the whole row is the hit area. */
+  margin: -10px 0 -6px -6px;
+  padding: 10px 0 6px 6px;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  font: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.shelf-toggle:last-child {
+  margin-right: -6px;
+  padding-right: 6px;
+}
+
+.shelf-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.shelf-chevron {
+  display: flex;
+  flex-shrink: 0;
+  color: var(--text-muted);
+  transition: transform 0.15s ease, color 0.15s;
+}
+
+.shelf-toggle:hover .shelf-chevron {
+  color: var(--text-primary);
+}
+
+.shelf-toggle[aria-expanded="true"] .shelf-chevron {
+  transform: rotate(90deg);
+}
+
+.library-section[data-collapsed="true"] {
+  margin-bottom: 0;
+}
+
+.library-section[data-collapsed="true"] .section-title {
+  margin-bottom: 0;
+}
+
 /* ── User playlist shelves (My Library) ── */
 .shelf-menu-btn {
   margin-left: auto;
