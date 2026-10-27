@@ -36,6 +36,8 @@ import {
   selectRefs, setSelectMode, toggleSelected,
 } from "../stores/selection";
 import { CollectionShelf } from "../components/CollectionShelf";
+import { LibraryShelf } from "../components/LibraryShelf";
+import { endShelfSearch, ensureShelvesLoaded, isShelfCollapsed } from "../stores/shelves";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Button } from "../components/Button";
 import { Select } from "../components/Select";
@@ -487,6 +489,13 @@ export function Library(props: { onUseForKids: (playlistId: number) => void }) {
     shownRecent().length > 0 || shownFavorites().length > 0
     || shownInstalled().length > 0 || shownPlaylists().length > 0;
 
+  /** Every shelf key that exists, rendered or not: what Alt-click folds. */
+  const allShelfKeys = createMemo(() =>
+    ["recent", "favorites", "installed", ...userPlaylists().map((p) => `pl-${p.id}`)]
+  );
+  ensureShelvesLoaded(); // now, not at the first shelf: its games wait for it
+  createEffect(on(librarySearch, (q) => { if (!q) { endShelfSearch(); } }, { defer: true }));
+
   // My Library jump bar: one entry per rendered (search-filtered) shelf.
   const libraryShelves = createMemo<{ key: string; label: string }[]>(() => {
     const shelves: { key: string; label: string }[] = [];
@@ -728,7 +737,7 @@ export function Library(props: { onUseForKids: (playlistId: number) => void }) {
   /** Browse selects every match of the filter, loaded or not; a shelf, its games. */
   const selectAll = async () => {
     const scope = activeTab() === "browse" ? "browse" : selectionScope();
-    if (!scope) {
+    if (!scope || (scope !== "browse" && isShelfCollapsed(scope.slice("shelf:".length), !!librarySearch()))) {
       showToast("Pick a game in a shelf first - Select all then takes the whole shelf", "info");
       return;
     }
@@ -1088,34 +1097,32 @@ export function Library(props: { onUseForKids: (playlistId: number) => void }) {
           }
         >
           <Show when={shownRecent().length > 0}>
-            <div class="library-section" data-shelf-key="recent" data-select-zone="shelf:recent">
-              <h2 class="section-title">Recently Played <span class="section-count">{shownRecent().length}</span></h2>
+            <LibraryShelf shelf="recent" title="Recently Played" count={shownRecent().length} allShelves={allShelfKeys()} searching={!!librarySearch()}>
               <ShelfGames games={shownRecent()} shelf="recent" />
-            </div>
+            </LibraryShelf>
           </Show>
 
           <Show when={shownFavorites().length > 0}>
-            <div class="library-section" data-shelf-key="favorites" data-select-zone="shelf:favorites">
-              <h2 class="section-title">Favorites <span class="section-count">{shownFavorites().length}</span></h2>
+            <LibraryShelf shelf="favorites" title="Favorites" count={shownFavorites().length} allShelves={allShelfKeys()} searching={!!librarySearch()}>
               <ShelfGames games={shownFavorites()} shelf="favorites" />
-            </div>
+            </LibraryShelf>
           </Show>
 
           <Show when={shownInstalled().length > 0}>
-            <div class="library-section" data-shelf-key="installed" data-select-zone="shelf:installed">
-              <h2 class="section-title">Installed <span class="section-count">{shownInstalled().length}</span></h2>
+            <LibraryShelf shelf="installed" title="Installed" count={shownInstalled().length} allShelves={allShelfKeys()} searching={!!librarySearch()}>
               <ShelfGames games={shownInstalled()} shelf="installed" />
-            </div>
+            </LibraryShelf>
           </Show>
 
           <For each={shownPlaylists()}>
             {(playlist) => (
-              <div class="library-section" data-shelf-key={`pl-${playlist.id}`} data-select-zone={`shelf:pl-${playlist.id}`}>
-                <h2 class="section-title">
-                  {playlist.name}
-                  <span class="section-count">
-                    {librarySearch() ? shownPlaylistGames(playlist.id).length : playlist.game_count}
-                  </span>
+              <LibraryShelf
+                shelf={`pl-${playlist.id}`}
+                title={playlist.name}
+                count={librarySearch() ? shownPlaylistGames(playlist.id).length : playlist.game_count}
+                allShelves={allShelfKeys()}
+                searching={!!librarySearch()}
+                actions={
                   <button
                     class="shelf-menu-btn"
                     data-testid="shelf-menu"
@@ -1126,7 +1133,8 @@ export function Library(props: { onUseForKids: (playlistId: number) => void }) {
                       setShelfMenu({ playlist, x: e.clientX, y: e.clientY });
                     }}
                   >⋯</button>
-                </h2>
+                }
+              >
                 <Show
                   when={shownPlaylistGames(playlist.id).length > 0}
                   fallback={
@@ -1137,7 +1145,7 @@ export function Library(props: { onUseForKids: (playlistId: number) => void }) {
                 >
                   <ShelfGames games={shownPlaylistGames(playlist.id)} shelf={`pl-${playlist.id}`} />
                 </Show>
-              </div>
+              </LibraryShelf>
             )}
           </For>
 

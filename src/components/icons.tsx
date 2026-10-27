@@ -103,6 +103,14 @@ export const IconNext = (p: { size?: number }) => (
   </svg>
 );
 
+/** Points right; a shelf header turns it down while open. */
+export const IconChevron = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+       stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M9 5l7 7-7 7" />
+  </svg>
+);
+
 export const IconZoom = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
     <circle cx="11" cy="11" r="7" />
