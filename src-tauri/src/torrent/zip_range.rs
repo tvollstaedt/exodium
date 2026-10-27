@@ -64,29 +64,66 @@ fn u64_at(buf: &[u8], off: usize) -> u64 {
     u64::from_le_bytes(b)
 }
 
-/// The directory's (entry count, size, offset) from the zip64 EOCD record.
-/// The locator sits right before the EOCD and names the record's offset;
-/// the record itself can be anywhere, so it is one more seek.
-async fn zip64_directory_location<R>(
-    reader: &mut R,
-    tail: &[u8],
-    eocd: usize,
-) -> anyhow::Result<(u64, u64, u64)>
-where
-    R: AsyncRead + AsyncSeek + Unpin,
-{
-    let locator = eocd
-        .checked_sub(20)
-        .filter(|&i| u32_at(tail, i) == ZIP64_EOCD_LOCATOR_SIGNATURE)
-        .context("zip64 sizes in the EOCD but no zip64 locator before it")?;
-    let record_offset = u64_at(tail, locator + 8);
-    reader.seek(std::io::SeekFrom::Start(record_offset)).await?;
-    let mut record = [0u8; 56];
-    reader.read_exact(&mut record).await.context("reading zip64 EOCD record")?;
-    if u32_at(&record, 0) != ZIP64_EOCD_SIGNATURE {
+struct DirectoryLocation {
+    entry_count: u64,
+    size: u64,
+    offset: u64,
+}
+
+enum Eocd {
+    Located(DirectoryLocation),
+    /// zip64: the real values sit in a record at this offset, one more read.
+    Zip64 { record_offset: u64 },
+}
+
+/// Start and length of the tail read that has to hold the EOCD.
+fn tail_range(file_len: u64) -> anyhow::Result<(u64, usize)> {
+    // Partially downloaded archives are normal here, so every length is
+    // suspect: an EOCD needs 22 bytes and the scan reads 4 at a time.
+    if file_len < 22 {
+        bail!("archive too small to be a zip ({} bytes)", file_len);
+    }
+    let tail_len = TAIL_SCAN_BYTES.min(file_len);
+    Ok((file_len - tail_len, tail_len as usize))
+}
+
+fn checked_location(location: DirectoryLocation) -> anyhow::Result<DirectoryLocation> {
+    if location.size > MAX_DIRECTORY_BYTES {
+        bail!("refusing to read a {} byte central directory", location.size);
+    }
+    Ok(location)
+}
+
+fn parse_eocd(tail: &[u8]) -> anyhow::Result<Eocd> {
+    // Scan backwards - the EOCD is the last such signature in the file.
+    let eocd = (0..=tail.len().saturating_sub(22))
+        .rev()
+        .find(|&i| u32_at(tail, i) == EOCD_SIGNATURE)
+        .context("no end-of-central-directory record - not a zip?")?;
+    let entry_count = u16_at(tail, eocd + 10) as u64;
+    let size = u32_at(tail, eocd + 12) as u64;
+    let offset = u32_at(tail, eocd + 16) as u64;
+    // zip64 (the 36 GB media-pack archives): the locator sits right before
+    // the EOCD and names the record's offset.
+    if offset == 0xFFFF_FFFF || size == 0xFFFF_FFFF || entry_count == 0xFFFF {
+        let locator = eocd
+            .checked_sub(20)
+            .filter(|&i| u32_at(tail, i) == ZIP64_EOCD_LOCATOR_SIGNATURE)
+            .context("zip64 sizes in the EOCD but no zip64 locator before it")?;
+        return Ok(Eocd::Zip64 { record_offset: u64_at(tail, locator + 8) });
+    }
+    checked_location(DirectoryLocation { entry_count, size, offset }).map(Eocd::Located)
+}
+
+fn parse_zip64_record(record: &[u8; 56], record_offset: u64) -> anyhow::Result<DirectoryLocation> {
+    if u32_at(record, 0) != ZIP64_EOCD_SIGNATURE {
         bail!("no zip64 EOCD record at offset {}", record_offset);
     }
-    Ok((u64_at(&record, 32), u64_at(&record, 40), u64_at(&record, 48)))
+    checked_location(DirectoryLocation {
+        entry_count: u64_at(record, 32),
+        size: u64_at(record, 40),
+        offset: u64_at(record, 48),
+    })
 }
 
 /// Replace the 0xFFFFFFFF fields of a central entry with the values from its
@@ -122,54 +159,103 @@ pub async fn read_central_directory<R>(reader: &mut R, file_len: u64) -> anyhow:
 where
     R: AsyncRead + AsyncSeek + Unpin,
 {
-    // Partially downloaded archives are normal here, so every length is
-    // suspect: an EOCD needs 22 bytes and the scan reads 4 at a time.
-    if file_len < 22 {
-        bail!("archive too small to be a zip ({} bytes)", file_len);
-    }
-    let tail_len = TAIL_SCAN_BYTES.min(file_len);
-    let tail_start = file_len - tail_len;
+    let (tail_start, tail_len) = tail_range(file_len)?;
     reader.seek(std::io::SeekFrom::Start(tail_start)).await?;
-    let mut tail = vec![0u8; tail_len as usize];
+    let mut tail = vec![0u8; tail_len];
     reader.read_exact(&mut tail).await.context("reading zip tail")?;
 
-    // Scan backwards - the EOCD is the last such signature in the file.
-    let eocd = (0..=tail.len().saturating_sub(22))
-        .rev()
-        .find(|&i| u32_at(&tail, i) == EOCD_SIGNATURE)
-        .context("no end-of-central-directory record - not a zip?")?;
+    let location = match parse_eocd(&tail)? {
+        Eocd::Located(location) => location,
+        Eocd::Zip64 { record_offset } => {
+            reader.seek(std::io::SeekFrom::Start(record_offset)).await?;
+            let mut record = [0u8; 56];
+            reader.read_exact(&mut record).await.context("reading zip64 EOCD record")?;
+            parse_zip64_record(&record, record_offset)?
+        }
+    };
 
-    let mut entry_count = u16_at(&tail, eocd + 10) as u64;
-    let mut cd_size = u32_at(&tail, eocd + 12) as u64;
-    let mut cd_offset = u32_at(&tail, eocd + 16) as u64;
-    // zip64 (the 36 GB media-pack archives): the real values sit in a
-    // separate record.
-    if cd_offset == 0xFFFF_FFFF || cd_size == 0xFFFF_FFFF || entry_count == 0xFFFF {
-        (entry_count, cd_size, cd_offset) = zip64_directory_location(reader, &tail, eocd).await?;
-    }
-    if cd_size > MAX_DIRECTORY_BYTES {
-        bail!("refusing to read a {} byte central directory", cd_size);
-    }
-
-    reader.seek(std::io::SeekFrom::Start(cd_offset)).await?;
-    let mut cd = vec![0u8; cd_size as usize];
+    reader.seek(std::io::SeekFrom::Start(location.offset)).await?;
+    let mut cd = vec![0u8; location.size as usize];
     reader.read_exact(&mut cd).await.context("reading central directory")?;
+    Ok(parse_directory(&cd, location.entry_count))
+}
 
+/// `read_central_directory` for a file on disk, strict where the streaming
+/// reader is lenient: fewer entries than the EOCD counts is an error, since
+/// on disk that is a hole in the directory. A directory inside the tail read
+/// costs no second read - on a share every read is a round trip (§22).
+pub fn read_central_directory_blocking<R>(reader: &mut R, file_len: u64) -> anyhow::Result<Vec<ZipEntry>>
+where
+    R: std::io::Read + std::io::Seek,
+{
+    let read_at = |reader: &mut R, offset: u64, buf: &mut [u8]| -> std::io::Result<()> {
+        reader.seek(std::io::SeekFrom::Start(offset))?;
+        reader.read_exact(buf)
+    };
+    let (tail_start, tail_len) = tail_range(file_len)?;
+    let mut tail = vec![0u8; tail_len];
+    read_at(reader, tail_start, &mut tail).context("reading zip tail")?;
+
+    let location = match parse_eocd(&tail)? {
+        Eocd::Located(location) => location,
+        Eocd::Zip64 { record_offset } => {
+            let mut record = [0u8; 56];
+            read_at(reader, record_offset, &mut record).context("reading zip64 EOCD record")?;
+            parse_zip64_record(&record, record_offset)?
+        }
+    };
+
+    let size = location.size as usize;
+    let in_tail = location
+        .offset
+        .checked_sub(tail_start)
+        .map(|start| start as usize)
+        .filter(|&start| start + size <= tail.len());
+    let entries = match in_tail {
+        Some(start) => parse_directory(&tail[start..start + size], location.entry_count),
+        None => {
+            let mut cd = vec![0u8; size];
+            read_at(reader, location.offset, &mut cd).context("reading central directory")?;
+            parse_directory(&cd, location.entry_count)
+        }
+    };
+    if (entries.len() as u64) < location.entry_count {
+        bail!(
+            "central directory holds {} of its {} entries",
+            entries.len(),
+            location.entry_count
+        );
+    }
+    Ok(entries)
+}
+
+/// Whether a local file header starts at `offset`.
+pub fn local_header_at<R>(reader: &mut R, offset: u64) -> bool
+where
+    R: std::io::Read + std::io::Seek,
+{
+    let mut signature = [0u8; 4];
+    reader.seek(std::io::SeekFrom::Start(offset)).is_ok()
+        && reader.read_exact(&mut signature).is_ok()
+        && u32::from_le_bytes(signature) == LOCAL_FILE_SIGNATURE
+}
+
+fn parse_directory(cd: &[u8], entry_count: u64) -> Vec<ZipEntry> {
     // A directory that claims more entries than its own bytes can describe is
     // corrupt; the count only sizes the Vec, so clamp it rather than reserve.
-    let mut entries = Vec::with_capacity(entry_count.min(cd_size / 46) as usize);
+    let mut entries = Vec::with_capacity(entry_count.min(cd.len() as u64 / 46) as usize);
     let mut pos = 0usize;
     while pos + 46 <= cd.len() {
-        if u32_at(&cd, pos) != CENTRAL_FILE_SIGNATURE {
+        if u32_at(cd, pos) != CENTRAL_FILE_SIGNATURE {
             break;
         }
-        let method = u16_at(&cd, pos + 10);
-        let mut compressed_size = u32_at(&cd, pos + 20) as u64;
-        let mut uncompressed_size = u32_at(&cd, pos + 24) as u64;
-        let name_len = u16_at(&cd, pos + 28) as usize;
-        let extra_len = u16_at(&cd, pos + 30) as usize;
-        let comment_len = u16_at(&cd, pos + 32) as usize;
-        let mut local_header_offset = u32_at(&cd, pos + 42) as u64;
+        let method = u16_at(cd, pos + 10);
+        let mut compressed_size = u32_at(cd, pos + 20) as u64;
+        let mut uncompressed_size = u32_at(cd, pos + 24) as u64;
+        let name_len = u16_at(cd, pos + 28) as usize;
+        let extra_len = u16_at(cd, pos + 30) as usize;
+        let comment_len = u16_at(cd, pos + 32) as usize;
+        let mut local_header_offset = u32_at(cd, pos + 42) as u64;
         let name_start = pos + 46;
         let name_end = name_start + name_len;
         if name_end > cd.len() {
@@ -194,7 +280,7 @@ where
         });
         pos = name_start + name_len + extra_len + comment_len;
     }
-    Ok(entries)
+    entries
 }
 
 /// Stream one entry into a writer, inflating as it goes. Returns the bytes
@@ -1325,6 +1411,40 @@ mod tests {
         let entries = read_central_directory(&mut cursor, zip.len() as u64).await.unwrap();
         assert_eq!(find_video(&entries).unwrap().local_header_offset, expected);
         assert_eq!(extract_video(&zip).await, body);
+    }
+
+    #[tokio::test]
+    async fn the_blocking_reader_lists_what_the_streaming_one_does() {
+        let body: Vec<u8> = (0..60_000u32).map(|i| (i % 241) as u8).collect();
+        for zip in [make_zip(&body, true), to_zip64_tail(&make_zip(&body, false), true)] {
+            let streamed = read_central_directory(&mut std::io::Cursor::new(zip.clone()), zip.len() as u64)
+                .await
+                .unwrap();
+            let blocking =
+                read_central_directory_blocking(&mut std::io::Cursor::new(zip.clone()), zip.len() as u64).unwrap();
+            assert_eq!(blocking, streamed);
+            assert!(blocking.iter().all(|e| local_header_at(&mut std::io::Cursor::new(&zip), e.local_header_offset)));
+        }
+    }
+
+    /// The streaming reader keeps the entries before a hole; on disk a hole
+    /// means pieces that never arrived, so the blocking reader refuses.
+    #[tokio::test]
+    async fn a_hole_in_the_directory_is_an_error_on_disk() {
+        let mut zip = make_zip(b"video", false);
+        let eocd = zip.len() - 22;
+        let cd_offset = u32_at(&zip, eocd + 16) as usize;
+        let second_entry = cd_offset
+            + 46
+            + [28, 30, 32].iter().map(|f| u16_at(&zip, cd_offset + f) as usize).sum::<usize>();
+        zip[second_entry..eocd].fill(0);
+        let streamed = read_central_directory(&mut std::io::Cursor::new(zip.clone()), zip.len() as u64)
+            .await
+            .unwrap();
+        assert_eq!(streamed.len(), 1);
+        let err = read_central_directory_blocking(&mut std::io::Cursor::new(zip.clone()), zip.len() as u64)
+            .unwrap_err();
+        assert!(err.to_string().contains("1 of its 3"), "{err}");
     }
 
     #[tokio::test]
