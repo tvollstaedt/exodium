@@ -1,6 +1,8 @@
 import { createSignal } from "solid-js";
 import { listen } from "@tauri-apps/api/event";
-import { kidsLock, kidsStatus, kidsUnlock, type KidsStatus } from "../api/tauri";
+import {
+  kidsChangePin, kidsDisable, kidsLock, kidsStatus, kidsUnlock, type KidsStatus, type PinResult,
+} from "../api/tauri";
 import { stop as stopMusic } from "./music";
 
 /** Kids mode's state as the backend holds it (§26); null until read. */
@@ -39,12 +41,21 @@ export async function lockKids() {
   setStatus(await kidsLock());
 }
 
-/** Answers how long to wait when the PIN was wrong (0: try again now). */
-export async function unlockKids(pin: string): Promise<{ ok: boolean; retryIn: number }> {
-  const r = await kidsUnlock(pin);
+export interface PinCheck {
+  ok: boolean;
+  /** Seconds to wait when the PIN was wrong (0: try again now). */
+  retryIn: number;
+}
+
+async function checked(result: Promise<PinResult>): Promise<PinCheck> {
+  const r = await result;
   await loadKidsStatus();
   return { ok: r.ok, retryIn: r.retry_in };
 }
+
+export const unlockKids = (pin: string) => checked(kidsUnlock(pin));
+export const changeKidsPin = (oldPin: string, newPin: string) => checked(kidsChangePin(oldPin, newPin));
+export const disableKids = (pin: string) => checked(kidsDisable(pin));
 
 /** `--reset-kids-mode` sent to the running app turns kids mode off there too. */
 export async function initKidsReset() {

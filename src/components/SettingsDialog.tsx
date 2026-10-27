@@ -26,6 +26,7 @@ import {
 } from "../stores/music";
 import { previewMuted, setPreviewMuted, ensurePreviewMutedLoaded } from "../stores/playback";
 import { setPreviewMutedNow } from "../stores/heroVideo";
+import { lockKids } from "../stores/kids";
 
 export type SettingsSection = "general" | "storage" | "network" | "packs" | "kids" | "about";
 
@@ -290,6 +291,13 @@ export function SettingsDialog(props: Props) {
     }
   };
 
+  // Closed first: the locked shell unmounts Settings without closing it, and
+  // the next unlock would bring it back.
+  const lockNow = () => {
+    props.onOpenChange(false);
+    void lockKids();
+  };
+
   const handleOpenLogFolder = async () => {
     setLogOpenError("");
     try {
@@ -501,7 +509,7 @@ export function SettingsDialog(props: Props) {
 
                   <Show when={props.section === "kids"}>
                     <div class="settings-body">
-                      <KidsSettings />
+                      <KidsSettings onLock={lockNow} />
                     </div>
                   </Show>
 

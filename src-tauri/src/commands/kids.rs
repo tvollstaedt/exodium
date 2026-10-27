@@ -228,55 +228,66 @@ pub async fn kids_update(
     Ok(status(&conn))
 }
 
-#[tauri::command]
-pub async fn kids_change_pin(state: State<'_, DbState>, old_pin: String, new_pin: String) -> Result<(), String> {
-    ensure_unlocked()?;
-    let conn = state.lock()?;
-    if !pin_matches(&conn, &old_pin) {
-        return Err("Wrong PIN".into());
-    }
-    if !valid_pin(&new_pin) {
-        return Err("The PIN must be 4 to 8 digits".into());
-    }
-    set(&conn, PIN, &pin_record(&new_pin)?)
-}
-
-#[tauri::command]
-pub async fn kids_disable(state: State<'_, DbState>, pin: String) -> Result<KidsStatus, String> {
-    ensure_unlocked()?;
-    let conn = state.lock()?;
-    if !pin_matches(&conn, &pin) {
-        return Err("Wrong PIN".into());
-    }
-    clear(&conn);
-    Ok(status(&conn))
-}
-
+/// The answer to a PIN: right, or wrong with the seconds until the next try.
 #[derive(Debug, Serialize)]
-pub struct UnlockResult {
+pub struct PinResult {
     pub ok: bool,
     pub retry_in: u64,
 }
 
-#[tauri::command]
-pub async fn kids_unlock(state: State<'_, DbState>, pin: String) -> Result<UnlockResult, String> {
-    let conn = state.lock()?;
-    let wait = retry_in(&conn);
+/// Every PIN check goes through here - unlock, PIN change, turning off - so
+/// all three count toward one wait and none of them is a way around it.
+fn try_pin(conn: &Connection, pin: &str) -> Result<PinResult, String> {
+    let wait = retry_in(conn);
     if wait > 0 {
-        return Ok(UnlockResult { ok: false, retry_in: wait });
+        return Ok(PinResult { ok: false, retry_in: wait });
     }
-    if pin_matches(&conn, &pin) {
+    if pin_matches(conn, pin) {
         let _ = conn.execute("DELETE FROM config WHERE key IN (?1, ?2)", params![FAILURES, RETRY_AT]);
-        LOCKED.store(false, Ordering::SeqCst);
-        return Ok(UnlockResult { ok: true, retry_in: 0 });
+        return Ok(PinResult { ok: true, retry_in: 0 });
     }
-    let failures = config(&conn, FAILURES).and_then(|v| v.parse::<u32>().ok()).unwrap_or(0) + 1;
-    set(&conn, FAILURES, &failures.to_string())?;
+    let failures = config(conn, FAILURES).and_then(|v| v.parse::<u32>().ok()).unwrap_or(0) + 1;
+    set(conn, FAILURES, &failures.to_string())?;
     let wait = backoff_secs(failures);
     if wait > 0 {
-        set(&conn, RETRY_AT, &(now() + wait).to_string())?;
+        set(conn, RETRY_AT, &(now() + wait).to_string())?;
     }
-    Ok(UnlockResult { ok: false, retry_in: wait })
+    Ok(PinResult { ok: false, retry_in: wait })
+}
+
+#[tauri::command]
+pub async fn kids_change_pin(state: State<'_, DbState>, old_pin: String, new_pin: String) -> Result<PinResult, String> {
+    ensure_unlocked()?;
+    if !valid_pin(&new_pin) {
+        return Err("The PIN must be 4 to 8 digits".into());
+    }
+    let conn = state.lock()?;
+    let result = try_pin(&conn, &old_pin)?;
+    if result.ok {
+        set(&conn, PIN, &pin_record(&new_pin)?)?;
+    }
+    Ok(result)
+}
+
+#[tauri::command]
+pub async fn kids_disable(state: State<'_, DbState>, pin: String) -> Result<PinResult, String> {
+    ensure_unlocked()?;
+    let conn = state.lock()?;
+    let result = try_pin(&conn, &pin)?;
+    if result.ok {
+        clear(&conn);
+    }
+    Ok(result)
+}
+
+#[tauri::command]
+pub async fn kids_unlock(state: State<'_, DbState>, pin: String) -> Result<PinResult, String> {
+    let conn = state.lock()?;
+    let result = try_pin(&conn, &pin)?;
+    if result.ok {
+        LOCKED.store(false, Ordering::SeqCst);
+    }
+    Ok(result)
 }
 
 #[tauri::command]
@@ -357,6 +368,23 @@ mod tests {
         assert_eq!(backoff_secs(5), 30);
         assert_eq!(backoff_secs(6), 60);
         assert_eq!(backoff_secs(20), 900, "capped at 15 minutes");
+    }
+
+    #[test]
+    fn every_pin_check_counts_toward_one_wait() {
+        let conn = db();
+        set(&conn, PIN, &pin_record("4711").unwrap()).unwrap();
+        for _ in 0..4 {
+            let r = try_pin(&conn, "0000").unwrap();
+            assert!(!r.ok && r.retry_in == 0, "the first four misses cost nothing");
+        }
+        assert_eq!(try_pin(&conn, "0000").unwrap().retry_in, 30);
+        let refused = try_pin(&conn, "4711").unwrap();
+        assert!(!refused.ok && refused.retry_in > 0, "the right PIN waits too");
+
+        set(&conn, RETRY_AT, &(now() - 1).to_string()).unwrap();
+        assert!(try_pin(&conn, "4711").unwrap().ok);
+        assert!(config(&conn, FAILURES).is_none() && config(&conn, RETRY_AT).is_none(), "a hit clears the count");
     }
 
     #[test]
