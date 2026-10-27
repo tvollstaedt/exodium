@@ -8,6 +8,8 @@ describe("detail panel", () => {
   // Specs share one session (wdio.conf.ts), so leave the library as found.
   after(async () => {
     await $(".game-detail-close").click();
+    // The panel animates out before it unmounts.
+    await $('[data-testid="game-detail"]').waitForExist({ reverse: true });
     await $(".search-clear").click();
   });
 

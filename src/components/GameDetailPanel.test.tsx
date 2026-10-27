@@ -629,6 +629,197 @@ describe("GameDetailPanel", () => {
   });
 });
 
+/** A closed panel stays mounted for its exit animation, showing the last game
+ *  as it was, and takes no more input; reduced motion skips the exit. */
+describe("GameDetailPanel closing", () => {
+  const META = {
+    manual_path: null, manual_kind: null,
+    images: ["/pack/Magic Carpet-01.png"], thumbnails: ["/cache/1.png"],
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mockInvoke.mockReset();
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_game_metadata") { return META; }
+      if (cmd === "get_game_variants") { return []; }
+      if (cmd === "start_game_video") { return VIDEO_READY; }
+      if (cmd === "get_video_status") { return VIDEO_READY; }
+      return null;
+    });
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = "";
+    vi.useRealTimers();
+  });
+
+  async function open(onClose: () => void = () => {}) {
+    const [game, setGame] = createSignal<Game | null>(makeGame({ id: 51, shortcode: "CLOSE51" }));
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const dispose = render(() => <GameDetailPanel game={game()} onClose={onClose} />, host);
+    await vi.advanceTimersByTimeAsync(3200);
+    const panel = document.body.querySelector<HTMLElement>('[data-testid="game-detail"]')!;
+    return { setGame, panel, dispose };
+  }
+  const current = () => document.body.querySelector<HTMLElement>('[data-testid="game-detail"]');
+  const metaCalls = () => mockInvoke.mock.calls.filter((c) => c[0] === "get_game_metadata").length;
+
+  it("keeps the last game mounted, unchanged and inert, for the exit, then unmounts it", async () => {
+    const onClose = vi.fn();
+    const { setGame, panel, dispose } = await open(onClose);
+    const title = panel.querySelector('[data-testid="game-detail-title"]')!;
+    const thumb = panel.querySelector("img.gallery-thumb");
+    expect(thumb, "the gallery is up before closing").not.toBeNull();
+    const fetched = metaCalls();
+
+    setGame(null);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(current()).toBe(panel);
+    expect(panel.classList.contains("is-closing")).toBe(true);
+    expect(document.body.querySelector(".game-detail-backdrop")!.classList.contains("is-closing")).toBe(true);
+    expect(panel.querySelector('[data-testid="game-detail-title"]')).toBe(title);
+    expect(title.textContent).toBe("Magic Carpet Plus");
+    expect(panel.querySelector("img.gallery-thumb")).toBe(thumb);
+
+    // Already closed: neither Escape nor a stray click closes it again.
+    const escape = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+    window.dispatchEvent(escape);
+    expect(escape.defaultPrevented).toBe(false);
+    panel.querySelector<HTMLButtonElement>(".game-detail-close")!.click();
+    document.body.querySelector<HTMLElement>(".game-detail-backdrop")!.click();
+    expect(onClose).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(150);
+    expect(current(), "still animating out").toBe(panel);
+    expect(metaCalls(), "nothing reloads while closing").toBe(fetched);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(current()).toBeNull();
+    expect(document.body.querySelector(".game-detail-backdrop")).toBeNull();
+    dispose();
+  });
+
+  it("stops the preview the moment the panel starts closing", async () => {
+    const { setGame, panel, dispose } = await open();
+    const video = panel.querySelector<HTMLVideoElement>("video.game-detail-hero-video")!;
+    expect(video.getAttribute("src") ?? "").toContain("videocache");
+    music.resumeFrom.mockClear();
+
+    setGame(null);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(current()).toBe(panel);
+    expect(video.hasAttribute("src"), "unloaded, not left to play on").toBe(false);
+    expect(video.className).not.toContain("is-visible");
+    expect(music.resumeFrom).toHaveBeenCalledWith("video");
+    dispose();
+  });
+
+  /** The video and theme beats used to die with the unmount; a closing panel
+   *  is still mounted, so the closing state itself has to stop them. */
+  it("asks for neither video nor theme once the panel is closing", async () => {
+    const musicStore = await import("../stores/music");
+    const request = vi.spyOn(musicStore, "requestTheme");
+    const play = vi.spyOn(musicStore, "playTheme");
+    const [game, setGame] = createSignal<Game | null>(makeGame({ id: 55 }));
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const dispose = render(() => <GameDetailPanel game={game()} onClose={() => {}} />, host);
+    try {
+      // Both 400 ms beats then fall inside the 200 ms exit.
+      await vi.advanceTimersByTimeAsync(300);
+      setGame(null);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(request).not.toHaveBeenCalled();
+      expect(play).not.toHaveBeenCalled();
+      expect(mockInvoke.mock.calls.some((c) => c[0] === "start_game_video")).toBe(false);
+    } finally {
+      request.mockRestore();
+      play.mockRestore();
+      dispose();
+    }
+  });
+
+  it("cancels the exit when another game opens meanwhile", async () => {
+    const { setGame, panel, dispose } = await open();
+    setGame(null);
+    await vi.advanceTimersByTimeAsync(100);
+
+    setGame(makeGame({ id: 52, title: "Syndicate", shortcode: "SYND" }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(current()).toBe(panel);
+    expect(panel.classList.contains("is-closing")).toBe(false);
+    expect(panel.querySelector('[data-testid="game-detail-title"]')!.textContent).toBe("Syndicate");
+    await vi.advanceTimersByTimeAsync(500);
+    expect(current(), "the stale exit timer must not unmount the new game").toBe(panel);
+    dispose();
+  });
+
+  it("cancels the exit when the same game opens again, without rebuilding it", async () => {
+    const onClose = vi.fn();
+    const { setGame, panel, dispose } = await open(onClose);
+    const thumb = panel.querySelector("img.gallery-thumb");
+    setGame(null);
+    await vi.advanceTimersByTimeAsync(100);
+
+    setGame(makeGame({ id: 51, shortcode: "CLOSE51" }));
+    await vi.advanceTimersByTimeAsync(500);
+    expect(current()).toBe(panel);
+    expect(panel.classList.contains("is-closing")).toBe(false);
+    expect(panel.querySelector("img.gallery-thumb")).toBe(thumb);
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(onClose, "open again, so it closes again").toHaveBeenCalledTimes(1);
+    dispose();
+  });
+
+  it("unmounts at once under prefers-reduced-motion", async () => {
+    const { setGame, dispose } = await open();
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: (query: string) => ({ matches: query.includes("reduce"), media: query }),
+    });
+    try {
+      setGame(null);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(current()).toBeNull();
+    } finally {
+      delete (window as { matchMedia?: unknown }).matchMedia;
+      dispose();
+    }
+  });
+
+  /** The entry is picked when the panel opens: keyed on the fullscreen class,
+   *  every toggle would replay it. */
+  it("fades a fullscreen panel in and keeps that entry across toggles", async () => {
+    const { setPanelFullscreen } = await import("../stores/detailPanel");
+    const [game, setGame] = createSignal<Game | null>(null);
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const dispose = render(() => <GameDetailPanel game={game()} onClose={() => {}} />, host);
+    await vi.advanceTimersByTimeAsync(0);
+    try {
+      await setPanelFullscreen(true);
+      setGame(makeGame({ id: 53 }));
+      await vi.advanceTimersByTimeAsync(400);
+      const panel = current()!;
+      expect(panel.classList.contains("enters-zoom")).toBe(true);
+      panel.querySelector<HTMLButtonElement>('[data-testid="game-detail-fullscreen"]')!.click();
+      await vi.advanceTimersByTimeAsync(50);
+      expect(panel.classList.contains("is-fullscreen")).toBe(false);
+      expect(panel.classList.contains("enters-zoom")).toBe(true);
+
+      setGame(null);
+      await vi.advanceTimersByTimeAsync(300);
+      setGame(makeGame({ id: 54 }));
+      await vi.advanceTimersByTimeAsync(400);
+      expect(current()!.classList.contains("enters-zoom"), "a normal open slides").toBe(false);
+    } finally {
+      await setPanelFullscreen(false);
+      dispose();
+    }
+  });
+});
+
 /** jsdom has no container queries, so the two rules that keep the wide tier
  *  honest are read from the stylesheet: it never reaches fullscreen, which has
  *  its own grid, and the container is the frame - an element cannot restyle
