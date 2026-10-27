@@ -244,9 +244,9 @@ turned four installed games into seventeen for one user. So: pass 2 may only
 CONFIRM rows that are already `in_library`, `adopt_from_disk` (import, the
 Rescan button, a data-dir change - never the startup scan) is the only way an
 archive creates an entry, and `clear_collateral_library_entries` drops rows
-whose every piece is covered by a file that WAS requested. Do not try to solve
-this by inspecting the archives: they are complete, so integrity tells you
-nothing - the torrent's geometry does. Sizes come from the bundled `.torrent`
+whose every piece is covered by a file that WAS requested. Do not try to tell
+collateral apart by inspecting the archives: they are complete, so integrity
+tells you nothing - the torrent's geometry does. Sizes come from the bundled `.torrent`
 (`download_size` is ZIP + GameData and would reject every game with extras).
 Cleanup and adoption are opposites and never run in the same pass, and an
 IMPORTED install (`library_from_disk`, written by `setup_from_local`) is never
@@ -255,6 +255,24 @@ worth fetching on its own" describes every game the user owns. Sizing is
 lenient on both the import route and when no bundled torrent could be parsed:
 without a measure, rejecting every archive would flip a full installation to
 "not installed" and invite a re-download.
+
+**Full length is not complete, though** - the opposite case. librqbit sets a
+file to its final length and writes 16 KiB blocks as they arrive, so a
+neighbour's download or a stopped transfer leaves an archive at exact torrent
+length with zeros where pieces are missing (ZZT: 63 MB long, 800 KB
+allocated; others fully allocated but zeroed by a non-sparse copy). Size
+alone confirmed those at every start, and Play answered "download first".
+So before pass 2 confirms or adopts an archive, `entries_present` reads its
+central directory (`zip_range::read_central_directory_blocking`, one tail
+read in the normal case) and checks the local-header signature of one entry
+per torrent-aligned 16 KiB block - a missing block zeroes every header in it,
+so that is as strong as checking all, and a per-PIECE check is not (a partial
+piece passed it). Only candidates are read (a stem that maps to a row this
+pass would touch), a failure logs one line and deletes nothing, and an
+imported library skips it (§22: thousands of archives at every start).
+Measured: 2 reads per startup candidate, 86 ms for a full Rescan. The limit is
+a hole inside one entry's data with no entry start in it - a single large ISO
+entry passes, and its extraction error does not reset `installed`.
 
 ### 5. Uninstall keeps the user's files, decided against the archive
 
@@ -519,6 +537,23 @@ for DOS and ScummVM alike, and it is resolved only after the DB lock is
 released (`MidiConfig::resolve`), since it may sit on a share (§22). ROMs are
 never bundled or downloaded. Nothing here has run against a real MIDI device
 yet.
+
+**A game's own sound menu switches the device at runtime, after the frag.**
+eXo's launcher bats write `CONFIG -set "mididevice=mt32|fluidsynth|default"`
+(optionally behind `if exist <X>.SEL`), so a chosen port lost to the first
+menu pick. `redirect_bat_midi_menus` (games.rs, every DOS launch, all
+platforms, bats up to three folders deep - AcesotD calls its menu from
+`DYNAMIX\AODCD`) rewrites only the lines whose side has a port: `mt32` to the
+MT-32 port, `fluidsynth`/`soundcanvas` to the GM port, `default` untouched.
+Each becomes a block between `@REM exodium-midi: <eXo's line>` and
+`@REM exodium-midi end`, the guard repeated and `midiconfig` set BEFORE
+`mididevice` (every `[midi]` change restarts MIDI, measured). Every launch
+restores all blocks to eXo's line first, then patches for the current ports,
+so Standard runs eXo's bytes and patching twice equals once; byte-per-char
+like `rewrite_bat_host_paths`, so a CP437 menu survives. A line with `<`, `>`
+or `|` stays as it is - Staging redirects even on a REM line (measured), so
+the marker could not carry it. The device is spelled per engine by
+`port_settings`, shared with `dosbox_frag`.
 
 **`resolve_engine` is the ONLY place that decides ECE vs Staging** - the
 launcher picks the binary from it, the detail panel labels the engine from it,
@@ -873,7 +908,7 @@ tested); a double-click on the handle clears the key and the CSS default is
 back. A pixel value would read wrong on the next display or window size.
 `detail_panel_fullscreen` puts the panel between the title bar
 (`--titlebar-h`) and the player bar and switches the SAME nodes into a
-two-column grid (`.is-fullscreen`: hero over the gallery grid on the left,
+two-column grid (`.is-fullscreen .game-detail-layout`: hero over the gallery grid on the left,
 `.game-detail-body` with title, notes, chips, actions and text on the right).
 Both are a variable and a class, never a remount - the gallery-identity guard
 below covers the toggle too. Escape peels one layer at a time: lightbox or
@@ -883,6 +918,29 @@ field grid keeps its two columns and its viewport breakpoint; the
 description is capped at `75ch`. Never give the flexible middle region `min-height: 0`
 again - that let the flex solver collapse the description to an invisible 0px
 and clip the gallery.
+
+**A wide tier from 760px of panel width needs two wrappers**, because a
+container cannot restyle itself from its own query: `.game-detail-frame` is
+the `detail-panel` size container, `.game-detail-layout` the element that the
+wide tier and fullscreen turn into a grid. The tier (drag only - the default
+is at most 560px - and never in fullscreen; a stylesheet test holds both)
+puts the cover beside the title block (`.game-detail-head`) and Information,
+theme and "Covered in" (`.game-detail-side`) beside the description; both are
+`display: contents` below it, so the narrow layout is unchanged. Size
+containment makes the frame the containing block for fixed descendants, so
+nothing fixed may live inside the panel - every overlay is a portaled
+sibling. vitest blanks CSS imports (`?raw` too), so stylesheet tests read
+`main.css` from disk.
+
+**Closing animates, so the panel stays mounted for 200ms.** The exported
+`GameDetailPanel` keeps the last game in a memo for `CLOSE_MS` (a timer, not
+`animationend`) while the view slides out, or fades in fullscreen; a panel
+opened in fullscreen fades in (`enters-zoom`, captured at open, so a toggle
+replays nothing). Any open cancels the exit, the same game included.
+Everything the unmount used to stop is stopped at the moment of closing:
+`clearPreview`, the video-fetch and theme beats, the auto-requested theme;
+Escape, backdrop and ✕ are guarded and `pointer-events: none` lets clicks
+reach the grid. Reduced motion unmounts at once.
 
 **Every effect in the panel keys on an id, never on `props.game`** - the grid
 hands over a fresh object for the same row on every library refresh, and an
@@ -2181,6 +2239,17 @@ never toggled - toggling a mixed selection flips it instead of unifying it.
 Cards track their favorite flag themselves, so a bulk change is announced
 (`favoriteChange`) rather than waiting for a refetch.
 
+**My Library shelves fold from their header** (`LibraryShelf.tsx`,
+`stores/shelves.ts`). `collapsed_shelves` stores the FOLDED keys, so a new
+playlist starts open, and `deletePlaylist` drops its key - without
+AUTOINCREMENT SQLite hands the highest id to the next playlist, which would
+start folded. Alt/Option-click applies the new state to every shelf key,
+rendered or not. A search shows every shelf with hits open and never writes;
+folds made meanwhile end with the query. A fold clears a selection in that
+shelf's scope, whatever caused it. Shelf bodies wait for the stored state (no
+open-then-fold flash), and a click before it arrived writes nothing - it
+would replace the stored list.
+
 ### 26. Kids mode: one door, held shut in the backend
 
 With kids mode on, every start is locked (`commands/kids.rs`, the static
@@ -2211,6 +2280,17 @@ does not reset it. A forgotten PIN is `--reset-kids-mode` (README); a running
 instance only hears it through the single-instance callback, which emits
 `kids-mode-reset`. Deleting the kids playlist turns the mode off - it cannot
 stay locked onto a list that is gone.
+
+Settings → Kids Mode is a status row with dialogs. Every user playlist's ⋯
+menu offers "Use for kids mode…", which opens that page through the same
+handler as its playlist select (`requestKidsPlaylist`, taken once):
+preselected while off, switched at once while on. Turn on asks for the PIN
+twice and locks immediately - Settings closes first, because the locked shell
+unmounts it without resetting `showSettings` and the next unlock would reopen
+it. All four PIN prompts are `PinDialog.tsx`, and every check (unlock, change,
+turn off) goes through `try_pin`, so all count toward the one wait. The kids
+screen shows the latest-played group first (any variant's `last_played`), the
+never played in playlist order, and reloads on `game-exited`.
 
 ## Conventions
 

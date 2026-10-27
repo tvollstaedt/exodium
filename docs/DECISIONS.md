@@ -544,3 +544,33 @@
 - Rejected: one output for everything (MT-32 patches on a GM module are the wrong instruments); a free-text device field (an index moves with every replug, a typo is silent); bundling or downloading ROMs (user-supplied only).
 - Why: Owners of real MIDI hardware want eXo's MT-32 and GM setups to reach it without editing every conf.
 - Gotcha: Standard is NOT "write nothing" off Windows: Staging's `port` opens CoreMIDI with no destination (measured on macOS), so eXo's GM games were silent there; Standard GM writes FluidSynth with eXo's soundfont when one is on disk, and only over port-bound devices - eXo's own FluidSynth confs keep their font. ALSA alone takes the numeric `client:port`, resolved at launch. Nuked SC-55 needs a CLAP plugin the staged Staging build lacks, so the UI hides it. No real device has been tested.
+
+## 2026-10-27 - Kids mode settings: status row, PIN dialogs, locked on turn-on
+- Decision: Settings → Kids Mode shows On/Off with Turn on / Turn off / Lock now and a Change PIN dialog; turning on locks at once; every playlist's ⋯ menu offers "Use for kids mode…"; the kids screen puts the latest played first.
+- Rejected: PIN fields inline in the settings page (Thomas: dialogs, like turning on and off); restarting the app after Turn on (locking in place reaches the same state without the wait).
+- Why: Smoke test - the playlist option was hard to find, and after "Turn on" nothing visibly changed.
+- Gotcha: Every PIN check goes through `try_pin`; Change PIN and Turn off used to skip the wait and were a way around it. Settings closes before locking, or the next unlock reopens it.
+
+## 2026-10-27 - Fragments at full length: check local headers before confirming
+- Decision: Pass 2 reads a candidate archive's central directory and checks one local-header signature per torrent-aligned 16 KiB block before it confirms or adopts it; a failure leaves `installed = 0`, logs one line, deletes nothing. Imported libraries skip it.
+- Rejected: librqbit's ledger as the measure (no session offline, nothing for a copied tree); an allocation heuristic (many fragments are fully allocated zeros); one header per 8 MiB piece (librqbit writes 16 KiB blocks, so a stopped transfer leaves partial pieces - one passed that check).
+- Why: ZZT read as installed after every start and Play answered "download first" - full length is what librqbit allocates, not what it received.
+- Gotcha: The 2026-08-19 rejection of integrity checks is about collateral, which is complete; fragments are the other case. A hole inside one entry's data with no entry start in it still passes.
+
+## 2026-10-27 - Detail panel: a wide tier and an exit animation
+- Decision: From 760px of panel width (drag only, never fullscreen) the cover sits beside the title block and Information/"Covered in" beside the description; closing slides the panel out over 200ms (fades in fullscreen, which now also fades in) while it stays mounted.
+- Rejected: a container query on the panel itself (a container cannot restyle itself - hence the frame and layout wrappers); a JS breakpoint on the stored width (a re-render per drag frame for what CSS answers).
+- Why: Smoke test - dragging the panel wider changed nothing, and the fullscreen panel vanished on close without fading.
+- Gotcha: A closing panel is still mounted, so what the unmount used to stop (preview, video and theme beats, auto theme) is stopped explicitly. Size containment makes the frame the containing block for fixed children - overlays stay portaled.
+
+## 2026-10-27 - Foldable My Library shelves
+- Decision: A shelf's header folds it, Alt/Option-click folds or opens all; `collapsed_shelves` stores the folded keys. A search shows every shelf with hits open and never writes.
+- Rejected: one-row horizontal carousels (Shift-click ranges and the drag frame would need horizontal scrolling); storing the open keys (a new playlist would start folded).
+- Why: Thomas wants to skim the shelves quickly.
+- Gotcha: `deletePlaylist` drops its key - SQLite reuses the highest id without AUTOINCREMENT. Folding clears a selection in that shelf.
+
+## 2026-10-27 - Game sound menus follow the selected MIDI ports
+- Decision: Before every DOS launch, `redirect_bat_midi_menus` turns a launcher's `CONFIG -set "mididevice=mt32|fluidsynth"` lines into marked blocks pointing at the user's MT-32 or GM port; each launch restores eXo's line first, so Standard runs eXo's bytes.
+- Rejected: a pristine copy beside each bat (uninstall would file it under `!save` as user data); forcing the device in the conf (the bat switches it back at runtime).
+- Why: A port chosen in Settings was dropped as soon as a game's own sound menu picked MT-32 or Sound Canvas.
+- Gotcha: Lines with `<`, `>` or `|` stay - Staging redirects even on a REM line. `midiconfig` goes before `mididevice`, since every `[midi]` change restarts MIDI. Music reaching a real port is untested.
