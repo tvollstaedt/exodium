@@ -289,6 +289,38 @@ fn scan_torrent_indices() -> std::collections::HashMap<&'static str, TorrentInde
     out
 }
 
+/// librqbit writes each block as it arrives, so a transfer stopped mid-piece
+/// leaves part of a piece on disk.
+const TORRENT_BLOCK: u64 = 16 * 1024;
+
+/// Whether every entry the central directory lists starts where it says - a
+/// fragment at full length keeps its edges and holds zeros between (§4). One
+/// header per torrent block is as strong as all: a missing block zeroes every
+/// header in it. `torrent_offset` aligns the blocks (0 without a torrent).
+fn entries_present<R: std::io::Read + std::io::Seek>(reader: &mut R, len: u64, torrent_offset: u64) -> Result<(), String> {
+    use crate::torrent::zip_range;
+    let entries = zip_range::read_central_directory_blocking(reader, len).map_err(|e| e.to_string())?;
+    let mut offsets: Vec<u64> = entries.iter().map(|e| e.local_header_offset).collect();
+    offsets.sort_unstable();
+    let mut checked_block = None;
+    for offset in offsets {
+        let block = (torrent_offset + offset) / TORRENT_BLOCK;
+        if checked_block == Some(block) {
+            continue;
+        }
+        checked_block = Some(block);
+        if !zip_range::local_header_at(reader, offset) {
+            return Err(format!("no entry at offset {offset}, where the directory puts one"));
+        }
+    }
+    Ok(())
+}
+
+fn archive_entries_present(zip: &Path, len: u64, torrent_offset: u64) -> Result<(), String> {
+    let mut file = std::fs::File::open(zip).map_err(|e| e.to_string())?;
+    entries_present(&mut file, len, torrent_offset)
+}
+
 /// `eXo/eXoWin9x/<year>/`: the one directory shape that holds zips a level down.
 fn is_year_dir(p: &Path) -> bool {
     p.file_name()
@@ -452,14 +484,17 @@ pub fn scan_installed_games_with_db(
     // Sizes to measure the files on disk against. A torrent entry is 0 bytes
     // until it is fetched, and a neighbouring download leaves piece-sized
     // partials, so "the file exists" says nothing about it being downloaded.
-    let expected_sizes: std::collections::HashMap<String, u64> = indices
+    let torrent_files: std::collections::HashMap<&str, &crate::torrent::TorrentFileEntry> = indices
         .values()
         .flat_map(|i| i.files.iter())
-        .map(|f| (f.path.clone(), f.size))
+        .map(|f| (f.path.as_str(), f))
         .collect();
     let torrent_root = game_root(data_dir);
-    let lenient_sizes = adopt_from_disk || expected_sizes.is_empty();
-    if expected_sizes.is_empty() {
+    let lenient_sizes = adopt_from_disk || torrent_files.is_empty();
+    // An imported tree's archives are the user's own files, and checking
+    // thousands of them at every start would cost a share minutes (§22).
+    let verify_entries = !disk_is_library;
+    if torrent_files.is_empty() {
         log::warn!(
             "scan_installed_games: no bundled torrent could be parsed - falling back to the \
              old size floor, so piece-sized partials may read as installs"
@@ -519,38 +554,53 @@ pub fn scan_installed_games_with_db(
             match std::fs::read_dir(dir) {
                 Ok(entries) => entries
                     .filter_map(|e| e.ok())
-                    .filter(|e| {
+                    .filter_map(|e| {
                         let path = e.path();
                         if !path
                             .extension()
                             .is_some_and(|ext| ext.eq_ignore_ascii_case("zip"))
                         {
-                            return false;
+                            return None;
                         }
-                        // Complete, measured against the torrent: a 1 KB floor
-                        // let piece-sized partials of a neighbouring download
-                        // pass as installs (a 376 MB game arriving as 8 MB).
-                        let len = match e.metadata() {
-                            Ok(m) => m.len(),
-                            Err(_) => return false,
-                        };
-                        // No torrent to measure against, or an import that
-                        // may hold repacked archives: size cannot decide.
+                        // Cheapest test first: only an archive this pass would
+                        // confirm is worth a stat, let alone an open.
+                        let id = *name_to_id.get(&*path.file_stem()?.to_string_lossy())?;
+                        let len = e.metadata().ok()?.len();
+                        let rel = path
+                            .strip_prefix(&torrent_root)
+                            .ok()
+                            .map(|r| r.to_string_lossy().replace('\\', "/"));
+                        let torrent_file = rel.as_deref().and_then(|r| torrent_files.get(r));
                         if lenient_sizes {
-                            return len >= 1024;
+                            // No torrent to measure against, or an import that
+                            // may hold repacked archives: size cannot decide.
+                            if len < 1024 {
+                                return None;
+                            }
+                        } else {
+                            // Complete, measured against the torrent: a 1 KB
+                            // floor let piece-sized partials of a neighbouring
+                            // download pass as installs (a 376 MB game
+                            // arriving as 8 MB).
+                            if rel.as_ref().is_none_or(|r| in_flight.contains(r)) {
+                                return None;
+                            }
+                            if torrent_file.is_none_or(|f| f.size != len) {
+                                return None;
+                            }
                         }
-                        let Ok(rel) = path.strip_prefix(&torrent_root) else {
-                            return false;
-                        };
-                        let rel = rel.to_string_lossy().replace('\\', "/");
-                        if in_flight.contains(&rel) {
-                            return false;
+                        // Full length is not complete: librqbit writes sparse.
+                        if verify_entries {
+                            let torrent_offset = torrent_file.map_or(0, |f| f.offset);
+                            if let Err(why) = archive_entries_present(&path, len, torrent_offset) {
+                                log::info!(
+                                    "scan_installed_games: {} is not a complete archive ({why}) - not an install",
+                                    path.display()
+                                );
+                                return None;
+                            }
                         }
-                        expected_sizes.get(&rel).is_some_and(|expected| len == *expected)
-                    })
-                    .filter_map(|e| {
-                        let stem = e.path().file_stem()?.to_string_lossy().into_owned();
-                        name_to_id.get(&stem).copied()
+                        Some(id)
                     })
                     .collect(),
                 Err(e) => {
@@ -745,7 +795,7 @@ mod scan_tests {
         std::fs::create_dir_all(base.join("SQ5")).unwrap();
         // Sized like the torrent says, sparse - a ZIP now counts as an install
         // only at its full length.
-        write_sparse_zip(&base.join("Capitalism (1995).zip"), "eXo/eXoDOS/Capitalism (1995).zip");
+        write_full_length_zip(&base.join("Capitalism (1995).zip"), "eXo/eXoDOS/Capitalism (1995).zip");
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         crate::db::init(&conn).unwrap();
@@ -783,17 +833,78 @@ mod scan_tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Create `path` with the length the bundled eXoDOS torrent declares for
-    /// `rel`, without writing that many bytes.
-    fn write_sparse_zip(path: &std::path::Path, rel: &str) -> u64 {
-        let indices = scan_torrent_indices();
-        let size = indices
+    fn torrent_size_of(rel: &str) -> u64 {
+        scan_torrent_indices()
             .get("eXoDOS")
             .and_then(|i| i.find_by_path(rel))
             .unwrap_or_else(|| panic!("{rel} missing from the bundled torrent"))
-            .size;
+            .size
+    }
+
+    /// Create `path` with the length the bundled eXoDOS torrent declares for
+    /// `rel`, without writing that many bytes: zeros, no archive at all.
+    fn write_sparse_zip(path: &std::path::Path, rel: &str) -> u64 {
+        let size = torrent_size_of(rel);
         let f = std::fs::File::create(path).unwrap();
         f.set_len(size).unwrap();
+        size
+    }
+
+    /// A zip of `len` bytes: 16 stored entries spread evenly, payloads left
+    /// as sparse holes, directory at the end - complete at any length without
+    /// writing it. Headers inside `hole` stay zeroed, like pieces that never
+    /// arrived.
+    fn write_skeleton_zip(path: &std::path::Path, len: u64, hole: std::ops::Range<u64>) {
+        use std::io::{Seek, SeekFrom, Write};
+        let names: Vec<String> = (0..16).map(|i| format!("GAME/FILE{i:02}.DAT")).collect();
+        let cd_len: u64 = names.iter().map(|n| 46 + n.len() as u64).sum();
+        let cd_offset = len - cd_len - 22;
+        let stride = cd_offset / names.len() as u64;
+        let mut file = std::fs::File::create(path).unwrap();
+        file.set_len(len).unwrap();
+        let mut cd = Vec::new();
+        for (i, name) in names.iter().enumerate() {
+            let header = i as u64 * stride;
+            let data_end = if i + 1 == names.len() { cd_offset } else { header + stride };
+            let size = ((data_end - header - 30 - name.len() as u64) as u32).to_le_bytes();
+            let name_len = (name.len() as u16).to_le_bytes();
+            if !hole.contains(&header) {
+                let mut local = 0x0403_4b50u32.to_le_bytes().to_vec();
+                local.extend(20u16.to_le_bytes());
+                local.extend([0u8; 12]); // flags, method (stored), time, date, crc
+                local.extend(size);
+                local.extend(size);
+                local.extend(name_len);
+                local.extend([0u8; 2]); // extra length
+                local.extend(name.as_bytes());
+                file.seek(SeekFrom::Start(header)).unwrap();
+                file.write_all(&local).unwrap();
+            }
+            cd.extend(0x0201_4b50u32.to_le_bytes());
+            cd.extend([20, 0, 20, 0]); // version made by, needed
+            cd.extend([0u8; 12]); // flags, method, time, date, crc
+            cd.extend(size);
+            cd.extend(size);
+            cd.extend(name_len);
+            cd.extend([0u8; 12]); // extra, comment, disk, attributes
+            cd.extend((header as u32).to_le_bytes());
+            cd.extend(name.as_bytes());
+        }
+        cd.extend(0x0605_4b50u32.to_le_bytes());
+        cd.extend([0u8; 4]); // disk numbers
+        cd.extend((names.len() as u16).to_le_bytes());
+        cd.extend((names.len() as u16).to_le_bytes());
+        cd.extend((cd_len as u32).to_le_bytes());
+        cd.extend((cd_offset as u32).to_le_bytes());
+        cd.extend([0u8; 2]); // comment length
+        file.seek(SeekFrom::Start(cd_offset)).unwrap();
+        file.write_all(&cd).unwrap();
+    }
+
+    /// A complete archive at the length the bundled eXoDOS torrent declares.
+    fn write_full_length_zip(path: &std::path::Path, rel: &str) -> u64 {
+        let size = torrent_size_of(rel);
+        write_skeleton_zip(path, size, 0..0);
         size
     }
 
@@ -845,7 +956,7 @@ mod scan_tests {
         let _ = std::fs::remove_dir_all(&dir);
         let base = dir.join("eXoDOS/eXo/eXoDOS");
         std::fs::create_dir_all(base.join("WOLF3D")).unwrap();
-        write_sparse_zip(&base.join("Wolfendoom (2000).zip"), "eXo/eXoDOS/Wolfendoom (2000).zip");
+        write_full_length_zip(&base.join("Wolfendoom (2000).zip"), "eXo/eXoDOS/Wolfendoom (2000).zip");
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         crate::db::init(&conn).unwrap();
@@ -904,7 +1015,7 @@ mod scan_tests {
         let _ = std::fs::remove_dir_all(&dir);
         let base = dir.join("eXoDOS/eXo/eXoDOS");
         std::fs::create_dir_all(base.join("WOLF3D")).unwrap();
-        write_sparse_zip(&base.join("Wolfendoom (2000).zip"), "eXo/eXoDOS/Wolfendoom (2000).zip");
+        write_full_length_zip(&base.join("Wolfendoom (2000).zip"), "eXo/eXoDOS/Wolfendoom (2000).zip");
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         crate::db::init(&conn).unwrap();
@@ -956,10 +1067,10 @@ mod scan_tests {
         let base = dir.join("eXoDOS/eXo/eXoDOS");
         std::fs::create_dir_all(&base).unwrap();
         let zip = base.join("Wolf (1994).zip");
-        let full = write_sparse_zip(&zip, "eXo/eXoDOS/Wolf (1994).zip");
-        // 8 MiB of a 376 MB archive: one piece of a neighbour's download.
-        std::fs::File::create(&zip).unwrap().set_len(8 * 1024 * 1024).unwrap();
-        assert!(full > 8 * 1024 * 1024);
+        // 8 MiB of a 376 MB archive: one piece of a neighbour's download, or
+        // a repacked archive the bundled torrent never described.
+        write_skeleton_zip(&zip, 8 * 1024 * 1024, 0..0);
+        assert!(torrent_size_of("eXo/eXoDOS/Wolf (1994).zip") > 8 * 1024 * 1024);
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         crate::db::init(&conn).unwrap();
@@ -987,6 +1098,8 @@ mod scan_tests {
         // may hold repacked archives the bundled torrent never described, and
         // refusing those would report "no games found" on a full installation.
         assert_eq!(installed_after(true), 1, "an explicit import trusts what it finds");
+        std::fs::File::create(&zip).unwrap().set_len(8 * 1024 * 1024).unwrap();
+        assert_eq!(installed_after(true), 0, "as long as it is an archive at all");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -998,7 +1111,7 @@ mod scan_tests {
         let _ = std::fs::remove_dir_all(&dir);
         let base = dir.join("eXoDOS/eXo/eXoDOS");
         std::fs::create_dir_all(&base).unwrap();
-        write_sparse_zip(&base.join("Wolf (1994).zip"), "eXo/eXoDOS/Wolf (1994).zip");
+        write_full_length_zip(&base.join("Wolf (1994).zip"), "eXo/eXoDOS/Wolf (1994).zip");
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         crate::db::init(&conn).unwrap();
@@ -1023,6 +1136,132 @@ mod scan_tests {
         assert_eq!(installed(&in_flight), 0, "a download in flight is not an install, whatever its length");
         assert_eq!(installed(&Default::default()), 1, "the same file counts once the session is done with it");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn scan_dir_with_wolf(name: &str, imported: bool) -> (PathBuf, PathBuf, std::sync::Mutex<rusqlite::Connection>) {
+        let dir = std::env::temp_dir().join(format!("exodium_{name}_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let base = dir.join("eXoDOS/eXo/eXoDOS");
+        std::fs::create_dir_all(&base).unwrap();
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::init(&conn).unwrap();
+        if imported {
+            conn.execute("INSERT INTO config (key, value) VALUES ('library_from_disk', '1')", []).unwrap();
+        }
+        conn.execute(
+            r"INSERT INTO games (title, platform, language, shortcode, torrent_source,
+                                 application_path, game_torrent_index, installed, in_library)
+              VALUES ('Wolf', 'MS-DOS', 'EN', 'WOLF', 'eXoDOS',
+                      'eXo\eXoDOS\!dos\WOLF\Wolf (1994).bat', ?1, 0, 1)",
+            rusqlite::params![torrent_index_of("eXo/eXoDOS/Wolf (1994).zip")],
+        )
+        .unwrap();
+        (dir, base.join("Wolf (1994).zip"), std::sync::Mutex::new(conn))
+    }
+
+    fn wolf_installed_after(db: &std::sync::Mutex<rusqlite::Connection>, dir: &Path, adopt: bool) -> i64 {
+        scan_installed_games_with_db(db, &dir.to_string_lossy(), adopt, &Default::default()).unwrap();
+        db.lock()
+            .unwrap()
+            .query_row("SELECT installed FROM games WHERE shortcode = 'WOLF'", [], |r| r.get(0))
+            .unwrap()
+    }
+
+    /// Neighbouring downloads bring an archive to full length with its first
+    /// and last pieces in place and zeros between; launching it then fails.
+    #[test]
+    fn a_fragment_at_full_length_is_not_an_install() {
+        let (dir, zip, db) = scan_dir_with_wolf("fragment", false);
+        let len = torrent_size_of("eXo/eXoDOS/Wolf (1994).zip");
+        write_skeleton_zip(&zip, len, len / 4..len * 3 / 4);
+        assert_eq!(wolf_installed_after(&db, &dir, false), 0, "the startup scan does not confirm a fragment");
+        assert_eq!(wolf_installed_after(&db, &dir, true), 0, "and adoption does not take it in");
+        write_sparse_zip(&zip, "eXo/eXoDOS/Wolf (1994).zip");
+        assert_eq!(wolf_installed_after(&db, &dir, false), 0, "nor full-length zeros");
+        write_skeleton_zip(&zip, len, 0..0);
+        assert_eq!(wolf_installed_after(&db, &dir, false), 1, "the complete archive still counts");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// On an imported tree the archives are the user's own: no entry check.
+    #[test]
+    fn an_imported_library_skips_the_entry_check() {
+        let (dir, zip, db) = scan_dir_with_wolf("imported_fragment", true);
+        let len = torrent_size_of("eXo/eXoDOS/Wolf (1994).zip");
+        write_skeleton_zip(&zip, len, len / 4..len * 3 / 4);
+        assert_eq!(wolf_installed_after(&db, &dir, false), 1);
+        assert_eq!(wolf_installed_after(&db, &dir, true), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    struct CountingReader<R> {
+        inner: R,
+        reads: usize,
+    }
+
+    impl<R: std::io::Read> std::io::Read for CountingReader<R> {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            self.reads += 1;
+            self.inner.read(buf)
+        }
+    }
+
+    impl<R: std::io::Seek> std::io::Seek for CountingReader<R> {
+        fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+            self.inner.seek(pos)
+        }
+    }
+
+    /// A real archive missing one block mid-piece - a transfer that stopped
+    /// there - fails; the complete one passes with one tail read plus at most
+    /// one header read per torrent block, however many entries it holds.
+    #[test]
+    fn the_entry_check_reads_one_header_per_torrent_block() {
+        use std::io::Write as _;
+        let mut seed = 0x2545_f491u32;
+        let mut noise = |n: usize| -> Vec<u8> {
+            (0..n)
+                .map(|_| {
+                    seed ^= seed << 13;
+                    seed ^= seed >> 17;
+                    seed ^= seed << 5;
+                    seed as u8
+                })
+                .collect()
+        };
+        let entries = 200;
+        let mut buf = std::io::Cursor::new(Vec::new());
+        {
+            let mut zip = zip::ZipWriter::new(&mut buf);
+            let stored: zip::write::FileOptions<'_, ()> =
+                zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+            for i in 0..entries {
+                zip.start_file(format!("GAME/FILE{i:03}.DAT"), stored).unwrap();
+                zip.write_all(&noise(2_000 + i * 20)).unwrap();
+            }
+            zip.finish().unwrap();
+        }
+        let complete = buf.into_inner();
+        let len = complete.len() as u64;
+        // Not block-aligned, as a file inside a torrent rarely is.
+        let torrent_offset = 5_000u64;
+        let block_of = |pos: u64| (torrent_offset + pos) / TORRENT_BLOCK;
+
+        let mut reader = CountingReader { inner: std::io::Cursor::new(complete.clone()), reads: 0 };
+        entries_present(&mut reader, len, torrent_offset).unwrap();
+        let blocks = (block_of(len - 1) - block_of(0) + 1) as usize;
+        assert!(reader.reads <= 1 + blocks, "{} reads for {blocks} blocks", reader.reads);
+        assert!(blocks < entries, "the bound has to bite");
+        let complete_reads = reader.reads;
+
+        let mut fragment = complete;
+        let missing = block_of(len / 2);
+        let start = (missing * TORRENT_BLOCK - torrent_offset) as usize;
+        fragment[start..start + TORRENT_BLOCK as usize].fill(0);
+        let mut reader = CountingReader { inner: std::io::Cursor::new(fragment), reads: 0 };
+        let err = entries_present(&mut reader, len, torrent_offset).unwrap_err();
+        assert!(err.contains("no entry at offset"), "{err}");
+        assert!(reader.reads < complete_reads, "stops at the first missing block");
     }
 }
 
