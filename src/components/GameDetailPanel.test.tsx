@@ -715,8 +715,8 @@ describe("GameDetailPanel closing", () => {
     dispose();
   });
 
-  /** The video and theme beats used to die with the unmount; a closing panel
-   *  is still mounted, so the closing state itself has to stop them. */
+  /** A closing panel is still mounted, so the closing state itself stops the
+   *  video and theme beats. */
   it("asks for neither video nor theme once the panel is closing", async () => {
     const musicStore = await import("../stores/music");
     const request = vi.spyOn(musicStore, "requestTheme");
