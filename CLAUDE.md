@@ -1094,7 +1094,10 @@ wrote into the next game's state. The "video" pause reason is claimed and
 released there only, on scheduling an unmuted start (not on the first frame),
 so the theme cannot start inside the cover beat. Its public transitions run
 under `untrack`: they are called from effects and write the very signals they
-read, which otherwise makes the caller re-run itself. A backend `timed out`
+read, which otherwise makes the caller re-run itself. A preview that becomes
+ready while a game runs (`runningGameIds`) loads but stays paused on the
+cover: `stopForGame` at launch only reaches what is already scheduled, and a
+trailer still fetching then started with sound over the game. A backend `timed out`
 (no peers yet, §14 deadlines) gets one automatic second try per game and
 session in both media stores; the pill names it as such.
 
@@ -2288,7 +2291,12 @@ preselected while off, switched at once while on. Turn on asks for the PIN
 twice and locks immediately - Settings closes first, because the locked shell
 unmounts it without resetting `showSettings` and the next unlock would reopen
 it. All four PIN prompts are `PinDialog.tsx`, and every check (unlock, change,
-turn off) goes through `try_pin`, so all count toward the one wait. The kids
+turn off) goes through `try_pin`, so all count toward the one wait. Unlock and
+Turn off submit by themselves once the field holds as many digits as the PIN
+(`kids_pin_length`, written with the PIN, and learned at the first right entry
+of a PIN stored without it); a wrong one is one try like any other. Checking
+at every length from 4 to 8 instead would make each keystroke a counted miss.
+Change PIN has three fields and waits for Enter. The kids
 screen shows the latest-played group first (any variant's `last_played`), the
 never played in playlist order, and reloads on `game-exited`.
 

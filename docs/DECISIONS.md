@@ -574,3 +574,15 @@
 - Rejected: a pristine copy beside each bat (uninstall would file it under `!save` as user data); forcing the device in the conf (the bat switches it back at runtime).
 - Why: A port chosen in Settings was dropped as soon as a game's own sound menu picked MT-32 or Sound Canvas.
 - Gotcha: Lines with `<`, `>` or `|` stay - Staging redirects even on a REM line. `midiconfig` goes before `mididevice`, since every `[midi]` change restarts MIDI. Music reaching a real port is untested.
+
+## 2026-10-28 - A preview that arrives during a game stays paused
+- Decision: `showPreview` loads a video that becomes ready while a game runs but leaves it paused on the cover; the replay button starts it, the game's exit does not.
+- Rejected: starting it muted (moving pictures and decoder load behind the emulator for nobody).
+- Why: Smoke test - Play pressed while the trailer was still fetching; it arrived three seconds later and played with sound over the game.
+- Gotcha: The gate is `runningGameIds`, the same level the theme's "game" pause reason follows; the stop at launch only reaches a preview already scheduled.
+
+## 2026-10-28 - The PIN prompt submits itself at the PIN's length
+- Decision: The PIN length is stored beside the hash (`kids_pin_length`) and returned with the status; Unlock and Turn off submit once that many digits are typed. The PIN field is larger in every prompt.
+- Rejected: trying at every length from 4 to 8 (each keystroke a counted miss, the wait after five digits); a fixed four-digit PIN (reverses the 4-8 decision).
+- Why: Thomas - the field was small, and Enter after the PIN was one step too many on the kids screen.
+- Gotcha: The UI knows the length; kids mode is a child lock, and the dots show it anyway. A PIN set before the key existed learns it at the next right entry.
