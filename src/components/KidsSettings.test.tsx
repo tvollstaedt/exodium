@@ -21,8 +21,8 @@ const PLAYLISTS: Playlist[] = [
   { id: 2, name: "Bedtime", kind: "user", description: null, game_count: 2 },
 ];
 
-const OFF: KidsStatus = { enabled: false, locked: false, playlist_id: null, language: "EN", retry_in: 0 };
-const ON: KidsStatus = { enabled: true, locked: false, playlist_id: 1, language: "EN", retry_in: 0 };
+const OFF: KidsStatus = { enabled: false, locked: false, playlist_id: null, language: "EN", retry_in: 0, pin_length: null };
+const ON: KidsStatus = { enabled: true, locked: false, playlist_id: 1, language: "EN", retry_in: 0, pin_length: 4 };
 
 /** Answers like the backend with kids mode in `state`; `pinOk` decides every
  *  PIN check, a wrong one costing `wait` seconds. */

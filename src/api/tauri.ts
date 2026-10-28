@@ -1119,6 +1119,7 @@ export interface KidsStatus {
   language: string;
   /** Seconds until the next PIN may be tried. */
   retry_in: number;
+  pin_length: number | null;
 }
 
 /** A wrong PIN carries the wait the backend set; every PIN check shares it. */

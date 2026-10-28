@@ -92,7 +92,7 @@ describe("download-all queue", () => {
     const { enqueueDownloads, queuedCount } = await import("./batchDownloads");
     const { getDownloadState } = await import("./downloads");
     const { setKidsStatus } = await import("./kids");
-    const status = (locked: boolean) => ({ enabled: true, locked, playlist_id: 1, language: "EN", retry_in: 0 });
+    const status = (locked: boolean) => ({ enabled: true, locked, playlist_id: 1, language: "EN", retry_in: 0, pin_length: 4 });
     const ids = [621, 622, 623, 624, 625, 626];
     enqueueDownloads(12, ids.map((gameId) => ({ gameId, title: `Game ${gameId}` })));
     expect(started()).toEqual(ids.slice(0, 4));

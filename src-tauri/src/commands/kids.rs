@@ -30,7 +30,8 @@ const LANGUAGE: &str = "kids_language";
 const PIN: &str = "kids_pin";
 const FAILURES: &str = "kids_failures";
 const RETRY_AT: &str = "kids_retry_at";
-const KEYS: [&str; 6] = [MODE, PLAYLIST, LANGUAGE, PIN, FAILURES, RETRY_AT];
+const PIN_LENGTH: &str = "kids_pin_length";
+const KEYS: [&str; 7] = [MODE, PLAYLIST, LANGUAGE, PIN, FAILURES, RETRY_AT, PIN_LENGTH];
 
 /// Name of the playlist kids mode creates when none is chosen.
 const DEFAULT_PLAYLIST: &str = "Kids";
@@ -116,6 +117,11 @@ fn pin_record(pin: &str) -> Result<String, String> {
     Ok(format!("{salt}${hash}"))
 }
 
+fn store_pin(conn: &Connection, pin: &str) -> Result<(), String> {
+    set(conn, PIN, &pin_record(pin)?)?;
+    set(conn, PIN_LENGTH, &pin.len().to_string())
+}
+
 fn pin_matches(conn: &Connection, pin: &str) -> bool {
     config(conn, PIN)
         .and_then(|r| r.split_once('$').map(|(salt, hash)| digest(salt, pin) == hash))
@@ -143,6 +149,8 @@ pub struct KidsStatus {
     pub language: String,
     /// Seconds until the next PIN may be tried.
     pub retry_in: u64,
+    /// Digits in the PIN, so a prompt can submit itself once that many are typed.
+    pub pin_length: Option<usize>,
 }
 
 fn status(conn: &Connection) -> KidsStatus {
@@ -152,6 +160,7 @@ fn status(conn: &Connection) -> KidsStatus {
         playlist_id: playlist_id(conn),
         language: config(conn, LANGUAGE).unwrap_or_else(|| "EN".into()),
         retry_in: retry_in(conn),
+        pin_length: config(conn, PIN_LENGTH).and_then(|v| v.parse().ok()),
     }
 }
 
@@ -203,7 +212,7 @@ pub async fn kids_enable(
     }
     let conn = state.lock()?;
     let playlist = resolve_playlist(&conn, playlist_id)?;
-    set(&conn, PIN, &pin_record(&pin)?)?;
+    store_pin(&conn, &pin)?;
     set(&conn, PLAYLIST, &playlist.to_string())?;
     set(&conn, LANGUAGE, &language)?;
     set(&conn, MODE, "1")?;
@@ -245,6 +254,8 @@ fn try_pin(conn: &Connection, pin: &str) -> Result<PinResult, String> {
     }
     if pin_matches(conn, pin) {
         let _ = conn.execute("DELETE FROM config WHERE key IN (?1, ?2)", params![FAILURES, RETRY_AT]);
+        // A PIN stored without its length learns it here.
+        set(conn, PIN_LENGTH, &pin.len().to_string())?;
         return Ok(PinResult { ok: true, retry_in: 0 });
     }
     let failures = config(conn, FAILURES).and_then(|v| v.parse::<u32>().ok()).unwrap_or(0) + 1;
@@ -265,7 +276,7 @@ pub async fn kids_change_pin(state: State<'_, DbState>, old_pin: String, new_pin
     let conn = state.lock()?;
     let result = try_pin(&conn, &old_pin)?;
     if result.ok {
-        set(&conn, PIN, &pin_record(&new_pin)?)?;
+        store_pin(&conn, &new_pin)?;
     }
     Ok(result)
 }
@@ -360,6 +371,19 @@ mod tests {
         assert!(pin_matches(&conn, "4711"));
         assert!(!pin_matches(&conn, "4712"));
         assert_ne!(pin_record("4711").unwrap(), stored, "salted: the same PIN hashes differently");
+    }
+
+    #[test]
+    fn the_pin_length_is_known_once_the_pin_is_set_or_entered_right() {
+        let conn = db();
+        store_pin(&conn, "123456").unwrap();
+        assert_eq!(status(&conn).pin_length, Some(6));
+        conn.execute("DELETE FROM config WHERE key = ?1", params![PIN_LENGTH]).unwrap();
+        assert!(!try_pin(&conn, "1234").unwrap().ok);
+        assert_eq!(status(&conn).pin_length, None, "a wrong PIN teaches nothing");
+        assert!(try_pin(&conn, "123456").unwrap().ok);
+        assert_eq!(status(&conn).pin_length, Some(6));
+        assert!(KEYS.contains(&PIN_LENGTH), "turning kids mode off forgets it");
     }
 
     #[test]

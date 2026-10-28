@@ -17,6 +17,7 @@ export function KidsPinDialog(props: { open: boolean; onClose: () => void; onUnl
       title="Unlock Exodium"
       fields={FIELDS}
       submitLabel="Unlock"
+      autoSubmit
       testId="kids-pin-dialog"
       submitTestId="kids-pin-submit"
       onSubmit={submit}
