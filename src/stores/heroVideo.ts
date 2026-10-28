@@ -1,5 +1,5 @@
 import { createSignal, untrack } from "solid-js";
-import { describePlayError, pauseFor, resumeFrom } from "./music";
+import { describePlayError, pauseFor, resumeFrom, runningGameIds } from "./music";
 
 /** The one hero preview: a single `<video>` element the panel attaches for
  *  its lifetime, driven from here. Every transition cancels the previous one
@@ -151,8 +151,14 @@ export function showPreview(id: number, url: string, opts: { muted: boolean; del
       src = url;
     }
     setGameId(id);
-    setPhase("loading");
     setError(null);
+    // A preview that lands while a game runs waits like one `stopForGame` stopped.
+    if (runningGameIds().size > 0) {
+      releaseSpeakers();
+      setPhase("paused");
+      return;
+    }
+    setPhase("loading");
     // A preview about to play with sound claims the speakers NOW, not at its
     // first frame: the theme would start within the cover beat otherwise and
     // be cut off two seconds later.
