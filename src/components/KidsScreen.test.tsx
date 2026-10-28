@@ -84,6 +84,31 @@ describe("KidsPinDialog", () => {
     dispose();
   });
 
+  it("unlocks by itself once the field holds as many digits as the PIN", async () => {
+    setKidsStatus({ enabled: true, locked: true, playlist_id: 1, language: "EN", retry_in: 0, pin_length: 4 });
+    mockInvoke.mockImplementation(async (cmd: string) => (cmd === "kids_unlock"
+      ? { ok: true, retry_in: 0 }
+      : { enabled: true, locked: false, playlist_id: 1, language: "EN", retry_in: 0, pin_length: 4 }));
+    const unlocked = vi.fn();
+    const dispose = mount(() => <KidsPinDialog open onClose={() => {}} onUnlocked={unlocked} />);
+    const input = document.querySelector<HTMLInputElement>("[data-testid=kids-pin-input]")!;
+    const type = (value: string) => {
+      input.value = value;
+      input.dispatchEvent(new InputEvent("input", { bubbles: true }));
+    };
+    type("1");
+    type("12");
+    type("123");
+    await flush();
+    expect(mockInvoke).not.toHaveBeenCalledWith("kids_unlock", expect.anything());
+    type("1234");
+    await flush();
+    await flush();
+    expect(mockInvoke).toHaveBeenCalledWith("kids_unlock", { pin: "1234" });
+    expect(unlocked).toHaveBeenCalled();
+    dispose();
+  });
+
   it("opens ready for a PIN when no wait is pending, however late the clock ticks", async () => {
     setKidsStatus(null);
     let t = 1_000_000;

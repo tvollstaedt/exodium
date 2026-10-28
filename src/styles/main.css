@@ -6892,9 +6892,10 @@ body.is-marquee {
 }
 
 .kids-pin-input {
+  padding: 14px 12px;
   text-align: center;
-  font-size: 20px;
-  letter-spacing: 6px;
+  font-size: 32px;
+  letter-spacing: 12px;
 }
 
 /* The spacing is for the dots; a spaced-out "Repeat new PIN" reads as noise. */

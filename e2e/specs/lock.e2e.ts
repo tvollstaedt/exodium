@@ -2,6 +2,7 @@ import { $, expect } from "@wdio/globals";
 
 // Kids mode: turned on (which locks at once), a wrong PIN refused, the right
 // one opens it, locked again from the top bar and from Settings, turned off.
+// Unlock and turn off submit by themselves at the PIN's length.
 // Removes the "Kids" playlist it created - the specs share one session.
 describe("kids mode", () => {
   const openKidsSettings = async () => {
@@ -13,7 +14,6 @@ describe("kids mode", () => {
   const unlock = async () => {
     await $('[data-testid="kids-unlock"]').click();
     await $('[data-testid="kids-pin-input"]').setValue("1234");
-    await $('[data-testid="kids-pin-submit"]').click();
     await $('[data-testid="kids-screen"]').waitForExist({ reverse: true });
   };
 
@@ -38,12 +38,10 @@ describe("kids mode", () => {
   it("refuses a wrong PIN and opens with the right one", async () => {
     await $('[data-testid="kids-unlock"]').click();
     await $('[data-testid="kids-pin-input"]').setValue("0000");
-    await $('[data-testid="kids-pin-submit"]').click();
     await expect($('[data-testid="kids-pin-error"]')).toHaveText("Wrong PIN");
     await expect($('[data-testid="kids-screen"]')).toBeDisplayed();
 
     await $('[data-testid="kids-pin-input"]').setValue("1234");
-    await $('[data-testid="kids-pin-submit"]').click();
     await $('[data-testid="kids-screen"]').waitForExist({ reverse: true });
     await expect($('[data-testid="tab-browse"]')).toBeDisplayed();
     // Settings closed before it locked, so the unlock does not bring it back.
@@ -67,7 +65,6 @@ describe("kids mode", () => {
     await openKidsSettings();
     await $('[data-testid="kids-turn-off"]').click();
     await $('[data-testid="kids-pin-current"]').setValue("1234");
-    await $('[data-testid="kids-disable"]').click();
     await $('[data-testid="kids-turn-on"]').waitForExist({ timeoutMsg: "kids mode did not turn off" });
     await expect($('[data-testid="kids-status"]')).toHaveText("Off");
     await $('[data-testid="settings-close"]').click();

@@ -174,6 +174,7 @@ export function KidsSettings(props: { onLock: () => void }) {
         description={`Exodium stops locking; the playlist stays. ${RESET_HINT}`}
         fields={OFF_FIELDS}
         submitLabel="Turn off"
+        autoSubmit
         testId="kids-turn-off-dialog"
         submitTestId="kids-disable"
         onSubmit={turnOff}

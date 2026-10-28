@@ -24,6 +24,8 @@ interface PinDialogProps {
   /** Set when the last field repeats the one before it: the message for a mismatch. */
   mismatch?: string;
   submitLabel: string;
+  /** A single-field check submits itself once it holds the PIN's digit count. */
+  autoSubmit?: boolean;
   testId: string;
   submitTestId: string;
   onSubmit: (pins: string[]) => Promise<PinAnswer>;
@@ -123,7 +125,11 @@ function PinDialogBody(props: PinDialogProps) {
                   aria-label={field().placeholder}
                   value={pins()[i]}
                   disabled={waitSecs() > 0}
-                  onInput={(e) => setPin(i, e.currentTarget.value.replace(/\D/g, ""))}
+                  onInput={(e) => {
+                    const pin = e.currentTarget.value.replace(/\D/g, "");
+                    setPin(i, pin);
+                    if (props.autoSubmit && pin.length === kidsStatus()?.pin_length) { void submit(); }
+                  }}
                   onKeyDown={(e) => { if (e.key === "Enter") { onEnter(i); } }}
                 />
               )}
