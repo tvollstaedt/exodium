@@ -167,6 +167,21 @@ describe("hero video controller", () => {
     expect(port.playCalls).toBe(1);
   });
 
+  it("a preview that arrives while a game runs waits on the cover until replayed", async () => {
+    const { hero, music, port } = await boot();
+    music.pauseForGame(7);
+    hero.showPreview(1, "v1", { muted: false, delayMs: 0 });
+    await settle(100);
+    expect(port.playCalls).toBe(0);
+    expect(hero.heroPhase()).toBe("paused");
+    expect(music.pauseReasons()).toEqual(["game"]);
+    music.resumeFromGame(7);
+    await settle(100);
+    expect(port.playCalls).toBe(0);
+    hero.replayPreview(false);
+    expect(port.playCalls).toBe(1);
+  });
+
   it("the lightbox pauses the hero and keeps the claim only while it has the trailer with sound", async () => {
     const { hero, music, port } = await boot();
     hero.showPreview(1, "v1", { muted: false, delayMs: 0 });
