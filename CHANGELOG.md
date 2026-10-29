@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.16.0 - 2026-10-29
+
+### Added
+
+- eXoAppleIIGS: the Apple IIGS collection. macOS and Linux run the games in
+  GSplus, which comes as a content pack; Windows runs them in eXo's own
+  emulators. Reference cards, maps and manuals open from a game's details,
+  and the GS+ magazine and the Apple IIGS Buyer's Guide are in the Reading
+  Room.
+- Playlists: Import list turns a text or CSV file of game titles into a
+  playlist, every playlist exports as CSV, and Download playlist fetches
+  every game of a playlist that is not installed yet. (#43)
+- Kids mode: a locked screen with the installed games of one playlist,
+  everything else behind a PIN. Settings → Kids Mode, or "Use for kids
+  mode…" in a playlist's menu. (#44)
+- Game details: drag the panel's left edge to widen it, or switch it to
+  fullscreen. A wide panel puts the cover beside the title and the
+  information beside the description. (#46)
+- Settings → General → Game defaults: General MIDI and MT-32 outputs to a
+  MIDI device of your choice, and a MIDI ROM folder for your own ROMs and
+  soundfonts. A game's own sound menu follows the chosen outputs. (#51)
+- Game selection: Select, Cmd/Ctrl-click, Shift-click or a drag frame picks
+  several games at once, to add them to a playlist, download them or mark
+  them as favorites together.
+- Downloads: pause and resume each download on its own or all at once, and
+  Cancel all empties the queue.
+
+### Changed
+
+- My Library: shelves fold from their header, and Alt/Option-click folds or
+  opens all of them.
+
+### Fixed
+
+- Library: a partly downloaded game could show as installed, and Play then
+  asked to download it.
+- Game details: a preview video that finished loading after a game had
+  started played with sound over the game.
+- macOS and Linux: games set up for General MIDI music played none. Standard
+  now plays it through FluidSynth.
+
 ## 0.15.4 - 2026-10-13
 
 ### Added
