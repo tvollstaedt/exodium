@@ -756,19 +756,39 @@ fn build_lp_overlay(
     Ok(staging)
 }
 
-/// A path as the emulator would see it: exact match first, then the one
-/// entry of the parent whose name differs only in case.
+/// A path as the emulator would see it: exact match first, then component by
+/// component the entry whose name differs only in case. Every component, not
+/// just the last: Staging `stat()`s a directory mount as written (§15).
 fn resolve_ignoring_case(path: &std::path::Path) -> Option<PathBuf> {
+    use std::path::Component;
     if path.exists() {
         return Some(path.to_path_buf());
     }
-    let name = path.file_name()?.to_string_lossy().to_ascii_lowercase();
-    let parent = path.parent()?;
-    std::fs::read_dir(parent)
-        .ok()?
-        .filter_map(Result::ok)
-        .find(|e| e.file_name().to_string_lossy().to_ascii_lowercase() == name)
-        .map(|e| e.path())
+    let mut cur = PathBuf::new();
+    for comp in path.components() {
+        let Component::Normal(name) = comp else {
+            if comp == Component::ParentDir {
+                cur.pop();
+            } else {
+                cur.push(comp);
+            }
+            continue;
+        };
+        if cur.join(name).exists() {
+            cur.push(name);
+            continue;
+        }
+        let want = name.to_string_lossy().to_ascii_lowercase();
+        let dir = if cur.as_os_str().is_empty() { Path::new(".") } else { cur.as_path() };
+        let found = std::fs::read_dir(dir)
+            .ok()?
+            .filter_map(Result::ok)
+            .map(|e| e.file_name())
+            .filter(|n| n.to_string_lossy().to_ascii_lowercase() == want)
+            .min()?;
+        cur.push(found);
+    }
+    Some(cur)
 }
 
 /// Where a `.\<game_folder>\[<lang_dir>\]<shortcode>\rest` host path lands
@@ -1056,10 +1076,17 @@ pub(crate) fn rewrite_bat_host_paths(game_dir: &Path, working_dir: &Path) {
                 return ".\\".to_string();
             }
             let fwd = body.replace('\\', "/");
-            if working_dir.join(&fwd).exists() {
-                trim_trailing_sep(&format!("./{}", fwd))
+            let target = working_dir.join(&fwd);
+            let rel = if target.exists() {
+                Some(fwd)
             } else {
-                format!(".\\{}", body)
+                resolve_ignoring_case(&target).and_then(|p| {
+                    p.strip_prefix(working_dir).ok().map(|r| r.to_string_lossy().replace('\\', "/"))
+                })
+            };
+            match rel {
+                Some(rel) => trim_trailing_sep(&format!("./{}", rel)),
+                None => format!(".\\{}", body),
             }
         });
         if rewritten == content {
@@ -2397,7 +2424,11 @@ mod tests {
         let found = resolve_ignoring_case(&tmp.path().join("odyssey"))
             .expect("a differently-cased directory must still resolve");
         assert!(found.is_dir(), "{}", found.display());
+        fs::create_dir_all(tmp.path().join("ODYSSEY/Disk1")).unwrap();
+        let nested = resolve_ignoring_case(&tmp.path().join("odyssey/DISK1")).expect("a middle component resolves too");
+        assert!(nested.is_dir(), "{}", nested.display());
         assert!(resolve_ignoring_case(&tmp.path().join("nothing-here")).is_none());
+        assert!(resolve_ignoring_case(&tmp.path().join("odyssey/nothing-here")).is_none());
     }
 
     /// eXo mounts the game directory as C: and then cds into a subdirectory
@@ -2595,6 +2626,31 @@ mod tests {
             patched.contains(&format!("{}eXoWin3x/20k3x/cd/cd.cue -t cdrom", abs)),
             "imgmount must be absolute: {}", patched
         );
+    }
+
+    /// Capitalist Pig mounts `.\eXoWin3x\cappig\cd\` from a `CapPig` folder.
+    /// A directory mount is `stat()`ed as written, so a MIDDLE component
+    /// needs the disk's spelling too.
+    #[test]
+    fn patch_dosbox_conf_resolves_case_in_every_component() {
+        let tmp = tempfile::tempdir().unwrap();
+        let working_dir = tmp.path();
+        fs::create_dir_all(working_dir.join("eXoWin3x/CapPig/cd")).unwrap();
+        let conf_path = write_conf(
+            working_dir,
+            "dosbox.conf",
+            "[autoexec]\nmount c .\\eXoWin3x\\cappig\nmount a .\\eXoWin3x\\cappig\\cd\\ -t floppy\nexit\n",
+        );
+
+        let patched = fs::read_to_string(patch_dosbox_conf(&conf_path, working_dir, None, true).unwrap()).unwrap();
+        let abs = format!("{}/", working_dir.to_string_lossy()).replace('\\', "/");
+        let want = format!("mount a {}eXoWin3x/CapPig/cd -t floppy", abs);
+        // Where the filesystem ignores case, the conf's own spelling is right.
+        if working_dir.join("EXOWIN3X").exists() {
+            assert!(patched.to_lowercase().contains(&want.to_lowercase()), "{patched}");
+        } else {
+            assert!(patched.contains(&want), "{patched}");
+        }
     }
 
     /// 11th Hour (DE): `imgmount d ".\cd\11HDISK1.cue"` after `c:` is a
@@ -2845,6 +2901,7 @@ mod tests {
         let run_bat = game_dir.join("run.bat");
         let content = b"@echo off\r\n\
             imgmount d \".\\eXoDOS\\comcon\\cd\\CD-1.iso\" \".\\eXoDOS\\comcon\\cd\\CD-9.iso\" -t cdrom\r\n\
+            imgmount e \".\\eXoDOS\\COMCON\\cd\\CD-1.iso\" -t cdrom\r\n\
             game.exe .\\\r\n\
             cd \\\r\n\xC9\xCD\xBB\r\n";
         fs::write(&run_bat, content).unwrap();
@@ -2856,6 +2913,10 @@ mod tests {
         let shown = String::from_utf8_lossy(&out);
         assert!(has(b"\"./eXoDOS/comcon/cd/CD-1.iso\""), "existing target rewritten: {}", shown);
         assert!(has(b"\".\\eXoDOS\\comcon\\cd\\CD-9.iso\""), "missing target untouched: {}", shown);
+        assert!(!has(b".\\eXoDOS\\COMCON"), "a differently-cased target is rewritten too: {}", shown);
+        if !working_dir.join("EXODOS").exists() {
+            assert!(has(b"e \"./eXoDOS/comcon/cd/CD-1.iso\""), "with the disk's spelling: {}", shown);
+        }
         assert!(has(b"game.exe .\\\r\n"), "bare .\\ is guest text: {}", shown);
         assert!(has(b"cd \\\r\n"), "guest cd stays: {}", shown);
         assert!(has(b"\xC9\xCD\xBB"), "CP437 bytes survive");

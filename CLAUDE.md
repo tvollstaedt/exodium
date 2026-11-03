@@ -1237,6 +1237,13 @@ What differs:
   filesystem ignores case it does nothing. Not specific to this pack, and how
   many archives are affected is unknown - finding out means reading the tail
   of every zip.
+- **Host paths resolve their case in every component**
+  (`resolve_ignoring_case`, for confs and the game's own bats). Staging's
+  `imgmount` globs case-insensitively, but a directory `mount` `stat()`s the
+  path as written (0.83.0 `mount.cpp`), and some confs mount a subfolder of a
+  differently-cased game folder (Capitalist Pig: `.\eXoWin3x\cappig\cd\`,
+  folder `CapPig`). Fixing only the last component left those without their
+  CD or floppy drive on Linux.
 
 **Solved since the initial import:**
 
