@@ -671,6 +671,50 @@ fn main() {
         );
     }
 
+    // eXo files some German-only games under `RootFolder !dos\<code>` while the
+    // config sits in `!dos\!german\<code>\`; where the filesystem ignores case,
+    // that path can name an English game's directory instead (§1).
+    {
+        let glp_confs: std::collections::HashSet<String> = {
+            let file = std::fs::File::open(metadata_dir.join("GLP_configs.zip")).unwrap();
+            let archive = zip::ZipArchive::new(file).unwrap();
+            archive.file_names().map(str::to_string).collect()
+        };
+        let rows: Vec<(i64, String)> = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, dosbox_conf FROM games WHERE torrent_source = 'eXoDOS_GLP' \
+                     AND dosbox_conf LIKE 'eXo\\eXoDOS\\!dos\\%' AND dosbox_conf NOT LIKE '%!german%'",
+                )
+                .unwrap();
+            stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                .unwrap()
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+        let tx = conn.unchecked_transaction().unwrap();
+        let mut relinked = 0usize;
+        {
+            let mut update = tx.prepare_cached("UPDATE games SET dosbox_conf = ?1 WHERE id = ?2").unwrap();
+            for (id, conf) in &rows {
+                let Some(code) = conf
+                    .strip_prefix("eXo\\eXoDOS\\!dos\\")
+                    .and_then(|r| r.strip_suffix("/dosbox.conf"))
+                else {
+                    continue;
+                };
+                if glp_confs.contains(&format!("eXo/eXoDOS/!dos/!german/{code}/dosbox.conf")) {
+                    update
+                        .execute(params![format!("eXo\\eXoDOS\\!dos\\!german\\{code}/dosbox.conf"), id])
+                        .unwrap();
+                    relinked += 1;
+                }
+            }
+        }
+        tx.commit().unwrap();
+        println!("GLP: {relinked}/{} rows outside !german linked to their own config", rows.len());
+    }
+
     // Every LP↔EN match below is scoped to the pack family: titles AND
     // shortcodes repeat across families (eXoWin9x catalogues "Gabriel Knight 2
     // - The Beast Within", eXoDOS/eXoWin3x both use "EarthQue"), and an
@@ -919,28 +963,46 @@ fn main() {
     println!("Generated {} new shortcodes for LP-exclusive games", pass3_count);
 
     // Normalize LP shortcodes to match EN case (e.g., DE "abanplac" → EN "Abanplac")
-    // This ensures thumbnails (which are named by EN shortcode) work for LP games
-    let case_fixed = conn
-        .execute(
-            &format!(
-                "UPDATE games SET shortcode = (
-                    SELECT en.shortcode FROM games en
-                    WHERE en.language = 'EN' AND en.shortcode IS NOT NULL
-                      AND LOWER(en.shortcode) = LOWER(games.shortcode)
-                      AND {fam_en} = {fam_g}
-                    LIMIT 1
-                ) WHERE language != 'EN' AND shortcode IS NOT NULL
-                  AND EXISTS (
-                    SELECT 1 FROM games en
-                    WHERE en.language = 'EN' AND en.shortcode IS NOT NULL
-                      AND LOWER(en.shortcode) = LOWER(games.shortcode)
-                      AND {fam_en} = {fam_g}
-                      AND en.shortcode != games.shortcode
-                )",
-            ),
-            [],
-        )
-        .unwrap();
+    // so the two rows merge into one card - only when the titles agree too (§1).
+    let case_pairs: Vec<(i64, String, String, String)> = {
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT games.id, games.title, en.shortcode, en.title FROM games
+                 JOIN games en ON en.language = 'EN' AND en.shortcode IS NOT NULL
+                   AND LOWER(en.shortcode) = LOWER(games.shortcode)
+                   AND en.shortcode != games.shortcode
+                   AND {fam_en} = {fam_g}
+                 WHERE games.language != 'EN' AND games.shortcode IS NOT NULL
+                 ORDER BY games.id, en.id"
+            ))
+            .unwrap();
+        stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect()
+    };
+    let mut case_fixed = 0usize;
+    {
+        let tx = conn.unchecked_transaction().unwrap();
+        let mut update = tx
+            .prepare_cached("UPDATE games SET shortcode = ?1 WHERE id = ?2")
+            .unwrap();
+        let mut done = std::collections::HashSet::new();
+        for (id, title, en_code, en_title) in &case_pairs {
+            if done.contains(id) {
+                continue;
+            }
+            if db::title_canonical(title) != db::title_canonical(en_title) {
+                println!("  case link skipped (another game): \"{title}\" vs \"{en_title}\" ({en_code})");
+                continue;
+            }
+            update.execute(params![en_code, id]).unwrap();
+            done.insert(*id);
+            case_fixed += 1;
+        }
+        drop(update);
+        tx.commit().unwrap();
+    }
     println!("Fixed {} LP shortcodes to match EN case", case_fixed);
 
     // Fill missing dosbox_conf from EN counterparts (LP translations share the EN config)

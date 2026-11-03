@@ -130,6 +130,16 @@ eXoWin3x is its own). Pairing on the shortcode alone merges the two into a
 single card and drops one game from the catalogue - there is a regression test
 (`same_shortcode_in_another_pack_is_not_a_variant`).
 
+**Case alone does not make two rows one game.** `generate_db` re-cases a
+localized shortcode that matches an English one in case only (DE `abanplac` →
+`Abanplac`) so the two merge, but only when `title_canonical` agrees: GLP's
+`Talisman` (1995) and eXoDOS's `talisman` (1987) are different games. Merged,
+the German row also launched the English conf wherever the filesystem ignores
+case, because eXo files it (and 97 other German-only games) under
+`RootFolder !dos\<code>` while the config sits in `!dos\!german\<code>\`;
+`generate_db` stores the `!german` path for those rows. Guard:
+`no_bundled_conf_path_exists_only_in_another_case`.
+
 ### 2. ONE root for every collection (eXo's merged layout)
 
 All packs share a single directory inside the data dir - the same shape eXo's
