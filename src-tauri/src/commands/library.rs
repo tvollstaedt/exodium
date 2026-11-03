@@ -1701,7 +1701,8 @@ pub async fn reset_game_data(
             })?;
         }
         let dest = game_dir.parent().map(PathBuf::from).unwrap_or_else(|| torrent_root.clone());
-        extract_game_zip(&zip, &dest).map_err(|e| (String::from(e), true))?;
+        let want = game_dir.file_name().map(|n| n.to_string_lossy().into_owned());
+        extract_game_zip(&zip, &dest, want.as_deref()).map_err(|e| (String::from(e), true))?;
         Ok(false)
     })
     .await

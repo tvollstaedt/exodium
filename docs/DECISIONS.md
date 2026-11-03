@@ -586,3 +586,9 @@
 - Rejected: trying at every length from 4 to 8 (each keystroke a counted miss, the wait after five digits); a fixed four-digit PIN (reverses the 4-8 decision).
 - Why: Thomas - the field was small, and Enter after the PIN was one step too many on the kids screen.
 - Gotcha: The UI knows the length; kids mode is a child lock, and the dots show it anyway. A PIN set before the key existed learns it at the next right entry.
+
+## 2026-11-03 - An archive folder that differs only in case takes the catalogue's spelling
+- Decision: `extract_game_zip` gets the catalogue's folder name from all three callers (download, launch, reset) and renames the archive's top folder to it when the two differ only in case; the `!save` restore then uses that name too. A no-op where the filesystem ignores case; both spellings present (overlay base plus patch) logs a warning and moves nothing.
+- Rejected: re-casing the catalogue like `gen_scummvm_assets.py` (the conf mounts the catalogue's spelling too, and finding the cases means reading every zip's tail, ~9 GB for eXoWin3x alone); case-insensitive lookups at every reader (scan, launch, mount rewrite, uninstall).
+- Why: Discord report 2026-11-01, Dark Seed II on CachyOS: the zip holds `Dseed2/` (read from the torrent with `media_pack_spike`), catalogue and conf say `DSeed2`.
+- Gotcha: No rename on Windows/macOS on purpose - nothing breaks there, and a fresh tree an indexer holds can refuse the rename (§5). The test only exercises the rename on a case-sensitive filesystem (CI's Linux; locally a case-sensitive APFS image as TMPDIR).

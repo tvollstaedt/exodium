@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Linux: a game whose archive spells its folder in different case than the
+  catalogue (Dark Seed II) unpacked and still could not start.
+
 ## 0.16.0 - 2026-10-29
 
 ### Added

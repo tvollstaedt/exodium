@@ -477,7 +477,7 @@ pub async fn get_download_progress(
     torrent_state: State<'_, TorrentState>,
     id: i64,
 ) -> Result<Option<DownloadProgress>, String> {
-    let (game_idx, gamedata_idx, title, already_installed, source, base) = {
+    let (game_idx, gamedata_idx, title, shortcode, already_installed, source, base) = {
         let conn = db_state.lock()?;
         let game = queries::fetch_game_by_id(&conn, id)
             .map_err(|e| e.to_string())?
@@ -488,6 +488,7 @@ pub async fn get_download_progress(
                 idx as usize,
                 game.gamedata_torrent_index.map(|i| i as usize),
                 game.title,
+                game.shortcode,
                 game.installed,
                 game.torrent_source.unwrap_or_else(|| "eXoDOS".to_string()),
                 base,
@@ -706,16 +707,17 @@ pub async fn get_download_progress(
                             log::info!("Extracting {} from {}", title, zip_path.display());
                             let extract_result = {
                                 let (z, d) = (zip_path.clone(), extract_dir.clone());
+                                let sc = shortcode.clone();
                                 let base_src = base_src.clone();
                                 tauri::async_runtime::spawn_blocking(move || {
-                                    if let Some((src, sc, _)) = base_src {
-                                        let Some(sc) = sc else {
+                                    if let Some((src, base_sc, _)) = base_src {
+                                        let Some(base_sc) = base_sc else {
                                             log::error!("English base has no shortcode - refusing to unpack the patch onto nothing");
                                             return Err(ExtractError::Other(
                                                 "the English base has no shortcode".into(),
                                             ));
                                         };
-                                        let dst = d.join(&sc);
+                                        let dst = d.join(&base_sc);
                                         if let Err(e) =
                                             crate::commands::lp_overlay::clone_tree(&src, &dst)
                                         {
@@ -726,7 +728,7 @@ pub async fn get_download_progress(
                                             return Err(ExtractError::Other(e.to_string()));
                                         }
                                     }
-                                    extract_game_zip(&z, &d)
+                                    extract_game_zip(&z, &d, sc.as_deref())
                                 })
                                 .await
                             };
@@ -1301,9 +1303,12 @@ pub(crate) async fn extract_before_launch(
     log::info!("Auto-extracting {} before launch", zip.display());
     // Next to the zip, so the dir lands where the probe above looks.
     let dest = zip.parent().map(PathBuf::from).unwrap_or_else(|| torrent_root.to_path_buf());
+    let want = (game_dir.parent() == Some(dest.as_path()))
+        .then(|| game_dir.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .flatten();
     let extract = {
         let (z, d) = (zip.clone(), dest.clone());
-        tauri::async_runtime::spawn_blocking(move || extract_game_zip(&z, &d))
+        tauri::async_runtime::spawn_blocking(move || extract_game_zip(&z, &d, want.as_deref()))
             .await
             .map_err(|e| LaunchError::Task(e.to_string()))?
     };
@@ -1323,7 +1328,13 @@ pub(crate) async fn extract_before_launch(
 }
 
 /// Extract a game zip in place, then restore saves from `!save/` if present.
-pub(crate) fn extract_game_zip(zip_path: &std::path::Path, dest: &std::path::Path) -> Result<(), ExtractError> {
+/// `game_dir` is the catalogue's folder name; an archive folder that differs
+/// from it only in case is renamed to it.
+pub(crate) fn extract_game_zip(
+    zip_path: &std::path::Path,
+    dest: &std::path::Path,
+    game_dir: Option<&str>,
+) -> Result<(), ExtractError> {
     let file = std::fs::File::open(zip_path)?;
     let mut archive = zip::ZipArchive::new(file)?;
 
@@ -1357,6 +1368,14 @@ pub(crate) fn extract_game_zip(zip_path: &std::path::Path, dest: &std::path::Pat
             );
         }
     }
+
+    let shortcode = match (shortcode, game_dir) {
+        (Some(top), Some(want)) if top.eq_ignore_ascii_case(want) => {
+            align_dir_case(dest, &top, want)?;
+            Some(want.to_string())
+        }
+        (top, _) => top,
+    };
 
     // Restore `!save/<shortcode>` from beside the game dir. The legacy shared
     // location one level up is probed ONLY for a row that lives there itself:
@@ -1395,6 +1414,27 @@ pub(crate) fn extract_game_zip(zip_path: &std::path::Path, dest: &std::path::Pat
     }
 
     Ok(())
+}
+
+/// eXo packs on Windows, where `Dseed2` and `DSeed2` name one folder, while
+/// every path Exodium derives uses the catalogue's spelling.
+fn align_dir_case(dest: &Path, top: &str, want: &str) -> std::io::Result<()> {
+    if top == want {
+        return Ok(());
+    }
+    let names: Vec<std::ffi::OsString> =
+        std::fs::read_dir(dest)?.filter_map(|e| e.ok()).map(|e| e.file_name()).collect();
+    let listed = |n: &str| names.iter().any(|x| x.as_os_str() == std::ffi::OsStr::new(n));
+    if listed(top) && listed(want) {
+        log::warn!("{}: both '{top}' and '{want}' exist, the archive's files stay in '{top}'", dest.display());
+        return Ok(());
+    }
+    // One spelling listed, the other resolving: the filesystem ignores case.
+    if !listed(top) || dest.join(want).exists() {
+        return Ok(());
+    }
+    log::info!("{}: renaming the archive's '{top}' to the catalogue's '{want}'", dest.display());
+    super::user_data::rename_retry(&dest.join(top), &dest.join(want))
 }
 
 #[cfg(test)]
@@ -1447,7 +1487,7 @@ mod tests {
 
         let lang_dest = root.join("!spanish");
         fs::create_dir_all(&lang_dest).unwrap();
-        extract_game_zip(&zip_path, &lang_dest).unwrap();
+        extract_game_zip(&zip_path, &lang_dest, None).unwrap();
         assert_eq!(
             fs::read(lang_dest.join("AlienOdy/ODYSSEY/GAME.CFG")).unwrap(),
             b"Language 4",
@@ -1455,7 +1495,7 @@ mod tests {
         );
 
         // The English row itself still restores from its own shared backup.
-        extract_game_zip(&zip_path, root).unwrap();
+        extract_game_zip(&zip_path, root, None).unwrap();
         assert_eq!(
             fs::read(root.join("AlienOdy/ODYSSEY/GAME.CFG")).unwrap(),
             b"Language 0"
@@ -1470,11 +1510,45 @@ mod tests {
         let fragment = tmp.path().join("fragment.zip");
         fs::write(&fragment, vec![0u8; 4096]).unwrap();
         for zip in [empty, fragment] {
-            let err = extract_game_zip(&zip, tmp.path()).unwrap_err();
+            let err = extract_game_zip(&zip, tmp.path(), None).unwrap_err();
             assert!(err.is_not_an_archive(), "{}: {err}", zip.display());
         }
-        let missing = extract_game_zip(&tmp.path().join("nope.zip"), tmp.path()).unwrap_err();
+        let missing = extract_game_zip(&tmp.path().join("nope.zip"), tmp.path(), None).unwrap_err();
         assert!(!missing.is_not_an_archive(), "a missing file is an I/O error, not a placeholder");
+    }
+
+    /// Dark Seed II's archive holds `Dseed2/`, its catalogue entry and conf
+    /// say `DSeed2`; on a case-sensitive filesystem the game was unpacked and
+    /// still not found.
+    #[test]
+    fn a_case_variant_archive_folder_takes_the_catalogue_spelling() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join("!save/DSeed2")).unwrap();
+        fs::write(root.join("!save/DSeed2/SAVE.DAT"), b"saved").unwrap();
+        let zip_path = root.join("Dark Seed II (1995).zip");
+        {
+            let mut w = zip::ZipWriter::new(fs::File::create(&zip_path).unwrap());
+            let opts: zip::write::FileOptions<'_, ()> = zip::write::FileOptions::default();
+            w.add_directory("Dseed2/", opts).unwrap();
+            w.start_file("Dseed2/DARK.EXE", opts).unwrap();
+            use std::io::Write;
+            w.write_all(b"MZ").unwrap();
+            w.finish().unwrap();
+        }
+
+        extract_game_zip(&zip_path, root, Some("DSeed2")).unwrap();
+        assert!(root.join("DSeed2/DARK.EXE").exists());
+        assert_eq!(fs::read(root.join("DSeed2/SAVE.DAT")).unwrap(), b"saved", "the backup is filed under the catalogue's name");
+
+        fs::write(root.join("probe"), b"").unwrap();
+        if !root.join("PROBE").exists() {
+            let names: Vec<String> = fs::read_dir(root)
+                .unwrap()
+                .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+                .collect();
+            assert!(names.contains(&"DSeed2".to_string()) && !names.contains(&"Dseed2".to_string()), "{names:?}");
+        }
     }
 
     #[test]

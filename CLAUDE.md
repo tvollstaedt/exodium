@@ -1228,6 +1228,15 @@ What differs:
   and both Castle of the Winds games sharing one launcher bat, which
   `generate_db` drops down to one row because `refresh_catalog` keys on
   `application_path`.
+- **An archive's folder can differ from the catalogue in case only** (Dark
+  Seed II: zip `Dseed2/`, catalogue and conf `DSeed2`) - invisible on Windows
+  and macOS, "unpacked, but its folder is not where the catalogue expects it"
+  on Linux. `extract_game_zip` takes the catalogue's folder name from every
+  caller and renames the archive's to it (`align_dir_case`), so the conf's
+  mount, the install scan and the `!save` restore see one spelling; where the
+  filesystem ignores case it does nothing. Not specific to this pack, and how
+  many archives are affected is unknown - finding out means reading the tail
+  of every zip.
 
 **Solved since the initial import:**
 
