@@ -592,3 +592,9 @@
 - Rejected: re-casing the catalogue like `gen_scummvm_assets.py` (the conf mounts the catalogue's spelling too, and finding the cases means reading every zip's tail, ~9 GB for eXoWin3x alone); case-insensitive lookups at every reader (scan, launch, mount rewrite, uninstall).
 - Why: Discord report 2026-11-01, Dark Seed II on CachyOS: the zip holds `Dseed2/` (read from the torrent with `media_pack_spike`), catalogue and conf say `DSeed2`.
 - Gotcha: No rename on Windows/macOS on purpose - nothing breaks there, and a fresh tree an indexer holds can refuse the rename (§5). The test only exercises the rename on a case-sensitive filesystem (CI's Linux; locally a case-sensitive APFS image as TMPDIR).
+
+## 2026-11-03 - Host paths resolve their case in every component
+- Decision: `resolve_ignoring_case` walks the path component by component (exact name first, else the one entry that differs only in case); `rewrite_bat_host_paths` uses it instead of `exists()`, so a game's own bats get the disk's spelling too.
+- Rejected: rewriting eXo's confs at extraction (touches eXo's files and misses the bats inside the archives); leaving it to Staging's glob (only `imgmount` has one, and a preceding `c:` sends the path through the DOS drive first).
+- Why: case scan of the bundled confs 2026-11-03: 30 confs spell the game folder unlike the catalogue; in five eXoWin3x directory mounts the difference sits before the last component, which the old resolver left as written and Staging's exact `stat()` rejects.
+- Gotcha: the walk only runs where the filesystem tells case apart, so the tests pass trivially on macOS; run them with TMPDIR on a case-sensitive APFS image. Not yet launched in one of the five games.
