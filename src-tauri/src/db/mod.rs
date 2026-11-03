@@ -21,7 +21,7 @@ pub type DbResult<T> = Result<T, DbError>;
 /// Version of the bundled catalog. Raise BEFORE `pnpm run gen-db` (the
 /// artefact stamps itself); an installed DB behind it is refreshed at
 /// startup by `refresh_catalog`, user state preserved. History in git.
-pub const CATALOG_VERSION: i64 = 16;
+pub const CATALOG_VERSION: i64 = 17;
 
 /// Open (or create) the Exodium database at the given path.
 pub fn open(path: &Path) -> DbResult<Connection> {

@@ -2786,6 +2786,40 @@ mod tests {
         assert_eq!(found_root, root);
     }
 
+    /// A catalogue conf path that exists only in another case is another
+    /// game's directory where the filesystem ignores case: GLP's `Talisman`
+    /// (1995) launched eXoDOS's `talisman` (1987) on Windows and macOS.
+    #[test]
+    fn no_bundled_conf_path_exists_only_in_another_case() {
+        let meta = Path::new(env!("CARGO_MANIFEST_DIR")).join("../metadata");
+        let Ok(gz) = fs::File::open(meta.join("exodium.db.gz")) else {
+            return; // not running from the repo
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("catalog.db");
+        std::io::copy(&mut flate2::read::GzDecoder::new(gz), &mut fs::File::create(&db_path).unwrap()).unwrap();
+
+        let mut exact = std::collections::HashSet::new();
+        for name in ["eXoDOS_configs.zip", "GLP_configs.zip", "SLP_configs.zip", "PLP_configs.zip", "Win3x_configs.zip"] {
+            let archive = zip::ZipArchive::new(fs::File::open(meta.join(name)).unwrap()).unwrap();
+            exact.extend(archive.file_names().map(str::to_string));
+        }
+        let folded: std::collections::HashSet<String> = exact.iter().map(|n| n.to_ascii_lowercase()).collect();
+
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        let mut stmt = conn.prepare("SELECT title, dosbox_conf FROM games WHERE dosbox_conf IS NOT NULL").unwrap();
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))).unwrap();
+        let mut only_in_another_case = Vec::new();
+        for (title, conf) in rows.flatten() {
+            let rel = conf.replace('\\', "/");
+            let rel = crate::commands::collections::with_canonical_prefix(&rel).unwrap_or(rel);
+            if !exact.contains(&rel) && folded.contains(&rel.to_ascii_lowercase()) {
+                only_in_another_case.push(format!("{title}: {rel}"));
+            }
+        }
+        assert!(only_in_another_case.is_empty(), "{only_in_another_case:#?}");
+    }
+
     // ── conf_requests_printer ───────────────────────────────────────────────
 
     #[test]

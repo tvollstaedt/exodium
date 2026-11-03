@@ -598,3 +598,9 @@
 - Rejected: rewriting eXo's confs at extraction (touches eXo's files and misses the bats inside the archives); leaving it to Staging's glob (only `imgmount` has one, and a preceding `c:` sends the path through the DOS drive first).
 - Why: case scan of the bundled confs 2026-11-03: 30 confs spell the game folder unlike the catalogue; in five eXoWin3x directory mounts the difference sits before the last component, which the old resolver left as written and Staging's exact `stat()` rejects.
 - Gotcha: the walk only runs where the filesystem tells case apart, so the tests pass trivially on macOS; run them with TMPDIR on a case-sensitive APFS image. Not yet launched in one of the five games.
+
+## 2026-11-03 - An LP shortcode takes the English spelling only when the titles agree
+- Decision: `generate_db`'s case normalization (DE `abanplac` -> EN `Abanplac`) also requires equal `title_canonical`; GLP rows eXo files under `RootFolder !dos\<code>` store their `!dos\!german\<code>` conf when that file exists. CATALOG_VERSION 17.
+- Rejected: a new shortcode for the German Talisman (its archive folder is `Talisman` and the game dir follows the shortcode); looking up the language dir first in `resolve_game_conf` (would also move LP rows that deliberately share the English conf).
+- Why: case scan 2026-11-03: GLP's Talisman (1995, Software 2000) was merged with eXoDOS's Talisman (1987, Polarware) and launched the 1987 conf wherever the filesystem ignores case.
+- Gotcha: `game_articles` still joins on shortcode `COLLATE NOCASE`, so the German magazine pages on Talisman also list under the 1987 game - left open.

@@ -9,6 +9,9 @@
 - Linux: a game whose configuration spells a folder in different case than
   the disk could start without its CD or floppy drive (Capitalist Pig,
   Loony Labyrinth).
+- The German Talisman (1995) showed as a language version of the English
+  Talisman (1987) and started with the English game's configuration on
+  Windows and macOS.
 
 ## 0.16.0 - 2026-10-29
 
