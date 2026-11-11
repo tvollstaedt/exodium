@@ -148,6 +148,8 @@ jobs:
           cd src-tauri/target/release/bundle/appimage
           name=$(ls *.AppImage)
           "./$name" --appimage-extract >/dev/null
+          # linuxdeploy leaves directories at 0700; appimagetool refuses to pack those.
+          chmod -R a+rX squashfs-root
           rm -fv squashfs-root/usr/lib/libwayland* squashfs-root/usr/lib/libgbm* \
                  squashfs-root/usr/lib/libdrm* squashfs-root/usr/lib/libEGL* \
                  squashfs-root/usr/lib/libGL*
