@@ -275,10 +275,12 @@ export function SettingsDialog(props: Props) {
     // The command takes u32; anything larger fails deserialization with an
     // error about integers rather than about speed limits.
     const MAX_KBPS = 4_000_000;
+    // One 16 KiB block per second: below it no peer can deliver anything.
+    const MIN_KBPS = 16;
     const parse = (raw: string): number | null => {
       const v = parseInt(raw, 10);
       if (!Number.isFinite(v) || v <= 0) { return null; }
-      return Math.min(v, MAX_KBPS);
+      return Math.min(Math.max(v, MIN_KBPS), MAX_KBPS);
     };
     const up = parse(limitUp());
     const down = parse(limitDown());
@@ -458,17 +460,17 @@ export function SettingsDialog(props: Props) {
                         >
                           <SettingSwitch id="seeding" checked={seedingOn() && !isOffline()} disabled={isOffline()} label="Share with other users" onChange={(v) => void handleToggleSeeding(v)} />
                         </SettingRow>
-                        <SettingRow label="Speed limits" hint="Whole session, both directions. Empty means unlimited." stacked>
+                        <SettingRow label="Speed limits" hint="Whole session, both directions. Empty means unlimited, the minimum is 16 KB/s." stacked>
                           <div class="limit-inputs">
                             <label class="limit-field">
                               <span>Down</span>
-                              <input type="number" min="1" placeholder="∞" disabled={isOffline()}
+                              <input type="number" min="16" placeholder="∞" disabled={isOffline()}
                                 value={limitDown()} onInput={(e) => setLimitDown(e.currentTarget.value)} onChange={() => void handleSaveLimits()} />
                               <span>KB/s</span>
                             </label>
                             <label class="limit-field">
                               <span>Up</span>
-                              <input type="number" min="1" placeholder="∞" disabled={isOffline() || !seedingOn()}
+                              <input type="number" min="16" placeholder="∞" disabled={isOffline() || !seedingOn()}
                                 value={limitUp()} onInput={(e) => setLimitUp(e.currentTarget.value)} onChange={() => void handleSaveLimits()} />
                               <span>KB/s</span>
                             </label>

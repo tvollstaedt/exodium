@@ -12,6 +12,8 @@
 - The German Talisman (1995) showed as a language version of the English
   Talisman (1987) and started with the English game's configuration on
   Windows and macOS.
+- A speed limit below 16 KB/s stopped every download and looked like a
+  torrent without peers. The limit is now at least 16 KB/s.
 
 ## 0.16.0 - 2026-10-29
 

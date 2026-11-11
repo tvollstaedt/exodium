@@ -604,3 +604,9 @@
 - Rejected: a new shortcode for the German Talisman (its archive folder is `Talisman` and the game dir follows the shortcode); looking up the language dir first in `resolve_game_conf` (would also move LP rows that deliberately share the English conf).
 - Why: case scan 2026-11-03: GLP's Talisman (1995, Software 2000) was merged with eXoDOS's Talisman (1987, Polarware) and launched the 1987 conf wherever the filesystem ignores case.
 - Gotcha: `game_articles` still joins on shortcode `COLLATE NOCASE`, so the German magazine pages on Talisman also list under the 1987 game - left open.
+
+## 2026-11-11 - A speed limit is never below 16 KB/s
+- Decision: `apply_session_limits` raises every user cap (down, and up while seeding) to one 16 KiB block per second; the Settings fields clamp to 16 and say so. Stored older values are covered because the raise sits in the one place that sets the caps.
+- Rejected: `allow_burst(max(bps, 16 KiB))` in the librqbit fork (fork commit, re-pin and a re-measure on three platforms, and it would turn seeding-off into a real 1 KB/s upload).
+- Why: 0.16.0 Linux test 2026-10-29: a leftover 2 KB/s limit looked like a dead swarm. librqbit's limiter grants at most one second's quota, a block request above it errors and ends the peer task.
+- Gotcha: lifting a too-low limit at runtime does not recover the session, the dropped peers stay in backoff until a restart. Seeding-off (1 KB/s) relies on the same effect to upload nothing; unmeasured whether re-enabling seeding at runtime uploads before a restart.

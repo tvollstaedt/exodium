@@ -833,6 +833,15 @@ callers go through it: `DownloadManager::apply_limits` for a running session,
 unlimited). A second copy of that rule drifts from the first - it already did
 once.
 
+**A cap below 16 KB/s is no download at all, so user limits are raised to
+it** (`MIN_LIMIT_BPS`, `user_limit_bps`; the Settings fields clamp to 16 too).
+librqbit's limiter is `Quota::per_second(bps)` with a burst equal to the
+rate: a 16 KiB block request above it fails outright, the error ends the peer
+task, and every peer drops - which reads as "no peers", not as "slow". The
+dropped peers stay in backoff after the limit is lifted; only a restart
+brings them back. Seeding-off stays at 1 KB/s on purpose: by the same
+mechanism that is zero upload, and raising it would start real uploads.
+
 Rates for the top-bar badge come from `get_transfer_stats` →
 `Session::stats_snapshot()`, which is session-wide. Do NOT sum per-torrent
 stats for this: all four collections share one session, `handle.stats()` copies

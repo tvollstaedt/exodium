@@ -11,13 +11,24 @@ use serde::Serialize;
 use tokio::sync::RwLock;
 
 
-/// Upload cap applied when sharing is off. Not zero: librqbit throttles rather
-/// than blocks, and a hard zero would stall the handshakes that keep downloads
-/// working.
+/// Upload cap applied when sharing is off. Below one 16 KiB block, so the
+/// limiter refuses every upload request: nothing is sent (§11).
 pub const SEEDING_OFF_BPS: u32 = 1024;
 
+/// Smallest cap a user limit may set: librqbit's limiter grants at most one
+/// second's quota at a time, and a 16 KiB block request above it fails and
+/// drops the peer (§11).
+pub const MIN_LIMIT_BPS: u32 = 16 * 1024;
+
+/// A user limit in KB/s as the session cap: `None` is unlimited, anything
+/// below one block is raised to `MIN_LIMIT_BPS`.
+fn user_limit_bps(kbps: Option<u32>) -> Option<std::num::NonZeroU32> {
+    let kbps = kbps.filter(|&k| k > 0)?;
+    std::num::NonZeroU32::new(kbps.saturating_mul(1024).max(MIN_LIMIT_BPS))
+}
+
 /// The ONE place that sets the session's transfer caps: seeding and the
-/// user's upload limit write the same knob, and seeding-off (1 KB/s) wins.
+/// user's upload limit write the same knob, and seeding-off wins.
 /// Called for a running session (`apply_limits`) and a fresh one (§11).
 pub fn apply_session_limits(
     session: &librqbit::Session,
@@ -25,16 +36,12 @@ pub fn apply_session_limits(
     up_kbps: Option<u32>,
     down_kbps: Option<u32>,
 ) {
-    let to_bps = |kbps: u32| std::num::NonZeroU32::new(kbps.saturating_mul(1024));
-    // Seeding off wins over any user limit: librqbit has no upload
-    // kill-switch, so 1 KB/s is as close to off as it gets while leaving
-    // enough headroom for the handshakes downloads depend on.
     let up = if seeding {
-        up_kbps.and_then(to_bps)
+        user_limit_bps(up_kbps)
     } else {
         std::num::NonZeroU32::new(SEEDING_OFF_BPS)
     };
-    let down = down_kbps.and_then(to_bps);
+    let down = user_limit_bps(down_kbps);
     session.ratelimits.set_upload_bps(up);
     session.ratelimits.set_download_bps(down);
     log::info!(
@@ -921,7 +928,17 @@ impl DownloadManager {
 
 #[cfg(test)]
 mod tests {
-    use super::clear_file_pieces;
+    use super::{clear_file_pieces, user_limit_bps, MIN_LIMIT_BPS};
+
+    #[test]
+    fn a_limit_below_one_block_is_raised_to_it() {
+        let bps = |k| user_limit_bps(k).map(|b| b.get());
+        assert_eq!(bps(Some(2)), Some(MIN_LIMIT_BPS));
+        assert_eq!(bps(Some(16)), Some(MIN_LIMIT_BPS));
+        assert_eq!(bps(Some(2000)), Some(2000 * 1024));
+        assert_eq!(bps(None), None);
+        assert_eq!(bps(Some(0)), None);
+    }
 
     #[test]
     fn clear_file_pieces_clears_exactly_the_overlapping_range() {
