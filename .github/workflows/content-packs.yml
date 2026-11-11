@@ -98,7 +98,7 @@ jobs:
 
   macos-packs:
     if: inputs.packs == 'win9x'
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - name: Assemble macOS pack tarballs
@@ -237,7 +237,7 @@ jobs:
       fail-fast: false
       matrix:
         version: ${{ fromJSON(inputs.scummvm_versions) }}
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - name: Assemble the macOS pack tarball
@@ -356,7 +356,7 @@ jobs:
 
   gsplus-macos:
     if: inputs.packs == 'gsplus'
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - name: Assemble the macOS pack tarball
